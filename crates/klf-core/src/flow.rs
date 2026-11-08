@@ -170,6 +170,11 @@ pub fn may_restore(st: &ClipState, now: &ClipObs) -> bool {
 
 pub trait Host {
     fn foreground(&self) -> usize;
+    /// The window in the foreground when the hotkey was pressed (read on the UI thread before
+    /// the work starts, audit A03); a different window later stops the conversion.
+    fn initial_target(&self) -> usize {
+        self.foreground()
+    }
     /// The focused control of the target is still the one seen by `target_info`.
     fn focus_unchanged(&self) -> bool;
     /// A mouse button, Tab or Enter was pressed at any moment since F10 (sampled during every
@@ -202,6 +207,9 @@ pub trait Host {
     fn clipboard_restore(&mut self, st: &ClipState) -> RestoreResult;
     /// Drops the saved clipboard without putting it back (the user copied something new).
     fn clipboard_forget(&mut self);
+    /// The restore failed after every retry: the saved copy is kept a few minutes IN MEMORY
+    /// only, so that the user can put it back later from the tray menu (audit A08).
+    fn clipboard_park(&mut self, _st: &ClipState) {}
     fn send_copy(&self) -> bool;
     fn send_select_to_line_start(&self) -> bool;
     fn send_paste(&self) -> bool;
@@ -295,7 +303,7 @@ pub fn run(host: &mut dyn Host, s: &AppSettings) -> Outcome {
 /// `run`, with the time of each step and what was known noted in `trace` (diagnostic).
 pub fn run_traced(host: &mut dyn Host, s: &AppSettings, trace: &mut Trace) -> Outcome {
     trace.mark(Step::Checks, host.now_ms());
-    let target = host.foreground();
+    let target = host.initial_target();
     if target == 0 {
         return Outcome::quiet("No active window, nothing done");
     }
@@ -391,7 +399,8 @@ pub fn run_traced(host: &mut dyn Host, s: &AppSettings, trace: &mut Trace) -> Ou
         RestoreResult::Restored => {}
         RestoreResult::KeptUserCopy => log.push_str(" | clipboard changed by someone else meanwhile: kept"),
         RestoreResult::Failed => {
-            log.push_str(" | clipboard restore FAILED");
+            log.push_str(" | clipboard restore FAILED (kept in memory for the tray menu)");
+            host.clipboard_park(&st);
             msg = Some(Msg::ClipboardNotRestored);
         }
     }
@@ -866,6 +875,8 @@ mod tests {
     /// number and an owner, a foreground window, and a user who may copy at any moment.
     struct Mock {
         fg: Cell<usize>,
+        /// window in the foreground at the hotkey (0 = same as `fg`), audit A03
+        start_fg: usize,
         info: TargetInfo,
         keys_ok: bool,
         save: SaveResult,
@@ -942,6 +953,7 @@ mod tests {
         fn new() -> Self {
             Self {
                 fg: Cell::new(7),
+                start_fg: 0,
                 info: TargetInfo { window_class: "Notepad".into(), exe_name: "notepad.exe".into(), elevated: Some(false), ..Default::default() },
                 keys_ok: true,
                 save: SaveResult::Complete,
@@ -1044,6 +1056,9 @@ mod tests {
         fn foreground(&self) -> usize {
             self.fg.get()
         }
+        fn initial_target(&self) -> usize {
+            if self.start_fg != 0 { self.start_fg } else { self.fg.get() }
+        }
         fn focus_unchanged(&self) -> bool {
             !self.focus_moved.get()
         }
@@ -1143,6 +1158,9 @@ mod tests {
         }
         fn clipboard_forget(&mut self) {
             self.saved = None;
+        }
+        fn clipboard_park(&mut self, _st: &ClipState) {
+            self.ev("park");
         }
         fn send_copy(&self) -> bool {
             self.ev("copy");
@@ -1549,6 +1567,16 @@ mod tests {
 
     // ---- consoles ----
 
+    #[test]
+    fn audit_a03_window_changed_before_the_work_starts_stops_without_ctrl_c() {
+        // F10 pressed in window 5, but window 7 is in the foreground when the work starts
+        let mut m = Mock { start_fg: 5, ..Mock::new() };
+        let o = run(&mut m, &AppSettings::default());
+        assert_eq!(o.msg, Some(Msg::WindowChanged), "{}", o.log);
+        assert!(!m.events.borrow().contains(&"copy".to_string()), "never Ctrl+C in the other window");
+        assert!(!m.events.borrow().contains(&"paste".to_string()));
+    }
+
     fn console() -> Mock {
         let mut m = Mock::new();
         m.info.window_class = "ConsoleWindowClass".into();
@@ -1648,6 +1676,18 @@ mod tests {
         let o = go(&mut m);
         assert_eq!(o.msg, Some(Msg::PasteFailed));
         assert_eq!(m.clip_text().as_deref(), Some("USER CLIPBOARD"), "{}", o.log);
+    }
+
+    #[test]
+    fn audit_a08_failed_restore_keeps_the_copy_for_the_menu() {
+        let mut m = Mock::new();
+        m.audit_restore_failure = true;
+        let o = run(&mut m, &AppSettings::default());
+        assert_eq!(o.msg, Some(Msg::ClipboardNotRestored));
+        assert_eq!(m.events.borrow().iter().filter(|e| *e == "park").count(), 1, "kept once, for the tray menu");
+        let mut ok = Mock::new();
+        run(&mut ok, &AppSettings::default());
+        assert!(!ok.events.borrow().contains(&"park".to_string()), "nothing kept when the restore worked");
     }
 
     #[test]

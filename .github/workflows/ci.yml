@@ -1,0 +1,49 @@
+# Vérification automatique à chaque envoi (audit A09) : tests du cœur, licences, compilation Windows,
+# puis essais PowerShell sous Windows (syntaxe des scripts, clé « démarrer avec Windows » intacte).
+name: CI
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  coeur-et-compilation:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Outils (MinGW pour la cible Windows)
+        run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64
+      - name: Rust (version fixée par rust-toolchain.toml)
+        run: rustup show && rustup target add x86_64-pc-windows-gnu
+      - name: Tests du cœur
+        run: cargo test --locked -p klf-core
+      - name: Licences des dépendances
+        run: python3 tools/verifier-licences.py
+      - name: Compilation Windows
+        run: cargo build --locked --release --target x86_64-pc-windows-gnu -p KeyboardLayoutFixer
+      - name: Mise en forme (indicatif)
+        continue-on-error: true
+        run: rustup component add rustfmt && cargo fmt --all -- --check
+      - name: Clippy (indicatif)
+        continue-on-error: true
+        run: rustup component add clippy && cargo clippy --locked -p klf-core --all-targets
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KeyboardLayoutFixer-exe
+          path: target/x86_64-pc-windows-gnu/release/KeyboardLayoutFixer.exe
+  scripts-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Syntaxe des scripts PowerShell
+        shell: powershell
+        run: |
+          $err = 0
+          Get-ChildItem -Recurse -Include *.ps1 | ForEach-Object {
+            $e = $null; [void][System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$e)
+            if ($e) { $err++; "ERREUR $($_.FullName) : $($e[0].Message)" } else { "OK $($_.Name)" }
+          }
+          exit $err
+      - name: Essais PowerShell
+        shell: powershell
+        run: Get-ChildItem tests-ps -Filter *.ps1 | ForEach-Object { & powershell -NoProfile -ExecutionPolicy Bypass -File $_.FullName; if ($LASTEXITCODE) { exit $LASTEXITCODE } }

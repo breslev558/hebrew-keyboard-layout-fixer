@@ -11,7 +11,7 @@ use klf_core::convert::{convert_with, swap_case};
 use klf_core::i18n::{text, text_with_key, Lang, Msg};
 use klf_core::layouts::{KeyMap, LatinKind};
 use klf_core::settings::{
-    hotkey_allowed, Action, KEY_NONE, key_to_vk, vk_to_key, AppSettings, MixedTextMode, UiLanguage, MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN,
+    hotkey_allowed, Action, KEY_NONE, key_to_vk, vk_to_key, AppSettings, MixedTextMode, UiLanguage, MOD_ALT, MOD_CONTROL, MOD_SHIFT,
 };
 use std::cell::Cell;
 use std::ptr::{null, null_mut};
@@ -637,10 +637,8 @@ fn read_controls() -> Option<AppSettings> {
     let l = app::lang();
     let hk = send(ID_HOTKEY, HKM_GETHOTKEY, 0, 0) as u32;
     let vk = hk & 0xFF;
-    let mut mods = hotkeyf_to_mods((hk >> 8) & 0xFF);
-    if old.hotkey_modifiers & MOD_WIN != 0 && key_to_vk(old.hotkey_key) == vk && mods == old.hotkey_modifiers & !MOD_WIN {
-        mods |= MOD_WIN; // the control cannot show Win: keep it if nothing else changed
-    }
+    // the control cannot show Win: kept if nothing else changed
+    let mods = klf_core::settings::keep_win(old.hotkey_modifiers, old.hotkey_key, vk, hotkeyf_to_mods((hk >> 8) & 0xFF));
     match vk_to_key(vk) {
         _ if lk.hotkey => {}
         Some(k) if hotkey_allowed(mods, k) => {
@@ -654,7 +652,8 @@ fn read_controls() -> Option<AppSettings> {
     }
     // Caps Lock box: empty = function switched off
     let hk = send(ID_HOTKEY_CASE, HKM_GETHOTKEY, 0, 0) as u32;
-    let (vk, mods) = (hk & 0xFF, hotkeyf_to_mods((hk >> 8) & 0xFF));
+    let vk = hk & 0xFF;
+    let mods = klf_core::settings::keep_win(old.case_hotkey_modifiers, old.case_hotkey_key, vk, hotkeyf_to_mods((hk >> 8) & 0xFF));
     if lk.case_hotkey {
     } else if vk == 0 {
         s.case_hotkey_key = KEY_NONE;
@@ -841,12 +840,12 @@ fn on_import() {
         .ok()
         .filter(|m| m.len() as usize <= klf_core::profile::MAX_BYTES)
         .and_then(|_| std::fs::read_to_string(&path).ok())
-        .ok_or_else(|| "fichier illisible ou trop gros".to_string())
+        .ok_or(klf_core::profile::ImportError::TooBig)
         .and_then(|t| klf_core::profile::import(&t));
     let new = match read {
         Ok(s) => s,
         Err(why) => {
-            set_error(&format!("{} {why}", text(l, Msg::ImportFailed)));
+            set_error(&format!("{} {}", text(l, Msg::ImportFailed), text(l, why.msg())));
             return;
         }
     };

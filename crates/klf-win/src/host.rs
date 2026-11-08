@@ -29,11 +29,13 @@ pub struct WinHost {
     /// layout of the target at the press, and the Latin layout chosen for the conversion
     pub layout_seen: Cell<Option<u32>>,
     latin_hkl: Cell<Option<u32>>,
+    /// window in the foreground at the hotkey (UI thread, audit A03)
+    start_fg: usize,
 }
 
 impl WinHost {
     /// `owner`: our hidden window (clipboard owner).
-    pub fn new(owner: usize, hotkey_vk: u16, caps_at_hotkey: (Option<bool>, Option<u32>)) -> Self {
+    pub fn new(owner: usize, hotkey_vk: u16, caps_at_hotkey: (Option<bool>, Option<u32>), start_fg: usize) -> Self {
         Self {
             owner: owner as HWND,
             hotkey_vk,
@@ -53,8 +55,37 @@ impl WinHost {
             started: std::time::Instant::now(),
             layout_seen: Cell::new(None),
             latin_hkl: Cell::new(None),
+            start_fg,
         }
     }
+}
+
+/// The user's clipboard that could not be put back (audit A08): memory only, 10 minutes,
+/// put back only on request from the tray menu, and only if our text is still in the clipboard.
+static PARKED: std::sync::Mutex<Option<(clipboard::Snapshot, ClipState, std::time::Instant)>> = std::sync::Mutex::new(None);
+const PARK_SECONDS: u64 = 600;
+
+/// A kept clipboard can be put back (shown in the tray menu).
+pub fn parked_available() -> bool {
+    let mut p = PARKED.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if p.as_ref().is_some_and(|(_, _, at)| at.elapsed().as_secs() >= PARK_SECONDS) {
+        *p = None; // expired: forgotten
+    }
+    p.is_some()
+}
+
+/// Puts the kept clipboard back (tray menu). None: nothing kept (or expired).
+pub fn restore_parked(owner: usize) -> Option<RestoreResult> {
+    if !parked_available() {
+        return None;
+    }
+    let mut p = PARKED.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let (snap, st, at) = p.take()?;
+    let r = clipboard::restore(owner as HWND, &snap, &st);
+    if r == RestoreResult::Failed {
+        *p = Some((snap, st, at)); // still busy: kept for another try
+    }
+    Some(r)
 }
 
 fn h(hwnd: usize) -> HWND {
@@ -64,6 +95,9 @@ fn h(hwnd: usize) -> HWND {
 impl Host for WinHost {
     fn foreground(&self) -> usize {
         target::foreground() as usize
+    }
+    fn initial_target(&self) -> usize {
+        if self.start_fg != 0 { self.start_fg } else { self.foreground() }
     }
     fn focus_unchanged(&self) -> bool {
         // unknown -> known (or the reverse) is a change; unknown both times stays "unchanged",
@@ -112,6 +146,8 @@ impl Host for WinHost {
         }
     }
     fn clipboard_save_and_clear(&mut self) -> (SaveResult, u32) {
+        // a new conversion: an older kept copy no longer makes sense
+        *PARKED.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
         let (r, seq, snap) = clipboard::save_and_clear(self.owner);
         self.snapshot = snap;
         (r, seq)
@@ -141,6 +177,11 @@ impl Host for WinHost {
     }
     fn clipboard_forget(&mut self) {
         self.snapshot = None;
+    }
+    fn clipboard_park(&mut self, st: &ClipState) {
+        if let Some(snap) = self.snapshot.take() {
+            *PARKED.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((snap, st.clone(), std::time::Instant::now()));
+        }
     }
     fn send_copy(&self) -> bool {
         input::copy()

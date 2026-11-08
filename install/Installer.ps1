@@ -19,7 +19,7 @@ $Dest = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'Programs\KeyboardLa
 $Exe = Join-Path $Dest 'KeyboardLayoutFixer.exe'
 $RunKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $Lnk = Join-Path ([Environment]::GetFolderPath('Programs')) 'Keyboard Layout Fixer.lnk'
-if (-not (Test-Path -LiteralPath $Src)) { Fin 1 'ERROR: KeyboardLayoutFixer.exe must be in the same folder. Unzip the file first (right click > Extract All).' }
+if (-not (Test-Path -LiteralPath $Src) -or -not (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'Uninstall.ps1'))) { Fin 1 'ERROR: KeyboardLayoutFixer.exe and Uninstall.ps1 must be in the same folder. Unzip the file first (right click > Extract All).' }
 Unblock-File -LiteralPath $Src -ErrorAction SilentlyContinue
 if ($Dest.StartsWith('\\')) { Write-Host 'Note: your local application folder is on the network; Windows may ask for confirmation at each logon.' }
 
@@ -68,28 +68,69 @@ if ($miennes.Count) {
 [void][IO.Directory]::CreateDirectory($Dest)
 $New = "$Exe.new"; $Old = "$Exe.old"
 $premiere = -not (Test-Path -LiteralPath $Exe)
+$Arp = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\KeyboardLayoutFixer'
+$arpAvant = Test-Path -LiteralPath $Arp
+$arpValeurs = if ($arpAvant) { Get-ItemProperty -LiteralPath $Arp } else { $null }
+# every step done is noted, to undo exactly those steps if a later one fails (audit A04)
+$fait = @{ moved = $false; swapped = $false; run = $false; arp = $false; files = @() }
 [IO.File]::Copy($Src, $New, $true)
 try {
     if (Test-Path -LiteralPath $Old) { [IO.File]::Delete($Old) }
-    if (-not $premiere) { [IO.File]::Move($Exe, $Old) }
-    [IO.File]::Move($New, $Exe)
+    if (-not $premiere) { [IO.File]::Move($Exe, $Old); $fait.moved = $true }
+    [IO.File]::Move($New, $Exe); $fait.swapped = $true
     # start with Windows: set at the first installation only (an update keeps the user's choice)
     if ($premiere) {
         # never New-Item -Force on an existing key: it would empty it (all the user's startup programs)
         if (-not (Test-Path -LiteralPath $RunKey)) { New-Item -Path $RunKey | Out-Null }
         New-ItemProperty -Path $RunKey -Name 'KeyboardLayoutFixer' -Value "`"$Exe`"" -PropertyType String -Force | Out-Null
+        $fait.run = $true
+        # an old "disabled" mark left by a previous install would keep it from starting
+        Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run' -Name 'KeyboardLayoutFixer' -ErrorAction SilentlyContinue
     }
+    # uninstaller kept next to the program + entry in Windows "Installed apps" (audit A13)
+    foreach ($f in 'Uninstall.ps1', 'Uninstall.cmd') {
+        $from = Join-Path $PSScriptRoot $f
+        if (Test-Path -LiteralPath $from) { [IO.File]::Copy($from, (Join-Path $Dest $f), $true); $fait.files += (Join-Path $Dest $f) }
+    }
+    $ver = (Get-Item -LiteralPath $Exe).VersionInfo.FileVersion
+    if (-not $arpAvant) { New-Item -Path $Arp | Out-Null }
+    $fait.arp = $true
+    $ps = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+    $vals = @{ DisplayName = 'Keyboard Layout Fixer'; DisplayVersion = "$ver"; Publisher = 'breslev558 (MIT, based on Ravid Saadia)'
+        DisplayIcon = "$Exe,0"; InstallLocation = $Dest
+        UninstallString = "`"$ps`" -NoProfile -ExecutionPolicy Bypass -File `"$(Join-Path $Dest 'Uninstall.ps1')`""
+        QuietUninstallString = "`"$ps`" -NoProfile -ExecutionPolicy Bypass -File `"$(Join-Path $Dest 'Uninstall.ps1')`" -NonInteractive"
+        URLInfoAbout = 'https://github.com/breslev558/hebrew-keyboard-layout-fixer' }
+    foreach ($k in $vals.Keys) { New-ItemProperty -Path $Arp -Name $k -Value $vals[$k] -PropertyType String -Force | Out-Null }
+    foreach ($k in 'NoModify', 'NoRepair') { New-ItemProperty -Path $Arp -Name $k -Value 1 -PropertyType DWord -Force | Out-Null }
+    New-ItemProperty -Path $Arp -Name 'EstimatedSize' -Value ([int]((Get-Item -LiteralPath $Exe).Length / 1KB)) -PropertyType DWord -Force | Out-Null
+    # the program is started BEFORE the old file is deleted: a failed start is undone too
+    Start-Process -FilePath $Exe -WorkingDirectory $Dest
 } catch {
-    if (-not (Test-Path -LiteralPath $Exe) -and (Test-Path -LiteralPath $Old)) { [IO.File]::Move($Old, $Exe) }
+    $err = $_.Exception.Message
+    if ($fait.arp -and -not $arpAvant) { Remove-Item -LiteralPath $Arp -Recurse -Force -ErrorAction SilentlyContinue }
+    elseif ($fait.arp -and $arpValeurs) { foreach ($k in 'DisplayVersion', 'EstimatedSize') { if ($null -ne $arpValeurs.$k) { Set-ItemProperty -LiteralPath $Arp -Name $k -Value $arpValeurs.$k -ErrorAction SilentlyContinue } } }
+    if ($fait.run) { Remove-ItemProperty -Path $RunKey -Name 'KeyboardLayoutFixer' -ErrorAction SilentlyContinue }
+    if ($premiere) { foreach ($f in $fait.files) { Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue } }
+    if ($fait.swapped -and (Test-Path -LiteralPath $Exe)) { [IO.File]::Delete($Exe) }
     if (Test-Path -LiteralPath $New) { [IO.File]::Delete($New) }
-    Fin 1 "ERROR: $($_.Exception.Message). The previous state was put back."
+    if (-not $premiere -and (Test-Path -LiteralPath $Old) -and -not (Test-Path -LiteralPath $Exe)) {
+        [IO.File]::Move($Old, $Exe)
+        Start-Process -FilePath $Exe -WorkingDirectory $Dest -ErrorAction SilentlyContinue
+        Fin 1 "ERROR: $err. The previous version was put back."
+    }
+    if ($premiere) {
+        if (-not (Get-ChildItem -LiteralPath $Dest -Force -ErrorAction SilentlyContinue)) { Remove-Item -LiteralPath $Dest -Force -ErrorAction SilentlyContinue }
+        Fin 1 "ERROR: $err. Nothing was installed."
+    }
+    if (-not $fait.moved -and -not $fait.swapped) { Fin 1 "ERROR: $err. Nothing was changed." }
+    Fin 1 "ERROR: $err. The installation is incomplete: run Installer.cmd again."
 }
+try { if (Test-Path -LiteralPath $Old) { [IO.File]::Delete($Old) } } catch { Write-Host "Note: the old file $Old could not be deleted (harmless)." }
 # Start menu shortcut: optional (may be refused in a locked-down PowerShell)
 try {
     $s = (New-Object -ComObject WScript.Shell).CreateShortcut($Lnk)
     $s.TargetPath = $Exe; $s.Arguments = '--settings'; $s.WorkingDirectory = $Dest; $s.Description = 'Keyboard Layout Fixer'
     $s.Save()
 } catch { Write-Host 'Note: the Start menu shortcut could not be created (the program works anyway).' }
-if (Test-Path -LiteralPath $Old) { [IO.File]::Delete($Old) }
-Start-Process -FilePath $Exe -WorkingDirectory $Dest
-Fin 0 "Installed: $Exe`nF10 fixes the keyboard layout, F9 fixes Caps Lock. Settings: click the keyboard icon near the clock.`nIt starts with Windows (can be switched off in the settings). To remove it: Uninstall.cmd."
+Fin 0 "Installed: $Exe`nF10 fixes the keyboard layout, F9 fixes Caps Lock. Settings: click the keyboard icon near the clock.`nIt starts with Windows (can be switched off in the settings). To remove it: Windows Settings > Apps > Installed apps > Keyboard Layout Fixer, or Uninstall.cmd from the program folder."

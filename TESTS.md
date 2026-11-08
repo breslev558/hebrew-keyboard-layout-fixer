@@ -1,6 +1,6 @@
 # Essais Windows à faire à chaque version (NOAM)
 
-Les tests automatiques (`cargo test -p klf-core`, `tests-ps/test-installeur-p1-p3.ps1`) simulent
+Les tests automatiques (`cargo test -p klf-core`, `tests-ps/*.ps1`, lancés aussi par la CI GitHub à chaque envoi) simulent
 Windows. Cette liste se fait à la main sur un PC d'essai, avec la version
 indiquée. Cocher, noter la date et ce qui ne va pas. Rien de ce qui est tapé n'est enregistré par
 le programme : pour signaler un problème, utiliser l'onglet **Diagnostic** puis **Copier les
@@ -10,7 +10,7 @@ Version : ______  PC : ______  Date : ______  Windows : ______  Échelle : _____
 
 ## Installation
 - [ ] install/Installer.cmd par-dessus l'ancienne version : fermée, remplacée, relancée, réglages gardés.
-- [ ] Désinstaller.cmd : tout est retiré, ou ce qui reste est dit.
+- [ ] Uninstall.cmd (ou Paramètres > Applications installées) : tout est retiré, ou ce qui reste est dit.
 
 ## F10 (langue) et F9 (majuscules)
 - [ ] Word : sélection « akuo » → « שלום » ; sans sélection : jusqu'au début de la ligne.
@@ -75,3 +75,11 @@ Version : ______  PC : ______  Date : ______  Windows : ______  Échelle : _____
 ## Performances (onglet Diagnostic, durées par étape)
 - [ ] Noter la durée totale d'une correction courte dans Word : ______ ms (dont attente avant remise : réglage « délai »).
 - [ ] Noter une correction dans Chrome : ______ ms. Comparer d'une version à l'autre.
+
+## Audit du 09/11/2026 (1.5.4)
+- [ ] A01 : copier un objet Word/Excel incorporé, faire F10 sur un autre texte, puis Collage spécial : noter ce qui revient (limite connue : formats OLE non gardés).
+- [ ] A02 : copier une image, F10, recopier une AUTRE image dans la même fenêtre pendant la seconde de remise : noter si la nouvelle est gardée (limite connue).
+- [ ] A03 : appuyer sur F10 puis tenir une flèche pendant la copie : la correction s'arrête (« fenêtre changée » ou rien), le texte n'est pas collé ailleurs.
+- [ ] A07 : régler Win+F9 (fichier settings.json), ouvrir les réglages, Enregistrer sans toucher aux touches : Win+F9 reste.
+- [ ] A08 : bloquer le presse-papiers (programme qui le garde ouvert) pendant F10 : message « presse-papiers non remis », puis menu de l'icône « Remettre le presse-papiers précédent » (moins de 10 minutes) : l'ancienne copie revient ; après une nouvelle copie, rien n'est remis.
+- [ ] A04/A13 (version publique) : installer, vérifier « Paramètres > Applications > Applications installées > Keyboard Layout Fixer », désinstaller depuis là ; les autres programmes de « Démarrage » sont toujours là.

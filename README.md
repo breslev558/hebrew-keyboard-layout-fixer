@@ -20,15 +20,22 @@ connection, nothing you type is recorded (only a small technical `debug.log` in 
    paid certificate: click **More info**, then **Run anyway**. You can check the file with the SHA256 given on the
    release page (`Get-FileHash KeyboardLayoutFixer.zip` in PowerShell).
 
-To remove it: double-click **Uninstall.cmd** (your settings are kept). Settings: click the keyboard icon near the clock.
+To remove it: Windows **Settings > Apps > Installed apps > Keyboard Layout Fixer > Uninstall** (or Uninstall.cmd from the zip); your settings are kept. Settings: click the A/א icon near the clock.
 
 Other features: the clipboard is saved and put back; password fields, administrator windows and consoles are
 protected; settings window in Hebrew / French / English (keys, direction, careful mode, per-program rules, bubble
 position, diagnostic, export/import). An administrator can impose settings on a whole PC in
 `HKLM\SOFTWARE\Policies\NOAM\KeyboardLayoutFixer` (same names as `settings.json`).
 
+**Guarantees and limits**
+- Passwords: classic Windows password fields (Edit/RichEdit with `ES_PASSWORD`) are recognised in advance; elsewhere the protection relies on the application refusing to copy. Administrator windows are left alone, unless the program itself runs as administrator.
+- Clipboard: text, images, files and most formats are saved and put back. Some embedded Office object formats (OLE: Embed Source, Object Descriptor…) are not: an Office object copied before a fix may come back as text or picture. A new copy made in the same window during the one-second restore may not be told apart from the application's copy if it is identical.
+- If the clipboard could not be put back, it is kept **in memory only** for 10 minutes: tray menu “Put back the previous clipboard”.
+- F10 fixes the keys' layout, it does not guess the intended language; punctuation alone is not always reversible.
+- The diagnostic never contains your text: program names, window classes, sizes, settings and steps only.
+
 **Build**: `bash tools/construire.sh` (Rust toolchain from `rust-toolchain.toml`, MinGW target `x86_64-pc-windows-gnu`):
-tests, licence check, `KeyboardLayoutFixer.exe` and `BUILD-INFO.txt`. Manual tests on Windows: `TESTS.md`.
+tests, licence check, `KeyboardLayoutFixer.exe` and `BUILD-INFO.txt`. The same checks run on GitHub for every change (`.github/workflows/ci.yml`). Manual tests on Windows: `TESTS.md`. Changes: `CHANGELOG.md`. Security reports: `SECURITY.md`.
 
 ## Français
 

@@ -115,11 +115,18 @@ fn down(vk: u16) -> bool {
 /// the waits of a conversion (audit B3).
 /// `hotkey_vk` is left out (a hotkey with Enter or Tab would always look like a move).
 pub fn user_moving(hotkey_vk: u16) -> bool {
-    [VK_LBUTTON, VK_RBUTTON, VK_MBUTTON, VK_TAB, VK_RETURN].iter().filter(|k| **k != hotkey_vk).any(|k| {
+    let clicked = [VK_LBUTTON, VK_RBUTTON, VK_MBUTTON, VK_TAB, VK_RETURN].iter().filter(|k| **k != hotkey_vk).any(|k| {
         // SAFETY: no pointers.
         let s = unsafe { GetAsyncKeyState(*k as i32) } as u16;
         s & 0x8001 != 0
-    })
+    });
+    // arrows and page keys held down by the user (audit A03): only "down now" (bit 15), because
+    // the "only the last word" mode sends Shift+Left/Right itself (key up sent at once)
+    clicked
+        || [VK_LEFT, VK_RIGHT, VK_UP, VK_DOWN, VK_PRIOR, VK_NEXT].iter().filter(|k| **k != hotkey_vk).any(|k| {
+            // SAFETY: no pointers.
+            (unsafe { GetAsyncKeyState(*k as i32) } as u16) & 0x8000 != 0
+        })
 }
 
 // Every press of Caps Lock, seen by a low-level keyboard hook when Windows dispatches it,

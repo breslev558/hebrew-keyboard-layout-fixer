@@ -15,6 +15,10 @@ $Dest = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'Programs\KeyboardLa
 $Exe = Join-Path $Dest 'KeyboardLayoutFixer.exe'
 $RunKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $Lnk = Join-Path ([Environment]::GetFolderPath('Programs')) 'Keyboard Layout Fixer.lnk'
+$Arp = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\KeyboardLayoutFixer'
+# this script may run from the program folder (Installed apps): leave it before deleting it
+Set-Location -LiteralPath $env:TEMP
+[Environment]::CurrentDirectory = $env:TEMP
 
 function Fermer-Fenetres($ids) {
     try {
@@ -48,10 +52,12 @@ if ($miennes.Count) {
         Start-Sleep -Seconds 2
     }
 }
+# the program folder first: if it cannot be deleted, nothing else is removed (Uninstall can be run again)
+try { if (Test-Path -LiteralPath $Dest) { Remove-Item -LiteralPath $Dest -Recurse -Force } }
+catch { Fin 1 "The program folder could not be deleted ($Dest): $($_.Exception.Message). Close it and run the uninstaller again." }
 $v = (Get-ItemProperty -Path $RunKey -Name 'KeyboardLayoutFixer' -ErrorAction SilentlyContinue).KeyboardLayoutFixer
 if ($v -and $v.Trim('"') -ieq $Exe) { Remove-ItemProperty -Path $RunKey -Name 'KeyboardLayoutFixer' -ErrorAction SilentlyContinue }
-Remove-Item -LiteralPath $Lnk -Force -ErrorAction SilentlyContinue
 Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run' -Name 'KeyboardLayoutFixer' -ErrorAction SilentlyContinue
-try { if (Test-Path -LiteralPath $Dest) { Remove-Item -LiteralPath $Dest -Recurse -Force } }
-catch { Fin 1 "The program folder could not be deleted ($Dest): $($_.Exception.Message). Close it and run Uninstall.cmd again." }
+Remove-Item -LiteralPath $Lnk -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $Arp -Recurse -Force -ErrorAction SilentlyContinue
 Fin 0 'Keyboard Layout Fixer was removed (your settings in %APPDATA%\KeyboardLayoutFixer are kept).'

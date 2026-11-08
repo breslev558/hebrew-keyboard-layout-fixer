@@ -16,23 +16,57 @@ pub fn export(user: &AppSettings, app_version: &str) -> String {
     serde_json::to_string_pretty(&v).unwrap_or_default()
 }
 
-/// A profile file, or a plain settings.json. Err(reason in French).
-pub fn import(text: &str) -> Result<AppSettings, String> {
-    if text.len() > MAX_BYTES {
-        return Err("fichier trop gros (plus de 1 Mo)".into());
+/// Why an import is refused (shown in the interface language, audit A11).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImportError {
+    TooBig,
+    NotJson,
+    UnknownFormat,
+    /// a profile written by a newer version (FormatVersion higher than ours, audit A06)
+    NewerFormat,
+    Unreadable,
+}
+
+impl ImportError {
+    pub fn msg(self) -> crate::i18n::Msg {
+        use crate::i18n::Msg;
+        match self {
+            Self::TooBig => Msg::ImportTooBig,
+            Self::NotJson => Msg::ImportNotJson,
+            Self::UnknownFormat => Msg::ImportUnknownFormat,
+            Self::NewerFormat => Msg::ImportNewerFormat,
+            Self::Unreadable => Msg::ImportUnreadable,
+        }
     }
-    let v: serde_json::Value = serde_json::from_str(text.trim_start_matches('\u{feff}')).map_err(|_| "ce n'est pas un fichier JSON lisible".to_string())?;
+}
+
+/// A profile file, or a plain settings.json.
+pub fn import(text: &str) -> Result<AppSettings, ImportError> {
+    if text.len() > MAX_BYTES {
+        return Err(ImportError::TooBig);
+    }
+    let v: serde_json::Value = serde_json::from_str(text.trim_start_matches('\u{feff}')).map_err(|_| ImportError::NotJson)?;
     let settings = match v.get("Format").and_then(|f| f.as_str()) {
-        Some(FORMAT) => v.get("Settings").cloned().ok_or_else(|| "profil sans réglages".to_string())?,
-        Some(_) => return Err("format de fichier inconnu".into()),
+        Some(FORMAT) => {
+            match v.get("FormatVersion") {
+                None => {}
+                Some(n) => match n.as_u64() {
+                    Some(n) if n <= u64::from(FORMAT_VERSION) => {}
+                    Some(_) => return Err(ImportError::NewerFormat),
+                    None => return Err(ImportError::Unreadable),
+                },
+            }
+            v.get("Settings").cloned().ok_or(ImportError::Unreadable)?
+        }
+        Some(_) => return Err(ImportError::UnknownFormat),
         None => v,
     };
     if !settings.is_object() {
-        return Err("réglages illisibles".into());
+        return Err(ImportError::Unreadable);
     }
     let (s, ok) = AppSettings::from_json(&settings.to_string());
     if !ok {
-        return Err("réglages illisibles".into());
+        return Err(ImportError::Unreadable);
     }
     Ok(s)
 }
@@ -48,6 +82,7 @@ pub fn differences(old: &AppSettings, new: &AppSettings, locked: &Locked) -> Vec
     };
     add("touche langue", old.hotkey_description(), new.hotkey_description(), locked.hotkey);
     add("touche majuscules", old.case_hotkey_description(), new.case_hotkey_description(), locked.case_hotkey);
+    add("majuscules converties (ReplaceCaps)", old.replace_caps.to_string(), new.replace_caps.to_string(), false);
     add("sens", format!("{:?}", old.mixed_text_mode), format!("{:?}", new.mixed_text_mode), locked.mixed_text_mode);
     add("mode prudent", old.require_selection.to_string(), new.require_selection.to_string(), locked.require_selection);
     add("dernier mot", old.last_word_only.to_string(), new.last_word_only.to_string(), locked.last_word_only);
@@ -71,6 +106,35 @@ pub fn differences(old: &AppSettings, new: &AppSettings, locked: &Locked) -> Vec
 mod tests {
     use super::*;
     use crate::settings::RuleMode;
+
+    #[test]
+    fn audit_a06_replace_caps_alone_is_a_difference() {
+        let old = AppSettings::default();
+        let new = AppSettings { replace_caps: !old.replace_caps, ..old.clone() };
+        let d = differences(&old, &new, &Locked::default());
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(d[0].contains("ReplaceCaps"));
+    }
+
+    #[test]
+    fn audit_a06_newer_format_version_is_refused() {
+        let ok = format!(r#"{{"Format":"{FORMAT}","FormatVersion":1,"Settings":{{}}}}"#);
+        assert!(import(&ok).is_ok());
+        let newer = format!(r#"{{"Format":"{FORMAT}","FormatVersion":2,"Settings":{{}}}}"#);
+        assert_eq!(import(&newer), Err(ImportError::NewerFormat));
+        let bad = format!(r#"{{"Format":"{FORMAT}","FormatVersion":"x","Settings":{{}}}}"#);
+        assert_eq!(import(&bad), Err(ImportError::Unreadable));
+    }
+
+    #[test]
+    fn audit_a11_import_errors_have_a_translated_text() {
+        for l in [crate::i18n::Lang::He, crate::i18n::Lang::Fr, crate::i18n::Lang::En] {
+            for e in [ImportError::TooBig, ImportError::NotJson, ImportError::UnknownFormat, ImportError::NewerFormat, ImportError::Unreadable] {
+                assert!(!crate::i18n::text(l, e.msg()).is_empty());
+            }
+        }
+        assert_eq!(import("not json"), Err(ImportError::NotJson));
+    }
 
     #[test]
     fn export_then_import_gives_the_same_settings() {

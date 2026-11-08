@@ -388,6 +388,16 @@ impl AppSettings {
 }
 
 /// Ctrl+C / Ctrl+V / Ctrl+X / Ctrl+A / Ctrl+Z are needed by the program itself and by the user.
+/// The Windows hotkey box cannot show Win: when the key and the other modifiers are unchanged,
+/// Win is kept (both hotkeys, audit A07).
+pub fn keep_win(old_mods: u32, old_key: u32, vk: u32, mods: u32) -> u32 {
+    if old_mods & MOD_WIN != 0 && key_to_vk(old_key) == vk && mods == old_mods & !MOD_WIN {
+        mods | MOD_WIN
+    } else {
+        mods
+    }
+}
+
 pub fn hotkey_allowed(mods: u32, key: u32) -> bool {
     if !key_is_known(key) || mods & !KNOWN_MODS != 0 {
         return false;
@@ -533,6 +543,16 @@ mod tests {
         assert_eq!(AppSettings::from_json("{\"BubblePosition\":\"x\"}").0.bubble_position, BUBBLE_TOP);
         let (s, _) = AppSettings::from_json("{\"BubblePosition\":1}");
         assert!(s.to_json().contains("\"BubblePosition\": 1"));
+    }
+
+    #[test]
+    fn audit_a07_win_is_kept_when_nothing_changed() {
+        let f9 = key_to_vk(KEY_F9);
+        assert_eq!(keep_win(MOD_WIN, KEY_F9, f9, 0), MOD_WIN, "Win+F9 unchanged stays Win+F9");
+        assert_eq!(keep_win(MOD_WIN | MOD_CONTROL, KEY_F9, f9, MOD_CONTROL), MOD_WIN | MOD_CONTROL);
+        assert_eq!(keep_win(MOD_WIN, KEY_F9, key_to_vk(KEY_F10), 0), 0, "another key: Win not added");
+        assert_eq!(keep_win(MOD_WIN, KEY_F9, f9, MOD_CONTROL), MOD_CONTROL, "other modifiers changed: Win not added");
+        assert_eq!(keep_win(0, KEY_F9, f9, 0), 0);
     }
 
     fn v(f: impl FnOnce(&mut AppSettings)) -> AppSettings {

@@ -155,9 +155,15 @@ pub fn from_values(values: &[(String, RegValue)]) -> Policy {
                             continue;
                         }
                         p.app_rules.retain(|r| r.process != proc_);
-                        if p.app_rules.len() < MAX_RULES {
-                            p.app_rules.push(AppRule { process: proc_, mode });
+                        // audit A05: the user's values (HKCU) are read first, the machine's (HKLM)
+                        // last: when the list is full, the oldest rule (a user one) gives way
+                        if p.app_rules.len() >= MAX_RULES {
+                            p.app_rules.remove(0);
+                            if !ign.iter().any(|m| m.starts_with("AppRules : limite")) {
+                                ign.push(format!("AppRules : limite de {MAX_RULES} règles atteinte, les plus anciennes (utilisateur) sont retirées"));
+                            }
                         }
+                        p.app_rules.push(AppRule { process: proc_, mode });
                     }
                 }
                 _ => ign.push(format!("{name} : liste (REG_MULTI_SZ) attendue")),
@@ -312,6 +318,16 @@ mod tests {
 
     fn vals(v: &[(&str, RegValue)]) -> Vec<(String, RegValue)> {
         v.iter().map(|(n, x)| (n.to_string(), x.clone())).collect()
+    }
+
+    #[test]
+    fn audit_a05_machine_rule_survives_200_user_rules() {
+        let user: Vec<String> = (0..MAX_RULES).map(|i| format!("prog{i}.exe=Disabled")).collect();
+        // HKCU is read first, HKLM last (platform/school.rs)
+        let p = from_values(&vals(&[("AppRules", RegValue::Lines(user)), ("AppRules", RegValue::Lines(vec!["machine.exe=SelectionOnly".into()]))]));
+        assert_eq!(p.app_rules.len(), MAX_RULES);
+        assert!(p.app_rules.iter().any(|r| r.process == "machine.exe" && r.mode == RuleMode::SelectionOnly));
+        assert_eq!(p.ignored.iter().filter(|m| m.contains("limite")).count(), 1, "{:?}", p.ignored);
     }
 
     #[test]

@@ -45,6 +45,7 @@ const CMD_RULE_DISABLE: usize = 105;
 const CMD_RULE_SELECTION: usize = 106;
 const CMD_RULE_REMOVE: usize = 107;
 const CMD_PAUSE10: usize = 108;
+const CMD_RESTORE_CLIP: usize = 109;
 /// End of a timed pause (10 minutes).
 const TIMER_PAUSE_END: usize = 3;
 const TIMED_PAUSE_MS: u32 = 10 * 60 * 1000;
@@ -675,6 +676,9 @@ fn show_menu(hwnd: HWND) {
         items.push((CMD_PAUSE10, text(l, Msg::MenuPause10).to_string(), false));
         items.push((CMD_PAUSE, text(l, Msg::MenuPause).to_string(), false));
     }
+    if crate::host::parked_available() {
+        items.push((CMD_RESTORE_CLIP, text(l, Msg::MenuRestoreClipboard).to_string(), false));
+    }
     items.push((CMD_ABOUT, text(l, Msg::MenuAbout).to_string(), false));
     items.push((0, String::new(), false));
     items.push((CMD_EXIT, text(l, Msg::MenuExit).to_string(), false));
@@ -798,8 +802,10 @@ fn start_hotkey(hwnd: HWND, action: Action, delayed: bool) {
     let vk = key_to_vk(if action == Action::Case { s.case_hotkey_key } else { s.hotkey_key }) as u16;
     // Caps Lock at F9: state read on the window that receives the keys + count of Caps Lock
     // presses so far (UI thread, before any key is sent; audit 1.3.7 P2)
+    // the target is the window in the foreground NOW, at the hotkey (audit A03)
+    let fg_at_hotkey = target::foreground() as usize;
     let caps_at_hotkey = if action == Action::Case && s.turn_off_caps_lock {
-        let fg = target::foreground();
+        let fg = fg_at_hotkey as HWND;
         let state = if fg.is_null() { None } else { crate::platform::input::caps_lock_on_now(fg) };
         (state, crate::platform::input::caps_presses())
     } else {
@@ -807,9 +813,9 @@ fn start_hotkey(hwnd: HWND, action: Action, delayed: bool) {
     };
     let spawned = std::thread::Builder::new().name("f10".into()).spawn(move || {
         log(if s.action == Action::Case { "Caps Lock hotkey pressed" } else { "Hotkey pressed" });
-        let fg = target::foreground();
+        let fg = fg_at_hotkey as HWND;
         let caret = if fg.is_null() { None } else { target::caret_point(fg) };
-        let mut host = WinHost::new(owner, vk, caps_at_hotkey);
+        let mut host = WinHost::new(owner, vk, caps_at_hotkey, fg_at_hotkey);
         let mut trace = klf_core::diag::Trace::default();
         let outcome = flow::run_traced(&mut host, &s, &mut trace);
         {
@@ -918,6 +924,18 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     toggle_pause()
                 }
                 CMD_PAUSE10 => pause_for_a_while(),
+                CMD_RESTORE_CLIP if !busy() => {
+                    use klf_core::flow::RestoreResult;
+                    let l = lang();
+                    let m = match crate::host::restore_parked(hwnd as usize) {
+                        Some(RestoreResult::Restored) => Msg::ClipboardRestoredLater,
+                        Some(RestoreResult::KeptUserCopy) => Msg::ClipboardNotRestoredNewCopy,
+                        Some(RestoreResult::Failed) => Msg::ClipboardNotRestored,
+                        None => Msg::ClipboardNotRestoredNewCopy,
+                    };
+                    log(&format!("Kept clipboard put back on request: {m:?}"));
+                    bubble::show(text(l, m), l.is_rtl(), None, 0, m == Msg::ClipboardRestoredLater);
+                }
                 CMD_RULE_DISABLE | CMD_RULE_SELECTION | CMD_RULE_REMOVE => {
                     use klf_core::settings::RuleMode;
                     let app = MENU_APP.with(|m| m.borrow().clone());

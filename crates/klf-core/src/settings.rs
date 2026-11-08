@@ -147,6 +147,14 @@ pub struct AppSettings {
     pub show_bubble: bool,
     #[serde(rename = "PlaySound", deserialize_with = "de_bool_false")]
     pub play_sound: bool,
+    // --- new in 1.5.5 : update in one click (public per-user install only) ---
+    #[serde(rename = "CheckUpdates", deserialize_with = "de_bool_true")]
+    pub check_updates: bool,
+    /// a version refused or failed is not offered again for 7 days
+    #[serde(rename = "UpdateSkipTag", default)]
+    pub update_skip_tag: String,
+    #[serde(rename = "UpdateSkipAt", default)]
+    pub update_skip_at: u64,
     // --- new in 1.5.2 ---
     /// Where the bubble appears: BUBBLE_TOP (default), BUBBLE_BOTTOM or BUBBLE_CARET.
     #[serde(rename = "BubblePosition", deserialize_with = "de_bubble_position")]
@@ -253,6 +261,9 @@ impl Default for AppSettings {
             show_bubble: true,
             play_sound: false,
             bubble_position: BUBBLE_TOP,
+            check_updates: true,
+            update_skip_tag: String::new(),
+            update_skip_at: 0,
             ui_language: UiLanguage::Auto,
             console_support: false,
             paste_delay_ms: DEFAULT_PASTE_DELAY_MS,

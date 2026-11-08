@@ -20,6 +20,8 @@ connection, nothing you type is recorded (only a small technical `debug.log` in 
    paid certificate: click **More info**, then **Run anyway**. You can check the file with the SHA256 given on the
    release page (`Get-FileHash KeyboardLayoutFixer.zip` in PowerShell).
 
+**Updates**: once a day the program asks GitHub whether a newer version exists. If so, a bubble tells you and the tray menu offers “Install version X”: the new exe is downloaded, its SHA-256 and digital signature are checked, then it replaces the old one (nothing is installed without your click). Switch it off with “Check for updates” in the tray menu. No other network access, no telemetry.
+
 To remove it: Windows **Settings > Apps > Installed apps > Keyboard Layout Fixer > Uninstall** (or Uninstall.cmd from the zip); your settings are kept. Settings: click the A/א icon near the clock.
 
 Other features: the clipboard is saved and put back; password fields, administrator windows and consoles are

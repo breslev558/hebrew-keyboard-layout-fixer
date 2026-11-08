@@ -1,4 +1,4 @@
-//! Keyboard Layout Fixer (NOAM) — Rust 1.5.4. Fixes text typed with the wrong keyboard layout
+//! Keyboard Layout Fixer (NOAM) — Rust 1.5.5. Fixes text typed with the wrong keyboard layout
 //! (Hebrew <-> English) with one key (F10). Based on RavidSaadia/Keyboard_Layout_Fixer (MIT).
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
@@ -17,6 +17,8 @@ mod platform;
 #[cfg(windows)]
 mod settings_ui;
 #[cfg(windows)]
+mod update;
+#[cfg(windows)]
 mod util;
 
 #[cfg(windows)]
@@ -28,7 +30,8 @@ fn main() {
 
     let arg = |name: &str| std::env::args_os().any(|a| a == name);
     // one copy per session; "--restart" waits up to 10 s for the old copy to quit
-    let Some(_instance) = platform::sys::SingleInstance::acquire(if arg("--restart") { 10_000 } else { 0 }) else {
+    // "--update": the old copy quits once a conversion in progress is over (up to 30 s)
+    let Some(_instance) = platform::sys::SingleInstance::acquire(if arg("--update") { 30_000 } else if arg("--restart") { 10_000 } else { 0 }) else {
         // "--settings" (Start menu shortcut): the running copy opens its settings window,
         // even when its tray icon is missing
         if arg("--settings") {

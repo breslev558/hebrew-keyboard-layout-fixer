@@ -25,6 +25,12 @@ pub const WM_APP_DONE: u32 = WM_APP + 2;
 pub const WM_APP_SETTINGS: u32 = WM_APP + 3;
 /// A hotkey pressed during a conversion, run once the conversion (and its clipboard restore) is over.
 const WM_APP_PENDING: u32 = WM_APP + 4;
+/// update (1.5.5): wparam 1 = a new version was found, 2 = installed (quit), 3 = failed
+const WM_APP_UPDATE: u32 = WM_APP + 5;
+const TIMER_UPDATE: usize = 5;
+static UPDATE_ERROR: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+/// one check / one installation at a time
+static UPDATE_BUSY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 const MAIN_CLASS: &str = "KBLayoutFixerMain";
 const HOTKEY_ID: i32 = 1;
 const HOTKEY_TEST_ID: i32 = 2;
@@ -46,6 +52,8 @@ const CMD_RULE_SELECTION: usize = 106;
 const CMD_RULE_REMOVE: usize = 107;
 const CMD_PAUSE10: usize = 108;
 const CMD_RESTORE_CLIP: usize = 109;
+const CMD_CHECK_UPDATES: usize = 110;
+const CMD_INSTALL_UPDATE: usize = 111;
 /// End of a timed pause (10 minutes).
 const TIMER_PAUSE_END: usize = 3;
 const TIMED_PAUSE_MS: u32 = 10 * 60 * 1000;
@@ -676,6 +684,15 @@ fn show_menu(hwnd: HWND) {
         items.push((CMD_PAUSE10, text(l, Msg::MenuPause10).to_string(), false));
         items.push((CMD_PAUSE, text(l, Msg::MenuPause).to_string(), false));
     }
+    if crate::update::allowed(true) {
+        let on = settings().check_updates;
+        if on {
+            if let Some(r) = crate::update::OFFER.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref().filter(|_| !UPDATE_BUSY.load(Ordering::SeqCst)) {
+                items.push((CMD_INSTALL_UPDATE, text(l, Msg::MenuInstallUpdate).replace("{version}", r.tag.trim_start_matches('v')), false));
+            }
+        }
+        items.push((CMD_CHECK_UPDATES, text(l, Msg::MenuCheckUpdates).to_string(), on));
+    }
     if crate::host::parked_available() {
         items.push((CMD_RESTORE_CLIP, text(l, Msg::MenuRestoreClipboard).to_string(), false));
     }
@@ -837,6 +854,88 @@ fn start_hotkey(hwnd: HWND, action: Action, delayed: bool) {
     }
 }
 
+fn sys_tick() -> u64 {
+    // SAFETY: no arguments.
+    unsafe { windows_sys::Win32::System::SystemInformation::GetTickCount64() }
+}
+
+/// Looks for an update on a worker thread (public per-user install, setting on, no policy).
+fn start_update_check(hwnd: HWND) {
+    let s = settings();
+    if !crate::update::allowed(s.check_updates) {
+        return;
+    }
+    if UPDATE_BUSY.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let owner = hwnd as usize;
+    let _ = std::thread::Builder::new().name("update-check".into()).spawn(move || {
+        let found = crate::update::check(&s.update_skip_tag, s.update_skip_at);
+        UPDATE_BUSY.store(false, Ordering::SeqCst);
+        if let Some(r) = found {
+            log(&format!("Update available: {}", r.tag));
+            *crate::update::OFFER.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(r);
+            // SAFETY: posting a message without pointers.
+            unsafe { PostMessageW(owner as HWND, WM_APP_UPDATE, 1, 0) };
+        }
+    });
+}
+
+/// Installs the offered update (tray menu click): download + checks + swap on a worker thread.
+fn start_update_install(hwnd: HWND) {
+    let Some(r) = crate::update::OFFER.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone() else { return };
+    if UPDATE_BUSY.swap(true, Ordering::SeqCst) {
+        return; // already installing (second click)
+    }
+    let l = lang();
+    bubble::show(text(l, Msg::UpdateInstalling), l.is_rtl(), None, 0, false);
+    let owner = hwnd as usize;
+    let _ = std::thread::Builder::new().name("update-install".into()).spawn(move || {
+        let code = match crate::update::install(&r) {
+            Ok(()) => 2,
+            Err(crate::update::Failure::Network(e)) => {
+                log(&format!("Update {}: network problem, tried again later: {e}", r.tag));
+                UPDATE_BUSY.store(false, Ordering::SeqCst);
+                4
+            }
+            Err(crate::update::Failure::Refused(e)) => {
+                log(&format!("Update {} FAILED: {e}", r.tag));
+                *UPDATE_ERROR.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = r.tag.clone();
+                UPDATE_BUSY.store(false, Ordering::SeqCst);
+                3
+            }
+        };
+        // SAFETY: posting a message without pointers.
+        unsafe { PostMessageW(owner as HWND, WM_APP_UPDATE, code, 0) };
+    });
+}
+
+fn on_update_message(hwnd: HWND, code: WPARAM) {
+    let l = lang();
+    match code {
+        1 => {
+            let tag = crate::update::OFFER.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref().map(|r| r.tag.trim_start_matches('v').to_string());
+            if let Some(v) = tag {
+                bubble::show(&text(l, Msg::UpdateAvailable).replace("{version}", &v), l.is_rtl(), None, 0, true);
+            }
+        }
+        2 => request_exit(hwnd), // the new copy is waiting for us to quit (--update)
+        4 => bubble::show(text(l, Msg::UpdateFailed), l.is_rtl(), None, 0, false), // network: offered again later
+        _ => {
+            // the failed version is not offered again for 7 days (no loop)
+            let tag = std::mem::take(&mut *UPDATE_ERROR.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
+            *crate::update::OFFER.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+            let mut s = user_settings();
+            s.update_skip_tag = tag;
+            s.update_skip_at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+            if save_settings(&s) {
+                apply_settings(s);
+            }
+            bubble::show(text(l, Msg::UpdateFailed), l.is_rtl(), None, 0, false);
+        }
+    }
+}
+
 /// Result of the last conversion, taken by the UI thread on WM_APP_DONE (one at a time).
 static DONE: std::sync::Mutex<Option<Done>> = std::sync::Mutex::new(None);
 
@@ -924,6 +1023,14 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     toggle_pause()
                 }
                 CMD_PAUSE10 => pause_for_a_while(),
+                CMD_CHECK_UPDATES => {
+                    let mut s = user_settings();
+                    s.check_updates = !s.check_updates;
+                    if save_settings(&s) {
+                        apply_settings(s);
+                    }
+                }
+                CMD_INSTALL_UPDATE if !busy() => start_update_install(hwnd),
                 CMD_RESTORE_CLIP if !busy() => {
                     use klf_core::flow::RestoreResult;
                     let l = lang();
@@ -968,6 +1075,18 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
         WM_TIMER if crate::indicator::on_timer(wparam) => 0,
         WM_TIMER if wparam == TIMER_POLICY => {
             reload_policy();
+            0
+        }
+        WM_TIMER if wparam == TIMER_UPDATE => {
+            // then once a day, a little later each time (not every PC at the same second)
+            let jitter = (sys_tick() % 3_600_000) as u32;
+            // SAFETY: our window.
+            unsafe { SetCoalescableTimer(hwnd, TIMER_UPDATE, 86_400_000 + jitter, None, 60_000) };
+            start_update_check(hwnd);
+            0
+        }
+        WM_APP_UPDATE => {
+            on_update_message(hwnd, wparam);
             0
         }
         WM_TIMER if wparam == TIMER_PAUSE_END => {
@@ -1048,6 +1167,9 @@ pub fn create_main_window() -> Option<HWND> {
         watch_foreground();
         note_foreground(GetForegroundWindow());
         SetCoalescableTimer(hwnd, TIMER_POLICY, 60_000, None, 5_000);
+        // update (public per-user install only): first look 2 minutes after the start
+        crate::update::cleanup();
+        SetCoalescableTimer(hwnd, TIMER_UPDATE, 120_000, None, 30_000);
         Some(hwnd)
     }
 }

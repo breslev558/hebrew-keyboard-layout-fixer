@@ -19,6 +19,18 @@ fn open(root: HKEY, path: &str) -> Option<HKEY> {
     (unsafe { RegOpenKeyExW(root, p.as_ptr(), 0, KEY_READ, &mut hk) } == ERROR_SUCCESS).then_some(hk)
 }
 
+/// An administrator manages this PC: the machine policy key exists (no automatic update then).
+pub fn policy_key_exists() -> bool {
+    match open(HKEY_LOCAL_MACHINE, KEY) {
+        Some(hk) => {
+            // SAFETY: key opened just above.
+            unsafe { RegCloseKey(hk) };
+            true
+        }
+        None => false,
+    }
+}
+
 /// Every value of a key: (name, value); values of other types or too big are left out.
 fn values(hk: HKEY) -> Vec<(String, RegValue)> {
     let mut out = Vec::new();

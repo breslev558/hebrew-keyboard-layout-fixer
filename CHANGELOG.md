@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.5.5 (November 2026)
+- Update in one click (per-user install only): once a day the program asks GitHub for the latest release; if a newer version exists, a bubble says so and the tray menu offers "Install version X". The exe is downloaded directly, its SHA-256 and an ECDSA P-256 signature (key kept outside GitHub) are checked by Windows, the file version must match, then it is swapped in place (old one kept until the new one starts). Can be switched off in the tray menu; never active when an administrator manages the PC. No other network access, no telemetry.
+
 ## 1.5.4 (November 2026)
 - New tray icon: white A and turquoise Aleph side by side, filling the square, drawn from a vector source and adjusted pixel by pixel (16-48 px); grey when paused.
 - Clipboard that could not be put back is kept in memory for 10 minutes: tray menu "Put back the previous clipboard" (only if our text is still there).

@@ -23,6 +23,7 @@ pub struct Policy {
     pub indicator: Option<bool>,
     pub show_bubble: Option<bool>,
     pub bubble_position: Option<u32>,
+    pub check_updates: Option<bool>,
     pub play_sound: Option<bool>,
     pub switch_language_after_convert: Option<bool>,
     pub max_character_limit: Option<i64>,
@@ -54,6 +55,7 @@ pub struct Locked {
     pub indicator: bool,
     pub show_bubble: bool,
     pub bubble_position: bool,
+    pub check_updates: bool,
     pub play_sound: bool,
     pub switch_language_after_convert: bool,
     pub max_character_limit: bool,
@@ -108,6 +110,7 @@ pub fn from_values(values: &[(String, RegValue)]) -> Policy {
             "indicator" => p.indicator = bool_of(name, v, &mut ign),
             "showbubble" => p.show_bubble = bool_of(name, v, &mut ign),
             "playsound" => p.play_sound = bool_of(name, v, &mut ign),
+            "checkupdates" => p.check_updates = bool_of(name, v, &mut ign),
             "bubbleposition" => match v {
                 RegValue::Dword(n) if *n <= crate::settings::BUBBLE_CARET => p.bubble_position = Some(*n),
                 _ => ign.push(format!("{name} : 0, 1 ou 2 attendu")),
@@ -229,6 +232,7 @@ pub fn effective(user: &AppSettings, p: &Policy) -> (AppSettings, Locked) {
     take!(indicator);
     take!(show_bubble);
     take!(bubble_position);
+    take!(check_updates);
     take!(play_sound);
     take!(switch_language_after_convert);
     take!(max_character_limit);
@@ -292,6 +296,7 @@ pub fn report_lines(p: &Policy) -> Vec<String> {
     show!(indicator, "Indicator");
     show!(show_bubble, "ShowBubble");
     show!(bubble_position, "BubblePosition");
+    show!(check_updates, "CheckUpdates");
     show!(play_sound, "PlaySound");
     show!(switch_language_after_convert, "SwitchLanguageAfterConvert");
     show!(max_character_limit, "MaxCharacterLimit");

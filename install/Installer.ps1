@@ -75,7 +75,8 @@ try {
     [IO.File]::Move($New, $Exe)
     # start with Windows: set at the first installation only (an update keeps the user's choice)
     if ($premiere) {
-        New-Item -Path $RunKey -Force | Out-Null
+        # never New-Item -Force on an existing key: it would empty it (all the user's startup programs)
+        if (-not (Test-Path -LiteralPath $RunKey)) { New-Item -Path $RunKey | Out-Null }
         New-ItemProperty -Path $RunKey -Name 'KeyboardLayoutFixer' -Value "`"$Exe`"" -PropertyType String -Force | Out-Null
     }
 } catch {

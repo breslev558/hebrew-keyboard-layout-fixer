@@ -588,9 +588,9 @@ fn fill_controls() {
     set_checked(ID_INDICATOR, s.indicator);
     set_text(ID_LIMIT, &s.max_character_limit.to_string());
     set_text(ID_DELAY, &s.paste_delay_ms.to_string());
-    // only the user's own list (the school's programs are added on top, never saved here)
+    // only the user's own list (the administrator's programs are added on top, never saved here)
     set_text(ID_EXCLUDED, &app::user_settings().excluded_processes.join(", "));
-    // settings imposed by the school: shown, greyed out
+    // settings imposed by the administrator: shown, greyed out
     let lk = app::locked();
     for (id, locked) in [
         (ID_HOTKEY, lk.hotkey),
@@ -628,8 +628,8 @@ fn fill_controls() {
 }
 
 /// Reads the controls; None (with a message) if a value is not allowed.
-/// Builds the USER settings to save: a setting imposed by the school keeps the user's own value
-/// (the school's value is never written into settings.json).
+/// Builds the USER settings to save: a setting imposed by the administrator keeps the user's own value
+/// (the administrator's value is never written into settings.json).
 fn read_controls() -> Option<AppSettings> {
     let old = app::user_settings();
     let lk = app::locked();
@@ -713,7 +713,7 @@ fn read_controls() -> Option<AppSettings> {
 fn on_save() {
     let Some(new_user) = read_controls() else { return };
     let old = app::settings();
-    // the keys and the language in force after saving (the school's settings stay on top)
+    // the keys and the language in force after saving (the administrator's settings stay on top)
     let new = klf_core::school::effective(&new_user, &app::policy()).0;
     // a new hotkey is tried BEFORE the old one is given up (audit 1.3.2)
     // a combination we already hold (F9 and F10 exchanged) is not "busy"
@@ -760,7 +760,7 @@ fn on_save() {
     }
 }
 
-/// The school's settings changed while the window is open: shown again, same tab.
+/// The administrator's settings changed while the window is open: shown again, same tab.
 pub fn refresh_after_policy() {
     if window().is_null() {
         return;
@@ -968,7 +968,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             0
         }
         WM_ENABLE if wparam != 0 && PENDING_REFRESH.with(|p| p.get()) => {
-            // the dialog closed: the school's settings changed meanwhile
+            // the dialog closed: the administrator's settings changed meanwhile
             // SAFETY: posting to our own window.
             unsafe { PostMessageW(hwnd, WM_APP + 20, 0, 0) };
             0
@@ -1065,7 +1065,7 @@ pub fn open() {
         }
         return;
     }
-    // the school's settings may have changed (an administration tool writes them without a notice)
+    // the administrator's settings may have changed (an administration tool writes them without a notice)
     app::reload_policy();
     let s = app::settings();
     let l = app::lang_of(&s);

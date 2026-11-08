@@ -38,12 +38,12 @@ pub fn import(text: &str) -> Result<AppSettings, String> {
 }
 
 /// Differences between the current settings and the imported ones, in plain French; a setting
-/// imposed by the school is marked "(sans effet : géré par l'école)".
+/// imposed by the administrator is marked "(sans effet : géré par l'administrateur)".
 pub fn differences(old: &AppSettings, new: &AppSettings, locked: &Locked) -> Vec<String> {
     let mut v = Vec::new();
     let mut add = |label: &str, a: String, b: String, l: bool| {
         if a != b {
-            v.push(format!("{label} : {a} → {b}{}", if l { " (sans effet : géré par l'école)" } else { "" }));
+            v.push(format!("{label} : {a} → {b}{}", if l { " (sans effet : géré par l'administrateur)" } else { "" }));
         }
     };
     add("touche langue", old.hotkey_description(), new.hotkey_description(), locked.hotkey);

@@ -1,5 +1,5 @@
 //! "HE / EN" sign when the keyboard language changes, and Caps Lock after a press (1.5.0, OFF by
-//! default, can be switched off by the school). Only while switched on: a slow timer (500 ms,
+//! default, can be switched off by the administrator). Only while switched on: a slow timer (500 ms,
 //! coalescable), plus Windows' language and foreground notices; no extra key is read (the
 //! Caps Lock count comes from the hook that already exists for F9). In doubt, nothing is shown.
 
@@ -30,7 +30,7 @@ fn main_window() -> HWND {
     app::STATE.with(|s| s.hwnd.get())
 }
 
-/// Starts or stops the indicator from the settings in force (user + school).
+/// Starts or stops the indicator from the settings in force (user + administrator).
 pub fn configure() {
     let want = app::settings().indicator;
     let hwnd = main_window();

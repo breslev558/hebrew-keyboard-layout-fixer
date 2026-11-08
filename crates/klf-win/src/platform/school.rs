@@ -1,5 +1,5 @@
-//! Settings imposed by the school: registry key SOFTWARE\Policies\NOAM\KeyboardLayoutFixer,
-//! machine (HKLM, the one to use: a pupil cannot write there) then user (HKCU); the machine
+//! Settings imposed by the administrator: registry key SOFTWARE\Policies\NOAM\KeyboardLayoutFixer,
+//! machine (HKLM, the one to use: a standard user cannot write there) then user (HKCU); the machine
 //! wins. Read only. Values: REG_DWORD / REG_SZ / REG_MULTI_SZ with the names of settings.json;
 //! the AppRules and ExcludedProcesses lists also as sub-keys (one REG_SZ value per program).
 
@@ -78,7 +78,7 @@ fn read_root(root: HKEY) -> Vec<(String, RegValue)> {
     out
 }
 
-/// The values of the school: the user's key first, then the machine's (which wins).
+/// The values of the administrator: the user's key first, then the machine's (which wins).
 pub fn read() -> Vec<(String, RegValue)> {
     let mut v = read_root(HKEY_CURRENT_USER);
     v.extend(read_root(HKEY_LOCAL_MACHINE));

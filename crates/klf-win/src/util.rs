@@ -31,7 +31,7 @@ pub fn settings_path() -> Option<PathBuf> {
     app_dir().map(|d| d.join("settings.json"))
 }
 
-/// Same file and same first messages as 1.2.x ("Hotkey registered: F10"...): the school's
+/// Same file and same first messages as 1.2.x ("Hotkey registered: F10"...): the administrator's
 /// check script reads them. Kept under 256 KB (+ .old).
 pub fn log(message: &str) {
     let Some(dir) = app_dir() else { return };

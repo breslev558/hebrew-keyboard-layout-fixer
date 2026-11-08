@@ -1,7 +1,7 @@
 @echo off
-rem Keyboard Layout Fixer (version NOAM) : lanceur. Tout le travail est fait par Installer.ps1
-rem (droits administrateur, arret propre, copie verifiee, retour arriere, verification).
-rem Le chemin est passe comme donnee (variable), jamais insere dans du code.
+rem Keyboard Layout Fixer: launcher. All the work is done by Installer.ps1 (current user, no administrator rights).
 set "KLF_PS1=%~dp0Installer.ps1"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Unblock-File -LiteralPath $env:KLF_PS1 -ErrorAction SilentlyContinue; & $env:KLF_PS1 %*; exit $LASTEXITCODE"
+if not exist "%KLF_PS1%" (echo Please extract the zip first: right click ^> Extract All. & pause & exit /b 1)
+"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -Command "Unblock-File -LiteralPath $env:KLF_PS1 -ErrorAction SilentlyContinue; & $env:KLF_PS1 %*; exit $LASTEXITCODE"
+if errorlevel 1 if not errorlevel 2 (echo. & echo If nothing was installed, PowerShell scripts may be blocked on this PC by its administrator.)
 exit /b %errorlevel%

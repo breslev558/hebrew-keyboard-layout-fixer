@@ -1,5 +1,5 @@
-//! Settings imposed by the school (1.5.0): read by klf-win from the registry key
-//! HKLM\SOFTWARE\Policies\NOAM\KeyboardLayoutFixer (a pupil cannot write there), merged here
+//! Settings imposed by the administrator (1.5.0): read by klf-win from the registry key
+//! HKLM\SOFTWARE\Policies\NOAM\KeyboardLayoutFixer (a standard user cannot write there), merged here
 //! over the user's own settings. Pure code, tested on Linux. An invalid value is ignored and
 //! noted (diagnostic), never a crash.
 
@@ -13,7 +13,7 @@ pub enum RegValue {
     Lines(Vec<String>),
 }
 
-/// The settings the school imposes (None = left to the user).
+/// The settings the administrator imposes (None = left to the user).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Policy {
     pub require_selection: Option<bool>,
@@ -31,7 +31,7 @@ pub struct Policy {
     pub hotkey: Option<(u32, u32)>,
     pub case_hotkey: Option<(u32, u32)>,
     pub ui_language: Option<UiLanguage>,
-    /// school rules: added to the user's, they win on the same program, cannot be removed
+    /// administrator rules: added to the user's, they win on the same program, cannot be removed
     pub app_rules: Vec<AppRule>,
     pub excluded_processes: Vec<String>,
     /// values that were present but could not be used (name: why)
@@ -204,7 +204,7 @@ fn dword(name: &str, v: &RegValue, ignored: &mut Vec<String>) -> Option<u32> {
     }
 }
 
-/// The settings in force: the user's, then what the school imposes on top.
+/// The settings in force: the user's, then what the administrator imposes on top.
 pub fn effective(user: &AppSettings, p: &Policy) -> (AppSettings, Locked) {
     let mut s = user.clone();
     let mut l = Locked::default();
@@ -239,7 +239,7 @@ pub fn effective(user: &AppSettings, p: &Policy) -> (AppSettings, Locked) {
         s.case_hotkey_key = k;
         l.case_hotkey = true;
     }
-    // the same key for both: the school's language key wins, the case key is switched off
+    // the same key for both: the administrator's language key wins, the case key is switched off
     if s.case_hotkey_key != crate::settings::KEY_NONE && (s.case_hotkey_modifiers, s.case_hotkey_key) == (s.hotkey_modifiers, s.hotkey_key) {
         s.case_hotkey_key = crate::settings::KEY_NONE;
         s.case_hotkey_modifiers = 0;
@@ -259,7 +259,7 @@ pub fn effective(user: &AppSettings, p: &Policy) -> (AppSettings, Locked) {
     (s, l)
 }
 
-/// The rule of a program comes from the school (cannot be changed from the tray menu).
+/// The rule of a program comes from the administrator (cannot be changed from the tray menu).
 pub fn school_rule(p: &Policy, exe: &str) -> bool {
     let n = crate::policy::exe_base_name(exe);
     p.app_rules.iter().any(|r| r.process == n)

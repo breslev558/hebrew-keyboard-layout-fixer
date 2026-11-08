@@ -76,7 +76,7 @@ pub fn report() -> String {
             ("règles par programme".into(), s.app_rules.len().to_string()),
         ]
         .into_iter()
-        .chain(klf_core::school::report_lines(&crate::app::policy()).into_iter().map(|l| ("imposé par l'école".to_string(), l)))
+        .chain(klf_core::school::report_lines(&crate::app::policy()).into_iter().map(|l| ("imposé par l'administrateur".to_string(), l)))
         .collect(),
     };
     let g = RING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);

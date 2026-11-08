@@ -200,7 +200,7 @@ fn reg_value_exists(root: HKEY, flags: REG_SAM_FLAGS) -> bool {
     }
 }
 
-/// Installed for the whole PC by Installer.cmd (HKLM Run): the school manages the autostart.
+/// Installed for the whole PC by Installer.cmd (HKLM Run): the administrator manages the autostart.
 pub fn autostart_managed() -> bool {
     reg_value_exists(HKEY_LOCAL_MACHINE, KEY_WOW64_64KEY)
 }

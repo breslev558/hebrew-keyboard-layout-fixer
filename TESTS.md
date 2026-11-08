@@ -9,7 +9,7 @@ informations**.
 Version : ______  PC : ______  Date : ______  Windows : ______  Échelle : ______
 
 ## Installation
-- [ ] Installer.cmd par-dessus l'ancienne version : fermée, remplacée, relancée, réglages gardés.
+- [ ] install/Installer.cmd par-dessus l'ancienne version : fermée, remplacée, relancée, réglages gardés.
 - [ ] Désinstaller.cmd : tout est retiré, ou ce qui reste est dit.
 
 ## F10 (langue) et F9 (majuscules)
@@ -65,9 +65,9 @@ Version : ______  PC : ______  Date : ______  Windows : ______  Échelle : _____
 - [ ] Application du Store (Calculatrice) : la bonne langue, ou rien.
 - [ ] Case décochée : plus rien.
 
-## Réglages de l'école (1.5.0)
-- [ ] des valeurs dans HKLM\SOFTWARE\Policies\NOAM\KeyboardLayoutFixer (en administrateur) sur le PC d'essai : en moins d'une minute, l'indicateur se coupe, les cases imposées sont grisées, « gérés par l'école » dans la ligne d'état, la règle « jeu.exe » cochée et grisée dans le menu.
-- [ ] Un élève (compte non administrateur) ne peut pas changer ces réglages.
+## Réglages imposés par l'administrateur (1.5.0)
+- [ ] des valeurs dans HKLM\SOFTWARE\Policies\NOAM\KeyboardLayoutFixer (en administrateur) sur le PC d'essai : en moins d'une minute, l'indicateur se coupe, les cases imposées sont grisées, « gérés par l'administrateur » dans la ligne d'état, la règle « jeu.exe » cochée et grisée dans le menu.
+- [ ] Un utilisateur standard (compte non administrateur) ne peut pas changer ces réglages.
 - [ ] Valeurs retirées du registre : chacun retrouve ses réglages.
 - [ ] Valeur fausse (ex. PasteDelayMs = 5) : ignorée, signalée dans l'onglet Diagnostic.
 - [ ] Exporter, modifier un réglage, Importer : différences montrées, réglages remis ; « Revenir à avant ».

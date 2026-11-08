@@ -48,7 +48,7 @@ const CMD_PAUSE10: usize = 108;
 /// End of a timed pause (10 minutes).
 const TIMER_PAUSE_END: usize = 3;
 const TIMED_PAUSE_MS: u32 = 10 * 60 * 1000;
-/// The school's settings are read again every 60 s (an administration tool writes them without a notice).
+/// The administrator's settings are read again every 60 s (an administration tool writes them without a notice).
 const TIMER_POLICY: usize = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,7 +62,7 @@ pub struct State {
     pub hwnd: Cell<HWND>,
     /// the user's own settings (settings.json)
     pub settings: RefCell<AppSettings>,
-    /// what the school imposes (registry), read at start, every 60 s and when the settings open
+    /// what the administrator imposes (registry), read at start, every 60 s and when the settings open
     pub policy: RefCell<klf_core::school::Policy>,
     pub enabled: Cell<bool>,
     pub registered: Cell<bool>,
@@ -137,7 +137,7 @@ thread_local! {
     };
 }
 
-/// The settings in force: the user's, with what the school imposes on top.
+/// The settings in force: the user's, with what the administrator imposes on top.
 pub fn settings() -> AppSettings {
     STATE.with(|s| klf_core::school::effective(&s.settings.borrow(), &s.policy.borrow()).0)
 }
@@ -151,12 +151,12 @@ pub fn policy() -> klf_core::school::Policy {
     STATE.with(|s| s.policy.borrow().clone())
 }
 
-/// Which settings the school imposes.
+/// Which settings the administrator imposes.
 pub fn locked() -> klf_core::school::Locked {
     STATE.with(|s| klf_core::school::effective(&s.settings.borrow(), &s.policy.borrow()).1)
 }
 
-/// Reads the school's settings again; when they changed: keys registered again, indicator and
+/// Reads the administrator's settings again; when they changed: keys registered again, indicator and
 /// settings window updated. Returns true if something changed.
 pub fn reload_policy() -> bool {
     let p = klf_core::school::from_values(&crate::platform::school::read());
@@ -306,7 +306,7 @@ pub fn save_settings(s: &AppSettings) -> bool {
     }
 }
 
-/// Applies new USER settings (settings window, menu, import): the school's settings stay on
+/// Applies new USER settings (settings window, menu, import): the administrator's settings stay on
 /// top; hotkey re-registered, indicator and tray updated.
 pub fn apply_settings(new: AppSettings) {
     STATE.with(|s| *s.settings.borrow_mut() = new);
@@ -460,7 +460,7 @@ fn end_timed_pause(hwnd: HWND) {
     }
 }
 
-/// Adds, changes or removes the rule of a program (tray menu). A rule of the school cannot be
+/// Adds, changes or removes the rule of a program (tray menu). A rule of the administrator cannot be
 /// changed here.
 fn set_rule(exe: &str, mode: Option<klf_core::settings::RuleMode>) {
     if klf_core::school::school_rule(&policy(), exe) {
@@ -690,7 +690,7 @@ fn show_menu(hwnd: HWND) {
             if *id == 0 {
                 AppendMenuW(menu, MF_SEPARATOR, 0, null());
             } else {
-                // a rule of the school is shown, ticked, but cannot be changed here
+                // a rule of the administrator is shown, ticked, but cannot be changed here
                 let grey = school && matches!(*id, CMD_RULE_DISABLE | CMD_RULE_SELECTION);
                 AppendMenuW(menu, MF_STRING | if *check { MF_CHECKED } else { 0 } | if grey { MF_GRAYED } else { 0 }, *id, w.as_ptr());
             }

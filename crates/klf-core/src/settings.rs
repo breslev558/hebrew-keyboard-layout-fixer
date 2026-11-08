@@ -177,7 +177,7 @@ pub struct AppSettings {
     /// Which action this run does (set by the hotkey pressed, never saved).
     #[serde(skip)]
     pub action: Action,
-    // --- new in 1.4.0 : rules per program (tray menu), format ready for the school profiles ---
+    // --- new in 1.4.0 : rules per program (tray menu), format ready for the administrator profiles ---
     /// Per-program rules; they can only RESTRICT (never lift the password, administrator or
     /// console protections). "ExcludedProcesses" stays (older versions read it) = Disabled.
     #[serde(rename = "AppRules", deserialize_with = "de_rules")]
@@ -281,7 +281,7 @@ impl AppSettings {
                     // 1.3.0/1.3.1 wrote ConsoleSupport=true as their default: the experimental
                     // console path is switched off once (audit 1.3.2); the user can switch it on again
                     s.console_support = false;
-                    // file of the ORIGINAL program (RavidSaadia 1.2.8, default Ctrl+Q): the school
+                    // file of the ORIGINAL program (RavidSaadia 1.2.8, default Ctrl+Q): the NOAM version
                     // key F10 is used instead (the original Ctrl+Q setting is never carried over)
                     if (s.hotkey_modifiers, s.hotkey_key) == (MOD_CONTROL, KEY_Q) {
                         s.hotkey_modifiers = 0;

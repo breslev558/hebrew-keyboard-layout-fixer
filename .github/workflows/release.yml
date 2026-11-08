@@ -1,0 +1,56 @@
+# Publication reproductible (prépare SignPath Foundation, audit A10) : sur un tag vX.Y.Z, GitHub compile
+# l'exe depuis ce dépôt, assemble le zip public, calcule les SHA-256 et publie une attestation de
+# provenance. Les fichiers restent en artefact : la version GitHub est créée à la main après contrôle
+# (et, une fois SignPath accepté, après signature par l'étape « SignPath » ci-dessous).
+name: Release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Outils
+        run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64 zip
+      - name: Rust (version fixée par rust-toolchain.toml)
+        run: rustup show && rustup target add x86_64-pc-windows-gnu
+      - name: Tests et compilation
+        env:
+          RUSTFLAGS: --remap-path-prefix=/home/runner=~
+        run: bash tools/construire.sh
+      - name: Zip public et empreintes
+        run: |
+          mkdir -p out/zip
+          cp target/x86_64-pc-windows-gnu/release/KeyboardLayoutFixer.exe install/* LICENSE target/BUILD-INFO.txt out/zip/
+          (cd out/zip && TZ=UTC touch -d '2026-01-01 00:00:00' * && zip -X -9 ../KeyboardLayoutFixer.zip *)
+          cp out/zip/KeyboardLayoutFixer.exe out/
+          (cd out && sha256sum KeyboardLayoutFixer.zip > KeyboardLayoutFixer.zip.sha256 && sha256sum KeyboardLayoutFixer.exe > KeyboardLayoutFixer.exe.sha256)
+          cat out/*.sha256
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            out/KeyboardLayoutFixer.exe
+            out/KeyboardLayoutFixer.zip
+      - uses: actions/upload-artifact@v4
+        id: upload
+        with:
+          name: KeyboardLayoutFixer-${{ github.ref_name }}
+          path: |
+            out/KeyboardLayoutFixer.exe
+            out/KeyboardLayoutFixer.zip
+            out/*.sha256
+      # Après acceptation par SignPath Foundation (identifiants fournis par SignPath) :
+      # - uses: signpath/github-action-submit-signing-request@v1
+      #   with:
+      #     api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+      #     organization-id: '<fourni par SignPath>'
+      #     project-slug: 'hebrew-keyboard-layout-fixer'
+      #     signing-policy-slug: 'release-signing'
+      #     github-artifact-id: ${{ steps.upload.outputs.artifact-id }}
+      #     wait-for-completion: true
+      #     output-artifact-directory: signed

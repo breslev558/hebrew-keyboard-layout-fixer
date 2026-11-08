@@ -1,0 +1,15 @@
+//! Keyboard Layout Fixer (NOAM) — pure code, no Windows calls: tested on Linux with `cargo test`.
+pub mod bubble;
+pub mod convert;
+pub mod diag;
+pub mod flow;
+pub mod i18n;
+pub mod indicator;
+pub mod layouts;
+pub mod policy;
+pub mod profile;
+pub mod school;
+pub mod settings;
+pub mod words;
+
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");

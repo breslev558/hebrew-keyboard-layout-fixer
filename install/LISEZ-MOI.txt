@@ -1,0 +1,60 @@
+Keyboard Layout Fixer - version NOAM (1.5.2)
+====================================================
+
+À QUOI ÇA SERT
+Vous avez tapé en hébreu alors que le clavier était en anglais (ou l'inverse) ?
+Exemple : « akuo » au lieu de « שלום ».
+Sélectionnez le texte et appuyez sur F10 : il est corrigé tout seul.
+Sans rien sélectionner, F10 corrige la ligne, du curseur jusqu'au début de la ligne.
+F9 : texte tapé avec Verr. Maj allumé (« hELLO » → « Hello ») ; pour annuler : resélectionner puis F9 ; Verr. Maj est éteint
+après. L'hébreu tapé avec Verr. Maj (« AKUO ») se corrige avec F10.
+
+INSTALLER
+1. Décompressez le zip (clic droit > Extraire tout).
+2. Double-cliquez sur Installer.cmd, puis acceptez la demande de Windows (droits administrateur).
+   Pas besoin de désinstaller une ancienne version : elle est fermée puis remplacée, les réglages sont gardés
+   (sauf le raccourci Ctrl+Q de la version d'origine, remplacé par F10).
+   Un ancien script AutoHotkey qui prend F9/F10 (ex. f10-klf.ahk) est retiré seulement si vous dites oui ;
+   une copie vérifiée de chacun est gardée dans C:\ProgramData\KeyboardLayoutFixer-anciens-scripts.
+3. C'est tout : une petite icône apparaît près de l'horloge.
+   Le programme démarre ensuite tout seul à chaque ouverture de session, pour tous les comptes du PC.
+   Il est aussi dans le menu Démarrer (« Keyboard Layout Fixer ») : ce raccourci ouvre les réglages,
+   même si l'icône près de l'horloge n'apparaît pas. Pas d'icône sur le bureau.
+Le programme n'est pas signé par un éditeur : Windows (SmartScreen) peut afficher un avertissement.
+Ne passez outre que si le zip vient de l'école (empreinte SHA256 donnée avec le zip).
+
+BON À SAVOIR
+- Rien d'autre à installer : un seul petit fichier d'environ 600 Ko, qui marche tout seul avec Windows 10 et 11.
+- Programme Windows 64 bits.
+- Le presse-papiers (texte, images, dessins Office, fichiers copiés) est remis après chaque correction,
+  sauf les objets Office incorporés (exprès). S'il ne peut pas être sauvegardé entièrement, F10 ne fait rien.
+  Si la remise échoue, une bulle le dit.
+- Si vous copiez autre chose pendant la correction, votre copie est gardée et rien n'est collé
+  (sauf un très court instant juste avant le collage, et sauf une nouvelle copie du MÊME texte
+  ou d'une image avec les mêmes formats depuis la MÊME fenêtre, pendant la correction).
+- Si vous changez de fenêtre ou de champ, ou cliquez pendant la correction, elle s'arrête.
+  Dans un navigateur, un changement de champ peut parfois passer inaperçu : restez dans le champ.
+- Avec un gestionnaire de presse-papiers (Ditto…), F10 peut refuser de coller (« votre copie est gardée »).
+- Rien n'est fait dans : fenêtres administrateur, bureau à distance, gestionnaires de mots de passe,
+  éditeurs de code (VS Code…). Excel : sélectionnez le texte DANS la cellule (F2).
+- Consoles cmd / PowerShell : option expérimentale, désactivée par défaut (elle est aussi désactivée une fois
+  en passant d'une 1.3.0, 1.3.1 ou 1.3.2 à cette version). Le Terminal Windows n'est pas pris en charge.
+- Mode prudent : "RequireSelection": true dans settings.json (F10 ne corrige qu'une sélection, jamais une console).
+- Le programme ne va pas sur internet et n'enregistre pas ce que vous tapez
+  (seul un journal technique sans contenu, debug.log, est écrit dans %APPDATA%\KeyboardLayoutFixer).
+- Clic sur l'icône près de l'horloge : fenêtre de réglages en 3 onglets (Ctrl+Tab) : Simple (touches, atelier
+  de conversion : collez un texte, copiez le résultat), Avancé (toutes les options), Diagnostic (pourquoi la
+  correction n'a pas marché ; « Copier les informations » ne contient aucun texte tapé).
+- Clic droit sur l'icône : « Désactiver dans ce programme », « Seulement avec une sélection dans ce programme »,
+  « Pause pendant 10 minutes », « Mettre en pause » (F10 redevient libre pour les autres programmes), « Quitter ».
+- Claviers : « Hébreu » de Windows + anglais (États-Unis) ou français (AZERTY). Un autre clavier latin utilise
+  la table anglais ; un clavier russe ou arabe actif : F10 ne fait rien (l'onglet Diagnostic le dit).
+- Réglages avancés : fichier %APPDATA%\KeyboardLayoutFixer\settings.json
+  (HotkeyKey 99 = F10 ; HotkeyModifiers 0 = aucune touche Ctrl/Alt/Maj).
+
+DÉSINSTALLER
+Double-cliquez sur Desinstaller.cmd et acceptez la demande de Windows.
+Il dit précisément ce qui reste si quelque chose n'a pas pu être retiré.
+
+Origine : programme libre (licence MIT) github.com/RavidSaadia/Keyboard_Layout_Fixer,
+relu, corrigé et adapté (version NOAM) (04/11/2026, fiabilité et audits 05/11/2026).

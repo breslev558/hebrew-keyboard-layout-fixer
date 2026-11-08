@@ -1,0 +1,75 @@
+//! Keyboard Layout Fixer (NOAM) — Rust 1.5.2. Fixes text typed with the wrong keyboard layout
+//! (Hebrew <-> English) with one key (F10). Based on RavidSaadia/Keyboard_Layout_Fixer (MIT).
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
+#[cfg(windows)]
+mod app;
+#[cfg(windows)]
+mod bubble;
+#[cfg(windows)]
+mod diagnostic;
+#[cfg(windows)]
+mod host;
+#[cfg(windows)]
+mod indicator;
+#[cfg(windows)]
+mod platform;
+#[cfg(windows)]
+mod settings_ui;
+#[cfg(windows)]
+mod util;
+
+#[cfg(windows)]
+fn main() {
+    use windows_sys::Win32::UI::Controls::{InitCommonControlsEx, ICC_HOTKEY_CLASS, ICC_STANDARD_CLASSES, ICC_WIN95_CLASSES, INITCOMMONCONTROLSEX};
+
+    // panic = "abort": write the reason in debug.log before the program stops
+    std::panic::set_hook(Box::new(|info| util::log(&format!("PANIC: {info}"))));
+
+    let arg = |name: &str| std::env::args_os().any(|a| a == name);
+    // one copy per session; "--restart" waits up to 10 s for the old copy to quit
+    let Some(_instance) = platform::sys::SingleInstance::acquire(if arg("--restart") { 10_000 } else { 0 }) else {
+        // "--settings" (Start menu shortcut): the running copy opens its settings window,
+        // even when its tray icon is missing
+        if arg("--settings") {
+            app::open_settings_in_running_copy();
+        }
+        return;
+    };
+
+    // SAFETY: structure fully initialised.
+    unsafe {
+        let icc = INITCOMMONCONTROLSEX {
+            dwSize: std::mem::size_of::<INITCOMMONCONTROLSEX>() as u32,
+            dwICC: ICC_HOTKEY_CLASS | ICC_STANDARD_CLASSES | ICC_WIN95_CLASSES,
+        };
+        InitCommonControlsEx(&icc);
+    }
+
+    util::log(&format!("Application starting v{}-noam (Rust)", klf_core::VERSION));
+    let s = app::load_settings();
+    app::STATE.with(|st| *st.settings.borrow_mut() = s);
+    // what the school imposes (registry), before the keys are registered
+    app::reload_policy();
+
+    let Some(_hwnd) = app::create_main_window() else {
+        util::log("Main window could not be created, exit");
+        return;
+    };
+    // the hotkey is reserved BEFORE the tray icon (the icon can take ~45 s at logon)
+    if !app::register_hotkey() {
+        app::announce_hotkey_unavailable();
+    }
+    app::ensure_tray();
+    indicator::configure();
+    if arg("--settings") {
+        settings_ui::open();
+    }
+    app::run_message_loop();
+    util::log("Application exit");
+}
+
+#[cfg(not(windows))]
+fn main() {
+    eprintln!("Keyboard Layout Fixer is a Windows program. Tests: cargo test -p klf-core");
+}

@@ -15,6 +15,8 @@ Fixes text typed with the wrong keyboard layout (Hebrew ⇄ English, also French
 <a href="https://github.com/breslev558/hebrew-keyboard-layout-fixer/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/breslev558/hebrew-keyboard-layout-fixer/actions/workflows/ci.yml/badge.svg"></a>
 <img alt="Windows 10 and 11, 64-bit" src="https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4">
 <a href="LICENSE"><img alt="MIT licence" src="https://img.shields.io/badge/licence-MIT-green"></a>
+<a href="https://www.bestpractices.dev/projects/16504"><img alt="OpenSSF Best Practices" src="https://www.bestpractices.dev/projects/16504/badge"></a>
+<a href="https://scorecard.dev/viewer/?uri=github.com/breslev558/hebrew-keyboard-layout-fixer"><img alt="OpenSSF Scorecard" src="https://api.scorecard.dev/projects/github.com/breslev558/hebrew-keyboard-layout-fixer/badge"></a>
 </p>
 
 <p align="center"><a href="#english">English</a> · <a href="#français">Français</a> · <a href="#עברית">עברית</a></p>

@@ -53,7 +53,7 @@ fn values(hk: HKEY) -> Vec<(String, RegValue)> {
         }
         let n = String::from_utf16_lossy(&name[..name_len as usize]);
         data.truncate(data_len as usize);
-        let units: Vec<u16> = data.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+        let units: Vec<u16> = data.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect();
         let v = match ty {
             REG_DWORD if data.len() >= 4 => RegValue::Dword(u32::from_le_bytes([data[0], data[1], data[2], data[3]])),
             REG_SZ => RegValue::Text(crate::util::from_wide(&units).trim().to_string()),

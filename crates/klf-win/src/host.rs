@@ -180,6 +180,12 @@ impl Host for WinHost {
     }
     fn clipboard_park(&mut self, st: &ClipState) {
         if let Some(snap) = self.snapshot.take() {
+            if snap.secret {
+                // a password manager's copy is never kept for later (it would come back after the
+                // manager cleared it)
+                crate::util::log("Clipboard marked as secret by its program: not kept for later");
+                return;
+            }
             *PARKED.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((snap, st.clone(), std::time::Instant::now()));
         }
     }

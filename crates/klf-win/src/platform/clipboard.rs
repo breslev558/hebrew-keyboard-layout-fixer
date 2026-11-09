@@ -22,6 +22,8 @@ const CF_ENHMETAFILE: u32 = 14;
 
 /// OLE formats describe the live object of the source program; put back by another owner
 /// they can confuse Office: skipped on purpose (same list as 1.2.x).
+/// GlobalFlags answer for a handle that is not a memory block (GMEM_INVALID_HANDLE)
+const GMEM_INVALID: u32 = 0x8000;
 const SKIPPED_NAMES: &[&str] = &[
     "DataObject", "Ole Private Data", "Embed Source", "Embedded Object", "Link Source",
     "Link Source Descriptor", "Object Descriptor", "OwnerLink", "ObjectLink", "Native", "Link",
@@ -33,6 +35,9 @@ const MARK_NAMES: &[&str] = &["ExcludeClipboardContentFromMonitorProcessing", "C
 /// Saved formats: memory blocks, and the bytes of a vector picture (CF_ENHMETAFILE).
 pub struct Snapshot {
     items: Vec<(u32, Vec<u8>)>,
+    /// the copy was marked "do not keep" by its program (password managers): never kept in
+    /// memory for later if it cannot be put back at once
+    pub secret: bool,
 }
 
 /// Opens the clipboard; closed when dropped. Retries happen BEFORE opening.
@@ -178,6 +183,7 @@ fn save_and_clear_inner(owner: HWND) -> (SaveResult, u32, Option<Snapshot>, Opti
     let mut format = 0u32;
     let (mut bitmap, mut dib, mut others) = (false, false, false);
     let marks: Vec<u32> = MARK_NAMES.iter().map(|n| register(n)).collect();
+    let mut secret = false;
     loop {
         // SAFETY: clipboard open. EnumClipboardFormats does not always clear the last error.
         format = unsafe {
@@ -194,6 +200,7 @@ fn save_and_clear_inner(owner: HWND) -> (SaveResult, u32, Option<Snapshot>, Opti
         if !marks.contains(&format) {
             others = true;
         }
+        secret |= format == marks[0]; // ExcludeClipboardContentFromMonitorProcessing
         match kind_of(format) {
             Kind::Skip => {
                 bitmap |= format == CF_BITMAP;
@@ -229,8 +236,9 @@ fn save_and_clear_inner(owner: HWND) -> (SaveResult, u32, Option<Snapshot>, Opti
                     }
                     continue; // registered delayed format its owner no longer renders: nobody can read it
                 }
+                // a registered format may hold a GDI handle, not a memory block: checked first
                 // SAFETY: h comes from GetClipboardData, clipboard open.
-                let size = unsafe { GlobalSize(h as HGLOBAL) };
+                let size = if unsafe { GlobalFlags(h as HGLOBAL) } == GMEM_INVALID { 0 } else { unsafe { GlobalSize(h as HGLOBAL) } };
                 if size == 0 {
                     if standard {
                         return (SaveResult::ReadError, 0, None, Some(format));
@@ -261,7 +269,7 @@ fn save_and_clear_inner(owner: HWND) -> (SaveResult, u32, Option<Snapshot>, Opti
     }
     // the sequence number may only move at CloseClipboard: read it after closing
     drop(open);
-    (SaveResult::Complete, sequence(), Some(Snapshot { items }), None)
+    (SaveResult::Complete, sequence(), Some(Snapshot { items, secret }), None)
 }
 
 enum TextRead {
@@ -324,10 +332,12 @@ pub fn capture(owner: HWND, target_pids: &[u32]) -> Capture {
         TextRead::TooBig => (None, true),
         TextRead::Absent => (None, false),
     };
+    let c = Capture { text, seq: sequence(), owner: o as usize, foreign_owner, too_big, busy: false, formats: list_formats() };
+    drop(_open); // the log is written once the clipboard is closed (never held during a disk write)
     if foreign_owner {
         crate::util::log(&format!("Clipboard owner is process {} (not the target)", pid_of(o)));
     }
-    Capture { text, seq: sequence(), owner: o as usize, foreign_owner, too_big, busy: false, formats: list_formats() }
+    c
 }
 
 /// Clipboard must be open. Every format listed, in order.

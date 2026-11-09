@@ -8,13 +8,16 @@ on:
     tags: ['v*']
 permissions:
   contents: read
-  id-token: write
-  attestations: write
 jobs:
   build:
     runs-on: ubuntu-24.04
+    # droits d'écriture seulement pour cette tâche (attestation de provenance)
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Outils
         run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64 zip
       - name: Rust (version fixée par rust-toolchain.toml)
@@ -36,13 +39,13 @@ jobs:
           cp out/zip/KeyboardLayoutFixer.exe installer/KeyboardLayoutFixer-Setup.exe out/
           (cd out && sha256sum KeyboardLayoutFixer.zip > KeyboardLayoutFixer.zip.sha256 && sha256sum KeyboardLayoutFixer.exe > KeyboardLayoutFixer.exe.sha256 && sha256sum KeyboardLayoutFixer-Setup.exe > KeyboardLayoutFixer-Setup.exe.sha256)
           cat out/*.sha256
-      - uses: actions/attest-build-provenance@v2
+      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
         with:
           subject-path: |
             out/KeyboardLayoutFixer.exe
             out/KeyboardLayoutFixer-Setup.exe
             out/KeyboardLayoutFixer.zip
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         id: upload
         with:
           name: KeyboardLayoutFixer-${{ github.ref_name }}

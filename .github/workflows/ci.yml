@@ -1,5 +1,6 @@
 # Vérification automatique à chaque envoi (audit A09) : tests du cœur, licences, compilation Windows,
-# puis essais PowerShell sous Windows (syntaxe des scripts, clé « démarrer avec Windows » intacte).
+# clippy strict, failles connues (cargo-audit, cargo-deny), fuzzing court, puis essais PowerShell sous
+# Windows (syntaxe des scripts, clé « démarrer avec Windows » intacte, vrai essai de l'installeur).
 name: CI
 on:
   push:
@@ -11,7 +12,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Outils (MinGW pour la cible Windows)
         run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64
       - name: Rust (version fixée par rust-toolchain.toml)
@@ -25,27 +26,53 @@ jobs:
       - name: Mise en forme (indicatif)
         continue-on-error: true
         run: rustup component add rustfmt && cargo fmt --all -- --check
-      - name: Clippy (indicatif)
+      - name: Clippy strict (cœur et programme Windows, aucun avertissement accepté)
+        run: |
+          rustup component add clippy
+          cargo clippy --locked -p klf-core --all-targets -- -D warnings
+          cargo clippy --locked --release --target x86_64-pc-windows-gnu -p KeyboardLayoutFixer --all-targets -- -D warnings
+      - name: Clippy pedantic (indicatif)
         continue-on-error: true
-        run: rustup component add clippy && cargo clippy --locked -p klf-core --all-targets
+        run: cargo clippy --locked -p klf-core -- -W clippy::pedantic
       - name: Installeur unique (NSIS)
         run: |
           sudo apt-get install -y nsis
           V=$(grep -m1 '^version' crates/klf-win/Cargo.toml | cut -d'"' -f2)
           makensis -V2 -DVERSION=$V -DEXE=$PWD/target/x86_64-pc-windows-gnu/release/KeyboardLayoutFixer.exe -DICON=$PWD/crates/klf-win/res/klf.ico installer/KeyboardLayoutFixer.nsi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: KeyboardLayoutFixer-exe
           path: |
             target/x86_64-pc-windows-gnu/release/KeyboardLayoutFixer.exe
             installer/KeyboardLayoutFixer-Setup.exe
+  dependances:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Outils (versions fixées)
+        run: cargo install --locked cargo-audit@0.22.2 cargo-deny@0.20.2
+      - name: Failles connues (RustSec)
+        run: cargo audit --deny warnings
+      - name: cargo deny (failles, licences, doublons, provenance)
+        run: cargo deny --locked check
+  fuzzing:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Rust nightly et cargo-fuzz (version fixée)
+        run: rustup toolchain install nightly --profile minimal && cargo install --locked cargo-fuzz@0.13.2
+      - name: Fuzzing court du cœur (60 s par cible)
+        working-directory: fuzz
+        run: for t in convert report update settings; do cargo +nightly fuzz run $t -- -max_total_time=60 || exit 1; done
   scripts-windows:
     runs-on: windows-latest
     timeout-minutes: 15
     needs: coeur-et-compilation
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: KeyboardLayoutFixer-exe
           path: artefacts

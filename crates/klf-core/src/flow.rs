@@ -1354,9 +1354,7 @@ mod tests {
         let mut m = Mock::new();
         m.fg.set(0);
         assert_eq!(go(&mut m).msg, None);
-        for m in [&Mock::new()] {
-            assert_eq!(m.seq.get(), 1);
-        }
+        assert_eq!(Mock::new().seq.get(), 1);
     }
 
     #[test]
@@ -1552,8 +1550,7 @@ mod tests {
         assert_eq!(go(&mut m).msg, Some(Msg::NothingToConvert));
         assert!(m.pasted.borrow().is_none());
         let mut m = Mock::new();
-        let mut s = AppSettings::default();
-        s.max_character_limit = 2;
+        let s = AppSettings { max_character_limit: 2, ..AppSettings::default() };
         assert_eq!(run(&mut m, &s).msg, Some(Msg::TooLong));
         assert_eq!(m.clip_text().as_deref(), Some("USER CLIPBOARD"));
     }
@@ -1561,8 +1558,7 @@ mod tests {
     #[test]
     fn language_switch_right_after_paste() {
         let mut m = Mock::new();
-        let mut s = AppSettings::default();
-        s.switch_language_after_convert = true;
+        let s = AppSettings { switch_language_after_convert: true, ..AppSettings::default() };
         run(&mut m, &s);
         let ev = m.events.borrow();
         let l = ev.iter().position(|e| e == "lang-he").unwrap();
@@ -2138,7 +2134,7 @@ mod tests {
 
     #[test]
     fn settle_and_release_waits_are_short() {
-        assert!(COPY_POLL_MS <= 5 && SETTLE_MS <= 20 && SETTLE_MAX_MS <= 100 && AFTER_RELEASE_MS <= 20);
+        const _: () = assert!(COPY_POLL_MS <= 5 && SETTLE_MS <= 20 && SETTLE_MAX_MS <= 100 && AFTER_RELEASE_MS <= 20);
     }
 
     #[test]

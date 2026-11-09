@@ -77,10 +77,7 @@ pub fn should_offer(current: (u32, u32, u32), r: &Release, last_failed: Option<(
     if r.version <= current {
         return false;
     }
-    match last_failed {
-        Some((tag, at)) if tag == r.tag && now_secs.saturating_sub(at) < RETRY_AFTER_SECS => false,
-        _ => true,
-    }
+    !matches!(last_failed, Some((tag, at)) if tag == r.tag && now_secs.saturating_sub(at) < RETRY_AFTER_SECS)
 }
 
 /// The host of an https URL, if it is one of ALLOWED_HOSTS (checked again after redirects).

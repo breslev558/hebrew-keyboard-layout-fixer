@@ -1159,6 +1159,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
         WM_TIMER if crate::indicator::on_timer(wparam) => 0,
         WM_TIMER if wparam == TIMER_POLICY => {
             reload_policy();
+            crate::host::parked_available(); // a kept clipboard is forgotten after 10 minutes, even unseen
             0
         }
         WM_TIMER if wparam == TIMER_UPDATE => {

@@ -1,0 +1,47 @@
+# Fuzzing of the pure core (cargo fuzz, nightly). Not part of the workspace or of the program.
+#   cargo +nightly fuzz run convert -- -max_total_time=60
+[package]
+name = "klf-fuzz"
+version = "0.0.0"
+edition = "2021"
+publish = false
+license = "MIT"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+klf-core = { path = "../crates/klf-core" }
+serde_json = "1"
+
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "convert"
+path = "fuzz_targets/convert.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "report"
+path = "fuzz_targets/report.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "update"
+path = "fuzz_targets/update.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "settings"
+path = "fuzz_targets/settings.rs"
+test = false
+doc = false
+bench = false

@@ -4,6 +4,7 @@
 //!   session: a Windows notification asks "Send an anonymous report?"; one click sends it;
 //! - tray menu "Report a problem…": a window with an optional comment and EXACTLY what is sent;
 //! - "Send reports without asking" (off by default) and "Never offer a report".
+//!
 //! What is sent is built by klf-core/report.rs (fixed technical fields, never the text).
 
 use crate::app;

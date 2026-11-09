@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.6.3 (November 2026)
+- Security review (with an independent second review): a clipboard copied from a password manager (marked "do not keep") is never kept in memory for later when it cannot be put back at once; a clipboard kept for later is forgotten after 10 minutes even if the tray menu is never opened; clipboard formats holding something other than a memory block are checked before being read; the clipboard is never held open while the log is written.
+- Updates: a local file problem (disk full, antivirus holding the file) is tried again at the next check instead of blocking that version for 7 days; an older copy still running is set aside instead of blocking the update.
+- Repository: CodeQL code scanning, OpenSSF Scorecard, Dependabot, cargo-audit and cargo-deny (known vulnerabilities, licences, sources), strict clippy and fuzzing of the conversion core on every change; GitHub Actions pinned by commit and with minimal permissions.
+
 ## 1.6.2 (November 2026)
 - All texts reviewed against Windows conventions, in Hebrew, French and English: standard button words (the settings button is now "Apply", it saves without closing the window), Hebrew commands in the imperative like Windows, French "Paramètres" and "Presse-papiers", consistent terms and agreements, clearer installer message.
 - The converter choices in Hebrew no longer use arrows (they could be shown reversed).

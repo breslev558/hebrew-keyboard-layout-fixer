@@ -43,6 +43,16 @@ pub fn cleanup() {
     let p = crate::platform::sys::exe_path();
     let _ = std::fs::remove_file(format!("{p}.old"));
     let _ = std::fs::remove_file(format!("{p}.new"));
+    // an old copy that was still running at the previous update was set aside as .old-<number>
+    let path = std::path::Path::new(&p);
+    if let (Some(dir), Some(name)) = (path.parent(), path.file_name().and_then(|n| n.to_str())) {
+        let prefix = format!("{name}.old-");
+        for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            if e.file_name().to_str().is_some_and(|n| n.starts_with(&prefix) && n[prefix.len()..].bytes().all(|b| b.is_ascii_digit())) {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
     // after an update in one click, "Installed apps" shows the new version number (1.6.0)
     if allowed(true) {
         use windows_sys::Win32::System::Registry::*;
@@ -109,7 +119,7 @@ fn request(url: &str, body: Option<&str>, max: usize, final_ok: &dyn Fn(&str) ->
             }
         }
         WinHttpSetTimeouts(s.0, 15_000, 15_000, 15_000, 30_000);
-        let c = H(WinHttpConnect(s.0, h.as_ptr(), INTERNET_DEFAULT_HTTPS_PORT as u16, 0));
+        let c = H(WinHttpConnect(s.0, h.as_ptr(), INTERNET_DEFAULT_HTTPS_PORT, 0));
         if c.0.is_null() {
             return None;
         }
@@ -293,22 +303,27 @@ pub fn install(r: &Release) -> Result<(), Failure> {
     let cur = crate::platform::sys::exe_path();
     let new = format!("{cur}.new");
     let old = format!("{cur}.old");
-    std::fs::write(&new, &exe).map_err(|e| format!("cannot write the new file: {e}"))?;
+    // a local file problem (disk full, antivirus holding the file a moment) is tried again at the
+    // next check, never frozen for 7 days like a refused file
+    std::fs::write(&new, &exe).map_err(|e| net(&format!("cannot write the new file: {e}")))?;
     let fv = file_version(&new);
     if !u::download_ok(r, exe.len() as u64, &got, &announced, fv) {
         let _ = std::fs::remove_file(&new);
         return Err(format!("download refused (version {fv:?} is not {})", r.tag).into());
     }
-    let _ = std::fs::remove_file(&old);
+    if std::fs::remove_file(&old).is_err() && std::path::Path::new(&old).exists() {
+        // an older copy still running from .old: set aside under another name (removed at start)
+        let _ = std::fs::rename(&old, format!("{cur}.old-{}", std::process::id()));
+    }
     // a running exe can be renamed (not deleted): the swap never leaves the user without a program
     std::fs::rename(&cur, &old).map_err(|e| {
         let _ = std::fs::remove_file(&new);
-        format!("cannot move the running program aside: {e}")
+        net(&format!("cannot move the running program aside: {e}"))
     })?;
     if let Err(e) = std::fs::rename(&new, &cur) {
         let _ = std::fs::rename(&old, &cur);
         let _ = std::fs::remove_file(&new);
-        return Err(format!("cannot put the new program in place: {e}").into());
+        return Err(net(&format!("cannot put the new program in place: {e}")));
     }
     // the new copy waits up to 30 s for us to quit (--update); if it stops at once (missing file,
     // blocked by an antivirus...), the old program is put back and keeps running

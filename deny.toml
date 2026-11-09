@@ -1,0 +1,29 @@
+# cargo deny check : failles connues (RustSec), licences, doublons et provenance des dépendances.
+[graph]
+targets = ["x86_64-pc-windows-gnu", "x86_64-unknown-linux-gnu"]
+all-features = true
+
+[advisories]
+# toute faille connue ou crate non maintenue/retirée fait échouer la vérification
+yanked = "deny"
+ignore = []
+
+[licenses]
+# les mêmes licences permissives que tools/verifier-licences.py (compatibles MIT)
+allow = ["MIT", "Apache-2.0", "Unlicense", "Unicode-3.0", "BSD-2-Clause", "BSD-3-Clause", "Zlib", "ISC"]
+confidence-threshold = 0.93
+unused-allowed-license = "allow"
+
+[licenses.private]
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

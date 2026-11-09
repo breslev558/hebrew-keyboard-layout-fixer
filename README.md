@@ -85,7 +85,7 @@ The script runs the tests, checks the dependency licences and builds `target/x86
 **Vous avez tapé `akuo` au lieu de `שלום` ?** Sélectionnez le texte et appuyez sur **F10**. Sans sélection, la ligne est corrigée du curseur jusqu'à son début. **F9** corrige un texte tapé avec Verr. Maj allumé. Hébreu ⇄ anglais, avec prise en charge du clavier français AZERTY. Pour Windows 10 et 11.
 
 - **Installation (sans droits administrateur)** : [téléchargez **KeyboardLayoutFixer-Setup.exe**](https://github.com/breslev558/hebrew-keyboard-layout-fixer/releases/latest/download/KeyboardLayoutFixer-Setup.exe) et double-cliquez dessus. Si Windows affiche « Windows a protégé votre ordinateur » (programme non encore signé) : **Informations complémentaires › Exécuter quand même**.
-- **Réglages** : cliquez sur l'icône près de l'horloge ; clic droit pour la pause et les autres options.
+- **Paramètres** : cliquez sur l'icône près de l'horloge ; clic droit pour la pause et les autres options.
 - **Mises à jour** : une fois par jour, une bulle signale une nouvelle version ; un clic dans le menu de l'icône l'installe, après vérification de l'intégrité et de la signature. Vous pouvez les désactiver dans ce menu.
 - **Désinstallation** : Paramètres › Applications › Applications installées › Keyboard Layout Fixer Vos réglages sont conservés.
 - **Vie privée** : rien de ce que vous tapez n'est envoyé ni enregistré. Après une vraie erreur, une notification propose d'envoyer un rapport anonyme (version, étape en échec, nom du programme ; jamais votre texte) : rien ne part sans votre clic. Menu de l'icône › Rapports de problèmes.

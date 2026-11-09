@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.2 (November 2026)
+- All texts reviewed against Windows conventions, in Hebrew, French and English: standard button words (the settings button is now "Apply", it saves without closing the window), Hebrew commands in the imperative like Windows, French "Paramètres" and "Presse-papiers", consistent terms and agreements, clearer installer message.
+- The converter choices in Hebrew no longer use arrows (they could be shown reversed).
+
 ## 1.6.1 (November 2026)
 - Optional, consent-based anonymous problem reports (per-user install only). After a real error (clipboard not put back, paste failed) or a crash (offered at most once a day), a Windows notification asks "Send an anonymous report to help fix it?"; nothing is sent without that click. Tray menu › Problem reports: "Report a problem…" (optional comment, the exact content shown before sending), "Send reports without asking" (off by default) and "Never offer a report".
 - A report contains only technical fields: report type, program version, Windows build, result, action, failed step, step timings, program name and window classes, kind of selection, number of characters, and the optional comment (shown before sending). Importing a settings file never turns on "Send reports without asking". Never the text you type or the clipboard, no identifier, no file path. The receiver (a small Cloudflare Worker) does not store IP addresses and keeps reports 90 days.

@@ -44,12 +44,12 @@ VIAddVersionKey "LegalCopyright" "MIT License - Ravid Saadia, breslev558"
 
 LangString LancerMaintenant ${LANG_ENGLISH} "Start Keyboard Layout Fixer"
 LangString LancerMaintenant ${LANG_FRENCH} "Lancer Keyboard Layout Fixer"
-LangString LancerMaintenant ${LANG_HEBREW} "הפעלת Keyboard Layout Fixer"
+LangString LancerMaintenant ${LANG_HEBREW} "הפעל את Keyboard Layout Fixer"
 LangString DejaMachine ${LANG_ENGLISH} "Keyboard Layout Fixer is already installed for the whole PC by an administrator. Nothing was changed."
 LangString DejaMachine ${LANG_FRENCH} "Keyboard Layout Fixer est déjà installé pour tout le PC par un administrateur. Rien n'a été changé."
-LangString DejaMachine ${LANG_HEBREW} "Keyboard Layout Fixer כבר מותקן לכל המחשב על ידי מנהל. לא שונה דבר."
+LangString DejaMachine ${LANG_HEBREW} "Keyboard Layout Fixer כבר מותקן לכל המחשב על ידי מנהל מערכת. לא שונה דבר."
 LangString PasFerme ${LANG_ENGLISH} "The running copy did not close. Close it from its tray icon (right-click > Exit), then try again."
-LangString PasFerme ${LANG_FRENCH} "La copie en marche ne s'est pas fermée. Fermez-la depuis son icône (clic droit > Quitter), puis recommencez."
+LangString PasFerme ${LANG_FRENCH} "Le programme en cours d'exécution ne s'est pas fermé. Fermez-le depuis son icône (clic droit > Quitter), puis réessayez."
 LangString PasFerme ${LANG_HEBREW} "העותק הפועל לא נסגר. סגרו אותו מהסמל (לחיצה ימנית > יציאה) ונסו שוב."
 
 Var Premiere

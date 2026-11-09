@@ -1,4 +1,8 @@
-> Archive du guide d'origine, plus à jour (touche F10, pas de fenêtre de réglages). Voir README.md.
+> **Archived documentation — does not apply to this version.**
+> This is the documentation of the original Keyboard Layout Fixer by Ravid Saadia (.NET 8 + Avalonia),
+> kept only for reference and credit. The current version is a Rust rewrite: it needs **no .NET**
+> (nor any other runtime) and is installed and used as described in the [main README](../../README.md).
+> Licence: [LICENSE](../../LICENSE) (MIT).
 
 # Quick Start Guide
 

@@ -104,4 +104,4 @@ The script runs the tests, checks the dependency licences and builds `target/x86
 
 ## Credits and licence
 
-Based on [Keyboard Layout Fixer](https://github.com/RavidSaadia/Keyboard_Layout_Fixer) by Ravid Saadia (MIT licence; his original documentation is kept in `README-original.md` and `USAGE-original.md`). NOAM version (Rust rewrite and changes) by breslev558, also under the MIT licence: see [LICENSE](LICENSE).
+Based on [Keyboard Layout Fixer](https://github.com/RavidSaadia/Keyboard_Layout_Fixer) by Ravid Saadia (MIT licence; his original .NET documentation, which does not apply to this version, is archived in [docs/archive](docs/archive)). NOAM version (Rust rewrite and changes) by breslev558, also under the MIT licence: see [LICENSE](LICENSE).

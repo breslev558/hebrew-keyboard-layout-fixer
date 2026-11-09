@@ -1,4 +1,8 @@
-> Archive du README d'origine (.NET 8 + Avalonia), gardée pour référence. La licence applicable est le fichier LICENSE (MIT).
+> **Archived documentation — does not apply to this version.**
+> This is the documentation of the original Keyboard Layout Fixer by Ravid Saadia (.NET 8 + Avalonia),
+> kept only for reference and credit. The current version is a Rust rewrite: it needs **no .NET**
+> (nor any other runtime) and is installed and used as described in the [main README](../../README.md).
+> Licence: [LICENSE](../../LICENSE) (MIT).
 
 # Keyboard Layout Fixer
 

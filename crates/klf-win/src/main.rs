@@ -1,4 +1,4 @@
-//! Keyboard Layout Fixer (NOAM) — Rust 1.6.3. Fixes text typed with the wrong keyboard layout
+//! Keyboard Layout Fixer (NOAM) — Rust 1.6.4. Fixes text typed with the wrong keyboard layout
 //! (Hebrew <-> English) with one key (F10). Based on RavidSaadia/Keyboard_Layout_Fixer (MIT).
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
@@ -39,7 +39,7 @@ fn main() {
     let arg = |name: &str| std::env::args_os().any(|a| a == name);
     // one copy per session; "--restart" waits up to 10 s for the old copy to quit
     // "--update": the old copy quits once a conversion in progress is over (up to 30 s)
-    let Some(_instance) = platform::sys::SingleInstance::acquire(if arg("--update") { 30_000 } else if arg("--restart") { 10_000 } else { 0 }) else {
+    let Some(instance) = platform::sys::SingleInstance::acquire(if arg("--update") { 30_000 } else if arg("--restart") { 10_000 } else { 0 }) else {
         // "--settings" (Start menu shortcut): the running copy opens its settings window,
         // even when its tray icon is missing
         if arg("--settings") {
@@ -67,6 +67,11 @@ fn main() {
         util::log("Main window could not be created, exit");
         return;
     };
+    if arg("--update") {
+        // 1.6.4: the window exists, the program runs: the old copy may quit for good (signalled
+        // before anything that could show a message)
+        update::signal_started();
+    }
     // the hotkey is reserved BEFORE the tray icon (the icon can take ~45 s at logon)
     if !app::register_hotkey() {
         app::announce_hotkey_unavailable();
@@ -80,6 +85,10 @@ fn main() {
     }
     app::run_message_loop();
     util::log("Application exit");
+    // 1.6.4: after an update, the lock is released so the new copy can start, then this process
+    // watches it and puts the old program back if it does not start
+    drop(instance);
+    update::watch_after_exit();
 }
 
 #[cfg(not(windows))]

@@ -284,16 +284,21 @@ impl From<String> for Failure {
     }
 }
 
-/// Downloads, checks and swaps the exe, then starts the new copy.
+/// Downloads, checks and swaps the exe, then starts the new copy (watched after we quit).
 pub fn install(r: &Release) -> Result<(), Failure> {
     let net = |m: &str| Failure::Network(m.to_string());
-    let sha_file = get(&r.sha_url, 1024).ok_or_else(|| net("sha256 not downloaded"))?;
-    let sig_file = get(&r.sig_url, 1024).ok_or_else(|| net("signature not downloaded"))?;
+    // 1.6.4: the signed description carries the version, the size and the SHA-256 of the exe
+    let upd_file = get(&r.upd_url, 1024).ok_or_else(|| net("update description not downloaded"))?;
+    let sig_file = get(&r.upd_sig_url, 1024).ok_or_else(|| net("signature not downloaded"))?;
     let sig = u::parse_sig(std::str::from_utf8(&sig_file).map_err(|_| "signature unreadable")?).ok_or("signature unreadable")?;
-    if !signature_ok(&sha_file, &sig) {
-        return Err("signature of the sha256 file is NOT valid".into());
+    if !signature_ok(&upd_file, &sig) {
+        return Err("signature of the update description is NOT valid".into());
     }
-    let announced = u::parse_sha_file(std::str::from_utf8(&sha_file).map_err(|_| "sha256 unreadable")?).ok_or("sha256 unreadable")?;
+    let info = u::parse_update_file(std::str::from_utf8(&upd_file).map_err(|_| "update description unreadable")?).ok_or("update description unreadable")?;
+    if !u::update_info_ok(&info, r, current()) {
+        return Err(format!("signed description ({:?}, {} bytes) does not match the release {}", info.version, info.size, r.tag).into());
+    }
+    let announced = info.sha256;
     let exe = get(&r.exe_url, u::MAX_EXE_BYTES as usize).ok_or_else(|| net("exe not downloaded"))?;
     let got = hex(&sha256(&exe).ok_or("sha256 failed")?);
     // size and SHA-256 checked BEFORE anything is written or parsed
@@ -325,18 +330,130 @@ pub fn install(r: &Release) -> Result<(), Failure> {
         let _ = std::fs::remove_file(&new);
         return Err(net(&format!("cannot put the new program in place: {e}")));
     }
-    // the new copy waits up to 30 s for us to quit (--update); if it stops at once (missing file,
-    // blocked by an antivirus...), the old program is put back and keeps running
+    // the new copy waits up to 30 s for us to quit (--update), then tells us it really started
+    // (named event). We watch it after our window is gone: no fixed wait, and if it never starts
+    // or stops before, the old program is put back and started again
     let undo = |why: &str| -> Failure {
         let _ = std::fs::remove_file(&cur);
         let _ = std::fs::rename(&old, &cur);
         Failure::Refused(format!("{why} (old program put back)"))
     };
-    let mut child = std::process::Command::new(&cur).arg("--update").spawn().map_err(|_| undo("the new program could not be started"))?;
-    std::thread::sleep(std::time::Duration::from_millis(1500));
-    if let Ok(Some(_)) = child.try_wait() {
-        return Err(undo("the new program stopped at once"));
+    let event = started_event(true);
+    if !event.is_null() {
+        // never a signal left from an earlier attempt
+        // SAFETY: event created just above.
+        unsafe { windows_sys::Win32::System::Threading::ResetEvent(event) };
     }
-    log(&format!("Update to {} installed, new copy started", r.tag));
+    let child = std::process::Command::new(&cur).arg("--update").spawn().map_err(|_| {
+        close(event);
+        undo("the new program could not be started")
+    })?;
+    let previous = WATCH.lock().unwrap_or_else(std::sync::PoisonError::into_inner).replace(Watch { child, event: event as usize, cur, old, tag: r.tag.clone() });
+    if let Some(p) = previous {
+        close(p.event as windows_sys::Win32::Foundation::HANDLE);
+    }
+    log(&format!("Update to {} installed, new copy started (watched until it is ready)", r.tag));
     Ok(())
+}
+
+// ---------------------------------------------------------------------------------------------
+// 1.6.4: the new copy is validated only once it has really started
+
+const STARTED_EVENT: &str = "Local\\KeyboardLayoutFixer_UpdateStarted";
+/// how long the new copy has to start (it first waits for us to quit)
+const START_LIMIT_MS: u32 = 60_000;
+
+struct Watch {
+    child: std::process::Child,
+    event: usize,
+    cur: String,
+    old: String,
+    tag: String,
+}
+static WATCH: Mutex<Option<Watch>> = Mutex::new(None);
+
+fn started_event(create: bool) -> windows_sys::Win32::Foundation::HANDLE {
+    use windows_sys::Win32::System::Threading::{CreateEventW, OpenEventW, EVENT_MODIFY_STATE};
+    let name = wide(STARTED_EVENT);
+    // SAFETY: valid name; manual-reset event, not signalled at creation; closed by the caller.
+    unsafe {
+        if create {
+            CreateEventW(null(), 1, 0, name.as_ptr())
+        } else {
+            OpenEventW(EVENT_MODIFY_STATE, 0, name.as_ptr())
+        }
+    }
+}
+
+fn close(h: windows_sys::Win32::Foundation::HANDLE) {
+    if !h.is_null() {
+        // SAFETY: a handle we opened.
+        unsafe { windows_sys::Win32::Foundation::CloseHandle(h) };
+    }
+}
+
+/// New copy started with --update: tells the old copy it is running (window and hotkey ready),
+/// then removes the old exe once the old copy has quit.
+pub fn signal_started() {
+    let h = started_event(false);
+    if !h.is_null() {
+        // SAFETY: event opened with EVENT_MODIFY_STATE.
+        unsafe { windows_sys::Win32::System::Threading::SetEvent(h) };
+        close(h);
+    }
+    let _ = std::thread::Builder::new().name("cleanup-old".into()).spawn(|| {
+        std::thread::sleep(std::time::Duration::from_secs(15));
+        let p = crate::platform::sys::exe_path();
+        let _ = std::fs::remove_file(format!("{p}.old"));
+    });
+}
+
+/// Old copy, after its window is gone and the single-instance lock released: waits until the new
+/// copy says it started; if it stops first or takes more than 60 s, puts the old program back,
+/// does not offer that version again for 7 days, and starts the old program again.
+pub fn watch_after_exit() {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Foundation::{HANDLE, WAIT_OBJECT_0};
+    use windows_sys::Win32::System::Threading::WaitForMultipleObjects;
+    let Some(mut w) = WATCH.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take() else { return };
+    let event = w.event as HANDLE;
+    let started = if event.is_null() {
+        // no event (very unlikely): the old rule, the copy must still run after 5 s
+        std::thread::sleep(std::time::Duration::from_secs(5));
+        matches!(w.child.try_wait(), Ok(None))
+    } else {
+        let handles = [event, w.child.as_raw_handle() as HANDLE];
+        // SAFETY: two valid handles; returns which one is signalled first, or a timeout.
+        let r = unsafe { WaitForMultipleObjects(2, handles.as_ptr(), 0, START_LIMIT_MS) };
+        close(event);
+        r == WAIT_OBJECT_0
+    };
+    if started {
+        log(&format!("Update to {}: new copy started, old copy quits", w.tag));
+        return;
+    }
+    let _ = w.child.kill();
+    let _ = w.child.wait();
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    // an antivirus may hold the new file a moment: a few tries, else the old exe is started as it is
+    let mut back = false;
+    for _ in 0..10 {
+        let _ = std::fs::remove_file(&w.cur);
+        if std::fs::rename(&w.old, &w.cur).is_ok() {
+            back = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+    if !back {
+        log(&format!("Update to {} FAILED; the old program could not be put back in place, started from {}", w.tag, w.old));
+        let _ = std::process::Command::new(&w.old).spawn();
+        return;
+    }
+    let mut s = crate::app::user_settings();
+    s.update_skip_tag = w.tag.clone();
+    s.update_skip_at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let _ = crate::app::save_settings(&s);
+    log(&format!("Update to {} FAILED (new copy did not start): old program put back and started again", w.tag));
+    let _ = std::process::Command::new(&w.cur).spawn();
 }

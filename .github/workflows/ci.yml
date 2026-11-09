@@ -91,3 +91,22 @@ jobs:
       - name: Essais PowerShell
         shell: powershell
         run: Get-ChildItem tests-ps -Filter *.ps1 | ForEach-Object { & powershell -NoProfile -ExecutionPolicy Bypass -File $_.FullName; if ($LASTEXITCODE) { exit $LASTEXITCODE } }
+  bout-en-bout:
+    # vrai essai sous Windows : installeur, Bloc-notes, « akuo » + F10 = « שלום ».
+    # Non bloquant tant qu'il n'a pas prouvé sa fiabilité sur les machines de GitHub.
+    runs-on: windows-latest
+    timeout-minutes: 15
+    needs: coeur-et-compilation
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: KeyboardLayoutFixer-exe
+          path: artefacts
+      - name: Essai de bout en bout
+        shell: powershell
+        run: |
+          Copy-Item artefacts\installer\KeyboardLayoutFixer-Setup.exe .\KeyboardLayoutFixer-Setup.exe
+          powershell -NoProfile -ExecutionPolicy Bypass -File tests-e2e\bout-en-bout.ps1
+          exit $LASTEXITCODE

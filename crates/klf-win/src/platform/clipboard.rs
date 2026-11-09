@@ -17,6 +17,12 @@ const CF_UNICODETEXT: u32 = 13;
 const MAX_SNAPSHOT_BYTES: usize = 128 * 1024 * 1024;
 /// Largest text read for conversion or comparison (audit B10): checked BEFORE copying.
 const MAX_TEXT_BYTES: usize = 4 * 1024 * 1024;
+/// 1.6.4: time allowed for the private formats of a program (Excel renders dozens on request,
+/// clipboard held open meanwhile). Past it, the remaining PRIVATE formats are not kept (text,
+/// pictures and files always are): F10 never makes the copy slow.
+const PRIVATE_FORMATS_BUDGET_MS: u128 = 300;
+/// formats left out by the last save (logged once the clipboard is closed)
+static SKIPPED_LATE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 const CF_BITMAP: u32 = 2;
 const CF_ENHMETAFILE: u32 = 14;
 
@@ -150,6 +156,17 @@ fn alloc_global(bytes: &[u8]) -> Option<HGLOBAL> {
     }
 }
 
+/// Registered formats every program understands (formatting, files): always kept, whatever the
+/// time budget.
+fn common_registered(format: u32) -> bool {
+    const COMMON: &[&str] = &["Rich Text Format", "HTML Format", "Csv", "FileName", "FileNameW", "Shell IDList Array", "Preferred DropEffect", "UniformResourceLocator", "UniformResourceLocatorW"];
+    let mut buf = [0u16; 128];
+    // SAFETY: buffer of the given size.
+    let n = unsafe { GetClipboardFormatNameW(format, buf.as_mut_ptr(), buf.len() as i32) }.max(0) as usize;
+    let name = String::from_utf16_lossy(&buf[..n.min(buf.len())]);
+    COMMON.iter().any(|c| c.eq_ignore_ascii_case(&name))
+}
+
 fn register(name: &str) -> u32 {
     let w = wide(name);
     // SAFETY: valid string.
@@ -169,7 +186,12 @@ pub fn sequence() -> u32 {
 /// Saves every format then empties the clipboard, in ONE opening (nobody can copy between the
 /// save and the emptying). Returns the sequence number right after emptying.
 pub fn save_and_clear(owner: HWND) -> (SaveResult, u32, Option<Snapshot>) {
+    SKIPPED_LATE.store(0, std::sync::atomic::Ordering::Relaxed);
     let r = save_and_clear_inner(owner);
+    let late = SKIPPED_LATE.load(std::sync::atomic::Ordering::Relaxed);
+    if late > 0 {
+        crate::util::log(&format!("Clipboard: {late} private formats not kept (rendering took more than {PRIVATE_FORMATS_BUDGET_MS} ms)"));
+    }
     if let (SaveResult::ReadError, Some(f)) = (r.0, r.3) {
         crate::util::log(&format!("Clipboard read error or format that cannot be kept: {f}"));
     }
@@ -184,6 +206,8 @@ fn save_and_clear_inner(owner: HWND) -> (SaveResult, u32, Option<Snapshot>, Opti
     let (mut bitmap, mut dib, mut others) = (false, false, false);
     let marks: Vec<u32> = MARK_NAMES.iter().map(|n| register(n)).collect();
     let mut secret = false;
+    let mut private_ms = 0u128;
+    let mut skipped_late = 0u32;
     loop {
         // SAFETY: clipboard open. EnumClipboardFormats does not always clear the last error.
         format = unsafe {
@@ -228,6 +252,12 @@ fn save_and_clear_inner(owner: HWND) -> (SaveResult, u32, Option<Snapshot>, Opti
             }
             Kind::Memory => {
                 let standard = is_standard_memory(format);
+                let private = !standard && format >= 0xC000 && !common_registered(format);
+                if private && private_ms > PRIVATE_FORMATS_BUDGET_MS {
+                    skipped_late += 1;
+                    continue;
+                }
+                let t0 = std::time::Instant::now();
                 // SAFETY: clipboard open.
                 let h = unsafe { GetClipboardData(format) };
                 if h.is_null() {
@@ -256,9 +286,13 @@ fn save_and_clear_inner(owner: HWND) -> (SaveResult, u32, Option<Snapshot>, Opti
                 };
                 dib |= matches!(format, 8 | 17);
                 items.push((format, data));
+                if private {
+                    private_ms += t0.elapsed().as_millis(); // only the time spent in private formats counts
+                }
             }
         }
     }
+    SKIPPED_LATE.store(skipped_late, std::sync::atomic::Ordering::Relaxed);
     // a bitmap Windows cannot rebuild, or a clipboard where nothing could be kept: untouched
     if (bitmap && !dib) || (others && items.is_empty()) {
         return (SaveResult::ReadError, 0, None, Some(if bitmap { CF_BITMAP } else { 0 }));

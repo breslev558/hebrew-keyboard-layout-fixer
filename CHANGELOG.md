@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.6.4 (November 2026)
+- Safer updates: the update is described by a signed file that includes its version, size and SHA-256, so an older signed release can never be passed off as a newer one. The new version is kept only once it has really started (window and keys ready); if it does not start within 60 seconds, the previous version is put back and started again automatically. No more fixed waiting time.
+- Copying from programs that offer dozens of private clipboard formats (Excel ranges) can no longer make F10 slow: past 300 ms, the remaining private formats are not kept (text, pictures and files always are).
+- Repository: issue templates (bug, idea), code of conduct, and an end-to-end test on Windows in CI (installs the program, types "akuo" in Notepad, presses F10 and expects "שלום").
+
 ## 1.6.3 (November 2026)
 - Security review (with an independent second review): a clipboard copied from a password manager (marked "do not keep") is never kept in memory for later when it cannot be put back at once; a clipboard kept for later is forgotten after 10 minutes even if the tray menu is never opened; clipboard formats holding something other than a memory block are checked before being read; the clipboard is never held open while the log is written.
 - Updates: a local file problem (disk full, antivirus holding the file) is tried again at the next check instead of blocking that version for 7 days; an older copy still running is set aside instead of blocking the update.

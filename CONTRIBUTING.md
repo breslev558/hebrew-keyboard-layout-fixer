@@ -9,6 +9,7 @@ Thank you for helping. Keyboard Layout Fixer is a small Windows 10/11 tray utili
   You can paste the diagnostic (Settings › Diagnostic › Copy): it contains program names and steps,
   never your text. Never paste passwords or personal text.
 - **Security problems:** do **not** open a public issue; follow [SECURITY.md](SECURITY.md).
+- Please follow the [code of conduct](CODE_OF_CONDUCT.md).
 - Issues get a first answer within 14 days. Closed issues stay public as an archive.
 
 ## Changing the code

@@ -9,6 +9,12 @@ pub const SHA_NAME: &str = "KeyboardLayoutFixer.exe.sha256";
 /// ECDSA P-256 signature (r||s, 128 hex characters) of the .sha256 file, made offline with the
 /// update key: the exe is installed only if it matches the public key built into the program.
 pub const SIG_NAME: &str = "KeyboardLayoutFixer.exe.sha256.sig";
+/// 1.6.4: signed description of the update (version, size, SHA-256 of the exe) and its signature.
+/// The version is inside the signed data: an older signed release, or a file of another version,
+/// can never be passed off as this one (anti-replay / anti-downgrade).
+pub const UPD_NAME: &str = "KeyboardLayoutFixer.exe.update";
+pub const UPD_SIG_NAME: &str = "KeyboardLayoutFixer.exe.update.sig";
+const UPD_HEADER: &str = "KeyboardLayoutFixer update 1";
 /// The only hosts a download may come from (after GitHub's redirect).
 pub const ALLOWED_HOSTS: &[&str] = &["github.com", "api.github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"];
 /// Larger answers / zips are refused.
@@ -26,6 +32,48 @@ pub struct Release {
     pub exe_size: u64,
     pub sha_url: String,
     pub sig_url: String,
+    pub upd_url: String,
+    pub upd_sig_url: String,
+}
+
+/// The signed update description, once its signature is checked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UpdateInfo {
+    pub version: (u32, u32, u32),
+    pub size: u64,
+    pub sha256: String,
+}
+
+/// Reads the signed description: exactly a header line then `version`, `size`, `sha256` lines.
+pub fn parse_update_file(text: &str) -> Option<UpdateInfo> {
+    if text.len() > 512 {
+        return None;
+    }
+    let mut lines = text.lines().map(str::trim).filter(|l| !l.is_empty());
+    if lines.next()? != UPD_HEADER {
+        return None;
+    }
+    let (mut version, mut size, mut sha) = (None, None, None);
+    for l in lines {
+        let (k, v) = l.split_once(' ')?;
+        match k {
+            "version" if version.is_none() => version = Some(parse_version(v)?),
+            "size" if size.is_none() => size = Some(v.trim().parse::<u64>().ok()?),
+            "sha256" if sha.is_none() => sha = Some(parse_sha_file(v)?),
+            _ => return None,
+        }
+    }
+    Some(UpdateInfo { version: version?, size: size?, sha256: sha? })
+}
+
+/// The text to sign for a release (the publishing tool writes it; tests check both agree).
+pub fn update_file_text(version: &str, size: u64, sha256: &str) -> String {
+    format!("{UPD_HEADER}\nversion {version}\nsize {size}\nsha256 {}\n", sha256.to_ascii_lowercase())
+}
+
+/// The signed description matches the release offered and is newer than the running version.
+pub fn update_info_ok(info: &UpdateInfo, r: &Release, current: (u32, u32, u32)) -> bool {
+    info.version == r.version && info.version > current && info.size == r.exe_size && info.size <= MAX_EXE_BYTES
 }
 
 /// "1.5.4", "v1.5.4", "1.5.4-noam" -> (1, 5, 4); anything else -> None.
@@ -64,12 +112,15 @@ pub fn parse_release(json: &str) -> Option<Release> {
     let exe = find(EXE_NAME)?;
     let sha = find(SHA_NAME)?;
     let sig = find(SIG_NAME)?;
+    // 1.6.4: a release without the signed description is not offered to this version
+    let upd = find(UPD_NAME)?;
+    let upd_sig = find(UPD_SIG_NAME)?;
     let url = |a: &serde_json::Value| a.get("browser_download_url").and_then(|u| u.as_str()).filter(|u| u.starts_with("https://github.com/")).map(String::from);
     let exe_size = exe.get("size")?.as_u64()?;
     if exe_size == 0 || exe_size > MAX_EXE_BYTES {
         return None;
     }
-    Some(Release { version, tag, exe_url: url(exe)?, exe_size, sha_url: url(sha)?, sig_url: url(sig)? })
+    Some(Release { version, tag, exe_url: url(exe)?, exe_size, sha_url: url(sha)?, sig_url: url(sig)?, upd_url: url(upd)?, upd_sig_url: url(upd_sig)? })
 }
 
 /// Offer this release? Only a NEWER version, and not one refused/failed less than 7 days ago.
@@ -121,8 +172,28 @@ mod tests {
             r#"{{"tag_name":"{tag}","draft":false,"prerelease":{pre},"assets":[
             {{"name":"KeyboardLayoutFixer.exe","size":{size},"browser_download_url":"https://github.com/x/y/releases/download/{tag}/KeyboardLayoutFixer.exe"}},
             {{"name":"KeyboardLayoutFixer.exe.sha256","size":90,"browser_download_url":"https://github.com/x/y/releases/download/{tag}/KeyboardLayoutFixer.exe.sha256"}},
-            {{"name":"KeyboardLayoutFixer.exe.sha256.sig","size":128,"browser_download_url":"https://github.com/x/y/releases/download/{tag}/KeyboardLayoutFixer.exe.sha256.sig"}}]}}"#
+            {{"name":"KeyboardLayoutFixer.exe.sha256.sig","size":128,"browser_download_url":"https://github.com/x/y/releases/download/{tag}/KeyboardLayoutFixer.exe.sha256.sig"}},
+            {{"name":"KeyboardLayoutFixer.exe.update","size":120,"browser_download_url":"https://github.com/x/y/releases/download/{tag}/KeyboardLayoutFixer.exe.update"}},
+            {{"name":"KeyboardLayoutFixer.exe.update.sig","size":128,"browser_download_url":"https://github.com/x/y/releases/download/{tag}/KeyboardLayoutFixer.exe.update.sig"}}]}}"#
         )
+    }
+
+    #[test]
+    fn signed_update_description() {
+        let sha = "a".repeat(64);
+        let t = update_file_text("1.6.4", 700_000, &sha);
+        let i = parse_update_file(&t).unwrap();
+        assert_eq!(i, UpdateInfo { version: (1, 6, 4), size: 700_000, sha256: sha.clone() });
+        let r = parse_release(&json("v1.6.4", 700_000, false)).unwrap();
+        assert!(update_info_ok(&i, &r, (1, 6, 3)));
+        assert!(!update_info_ok(&i, &r, (1, 6, 4)), "never the same or an older version");
+        let old = parse_update_file(&update_file_text("1.6.3", 700_000, &sha)).unwrap();
+        assert!(!update_info_ok(&old, &r, (1, 6, 2)), "a signed older description cannot pass for the release offered");
+        let other = parse_update_file(&update_file_text("1.6.4", 699_999, &sha)).unwrap();
+        assert!(!update_info_ok(&other, &r, (1, 6, 3)), "size must match");
+        assert!(parse_update_file("version 1.6.4\nsize 1\nsha256 aa").is_none(), "header required");
+        assert!(parse_update_file(&format!("{t}version 9.9.9\n")).is_none(), "no duplicate line");
+        assert!(parse_update_file(&t.replace("size 700000", "size x")).is_none());
     }
 
     #[test]

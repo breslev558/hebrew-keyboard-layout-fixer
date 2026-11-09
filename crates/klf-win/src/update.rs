@@ -43,6 +43,21 @@ pub fn cleanup() {
     let p = crate::platform::sys::exe_path();
     let _ = std::fs::remove_file(format!("{p}.old"));
     let _ = std::fs::remove_file(format!("{p}.new"));
+    // after an update in one click, "Installed apps" shows the new version number (1.6.0)
+    if allowed(true) {
+        use windows_sys::Win32::System::Registry::*;
+        let key = wide("Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\KeyboardLayoutFixer");
+        let name = wide("DisplayVersion");
+        let val = wide(klf_core::VERSION);
+        let mut hk: HKEY = null_mut();
+        // SAFETY: valid strings; the key is only opened if it already exists (never created here).
+        unsafe {
+            if RegOpenKeyExW(HKEY_CURRENT_USER, key.as_ptr(), 0, KEY_SET_VALUE, &mut hk) == 0 {
+                RegSetValueExW(hk, name.as_ptr(), 0, REG_SZ, val.as_ptr() as *const u8, (val.len() * 2) as u32);
+                RegCloseKey(hk);
+            }
+        }
+    }
 }
 
 struct H(*mut core::ffi::c_void);

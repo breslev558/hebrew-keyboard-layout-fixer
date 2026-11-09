@@ -23,18 +23,24 @@ jobs:
         env:
           RUSTFLAGS: --remap-path-prefix=/home/runner=~
         run: bash tools/construire.sh
+      - name: Installeur unique (NSIS)
+        run: |
+          sudo apt-get install -y nsis
+          V=$(grep -m1 '^version' crates/klf-win/Cargo.toml | cut -d'"' -f2)
+          makensis -V2 -DVERSION=$V -DEXE=$PWD/target/x86_64-pc-windows-gnu/release/KeyboardLayoutFixer.exe -DICON=$PWD/crates/klf-win/res/klf.ico installer/KeyboardLayoutFixer.nsi
       - name: Zip public et empreintes
         run: |
           mkdir -p out/zip
           cp target/x86_64-pc-windows-gnu/release/KeyboardLayoutFixer.exe install/* LICENSE target/BUILD-INFO.txt out/zip/
           (cd out/zip && TZ=UTC touch -d '2026-01-01 00:00:00' * && zip -X -9 ../KeyboardLayoutFixer.zip *)
-          cp out/zip/KeyboardLayoutFixer.exe out/
-          (cd out && sha256sum KeyboardLayoutFixer.zip > KeyboardLayoutFixer.zip.sha256 && sha256sum KeyboardLayoutFixer.exe > KeyboardLayoutFixer.exe.sha256)
+          cp out/zip/KeyboardLayoutFixer.exe installer/KeyboardLayoutFixer-Setup.exe out/
+          (cd out && sha256sum KeyboardLayoutFixer.zip > KeyboardLayoutFixer.zip.sha256 && sha256sum KeyboardLayoutFixer.exe > KeyboardLayoutFixer.exe.sha256 && sha256sum KeyboardLayoutFixer-Setup.exe > KeyboardLayoutFixer-Setup.exe.sha256)
           cat out/*.sha256
       - uses: actions/attest-build-provenance@v2
         with:
           subject-path: |
             out/KeyboardLayoutFixer.exe
+            out/KeyboardLayoutFixer-Setup.exe
             out/KeyboardLayoutFixer.zip
       - uses: actions/upload-artifact@v4
         id: upload
@@ -42,6 +48,7 @@ jobs:
           name: KeyboardLayoutFixer-${{ github.ref_name }}
           path: |
             out/KeyboardLayoutFixer.exe
+            out/KeyboardLayoutFixer-Setup.exe
             out/KeyboardLayoutFixer.zip
             out/*.sha256
       # Après acceptation par SignPath Foundation (identifiants fournis par SignPath) :

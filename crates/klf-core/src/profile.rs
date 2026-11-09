@@ -91,6 +91,7 @@ pub fn differences(old: &AppSettings, new: &AppSettings, locked: &Locked) -> Vec
     add("indicateur", old.indicator.to_string(), new.indicator.to_string(), locked.indicator);
     add("bulle", old.show_bubble.to_string(), new.show_bubble.to_string(), locked.show_bubble);
     add("position de la bulle", old.bubble_position.to_string(), new.bubble_position.to_string(), locked.bubble_position);
+    add("aperçu dans la bulle", old.show_preview.to_string(), new.show_preview.to_string(), locked.show_preview);
     add("son", old.play_sound.to_string(), new.play_sound.to_string(), locked.play_sound);
     add("changer la langue après", old.switch_language_after_convert.to_string(), new.switch_language_after_convert.to_string(), locked.switch_language_after_convert);
     add("limite", old.max_character_limit.to_string(), new.max_character_limit.to_string(), locked.max_character_limit);

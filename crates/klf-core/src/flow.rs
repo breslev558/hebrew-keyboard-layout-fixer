@@ -262,14 +262,17 @@ pub struct Outcome {
     pub msg: Option<Msg>,
     /// Line for debug.log (never the text itself).
     pub log: String,
+    /// 1.6.0: what was converted (before, after), for the bubble only: kept in memory, never
+    /// written to a log or a file. Only set for a real conversion (never for a refused field).
+    pub preview: Option<(String, String)>,
 }
 
 impl Outcome {
     fn say(msg: Msg, log: impl Into<String>) -> Self {
-        Self { msg: Some(msg), log: log.into() }
+        Self { msg: Some(msg), log: log.into(), preview: None }
     }
     fn quiet(log: impl Into<String>) -> Self {
-        Self { msg: None, log: log.into() }
+        Self { msg: None, log: log.into(), preview: None }
     }
 }
 
@@ -382,7 +385,7 @@ pub fn run_traced(host: &mut dyn Host, s: &AppSettings, trace: &mut Trace) -> Ou
     if st.new_copy_seen {
         log.push_str(" | new copy during conversion: kept, nothing restored");
         host.clipboard_forget();
-        return Outcome { msg: outcome.msg, log };
+        return Outcome { msg: outcome.msg, log, preview: outcome.preview };
     }
     // a busy clipboard is retried (provenance checked again each time); a failure is SAID (audit B2)
     trace.mark(Step::Restore, host.now_ms());
@@ -404,7 +407,9 @@ pub fn run_traced(host: &mut dyn Host, s: &AppSettings, trace: &mut Trace) -> Ou
             msg = Some(Msg::ClipboardNotRestored);
         }
     }
-    Outcome { msg, log }
+    // the preview is shown only if everything went well (the user's clipboard is back)
+    let preview = if msg == Some(Msg::Converted) { outcome.preview } else { None };
+    Outcome { msg, log, preview }
 }
 
 enum Copy {
@@ -612,7 +617,7 @@ fn convert_window(
     }
     trace.mark(Step::WaitBeforeRestore, host.now_ms());
     host.pause(s.paste_delay_ms.max(0) as u64); // a slow PC must have read the clipboard before restore
-    Outcome::say(Msg::Converted, format!("Ctrl+V sent with {n} converted characters"))
+    Outcome { preview: Some((text.to_string(), out)), ..Outcome::say(Msg::Converted, format!("Ctrl+V sent with {n} converted characters")) }
 }
 
 /// "Only the last word" (1.4.1 trial): the line copied with Shift+Home gives the last

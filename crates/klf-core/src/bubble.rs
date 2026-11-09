@@ -29,11 +29,41 @@ pub fn place(pos: u32, caret: Option<(i32, i32)>, size: (i32, i32), wa: (i32, i3
     (x.clamp(left, (right - w).max(left)), y.clamp(top_edge, (bottom_edge - h).max(top_edge)))
 }
 
+/// Bubble text for a conversion: "before → after", each part on one line, at most `max`
+/// characters (then "…"), each wrapped in Unicode isolates so that Hebrew and Latin text keep
+/// their own direction whatever the interface language (1.6.0).
+pub fn preview_text(before: &str, after: &str, max: usize) -> String {
+    fn part(t: &str, max: usize) -> String {
+        let one: String = t.split_whitespace().collect::<Vec<_>>().join(" ");
+        let mut c: Vec<char> = one.chars().filter(|ch| !ch.is_control() && !('\u{2066}'..='\u{2069}').contains(ch) && !('\u{202a}'..='\u{202e}').contains(ch) && !matches!(ch, '\u{200e}' | '\u{200f}' | '\u{061c}')).collect();
+        if c.len() > max {
+            c.truncate(max.saturating_sub(1));
+            c.push('…');
+        }
+        c.into_iter().collect()
+    }
+    // the whole line left to right (before, then after), whatever the interface direction
+    format!("\u{2066}\u{2068}{}\u{2069} → \u{2068}{}\u{2069}\u{2069}", part(before, max), part(after, max))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::settings::BUBBLE_TOP;
     const WA: (i32, i32, i32, i32) = (0, 0, 1920, 1040); // 1080p, taskbar 40 px at the bottom
+
+    #[test]
+    fn preview_is_short_one_line_and_isolated() {
+        assert_eq!(preview_text("akuo", "שלום", 24), "\u{2066}\u{2068}akuo\u{2069} → \u{2068}שלום\u{2069}\u{2069}");
+        assert!(!preview_text("a\u{200f}b", "c", 24).contains('\u{200f}'));
+        let p = preview_text("a\nb\t  c", "x", 24);
+        assert!(p.contains("a b c"), "{p}");
+        let long = "x".repeat(50);
+        assert_eq!(preview_text(&long, "y", 10).chars().filter(|c| *c == 'x').count(), 9);
+        assert!(preview_text(&long, "y", 10).contains('…'));
+        // a text cannot break the layout with its own direction marks
+        assert!(!preview_text("a\u{202e}b\u{2069}", "c", 24).contains('\u{202e}'));
+    }
 
     #[test]
     fn centred_top_by_default_and_bottom_on_request() {

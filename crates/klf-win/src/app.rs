@@ -28,6 +28,14 @@ const WM_APP_PENDING: u32 = WM_APP + 4;
 /// update (1.5.5): wparam 1 = a new version was found, 2 = installed (quit), 3 = failed
 const WM_APP_UPDATE: u32 = WM_APP + 5;
 const TIMER_UPDATE: usize = 5;
+/// 1.6.0: first-run welcome (shown once the message loop runs)
+const WM_APP_WELCOME: u32 = WM_APP + 6;
+
+pub fn post_welcome() {
+    let h = STATE.with(|s| s.hwnd.get());
+    // SAFETY: posting a message without pointers to our window.
+    unsafe { PostMessageW(h, WM_APP_WELCOME, 0, 0) };
+}
 static UPDATE_ERROR: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 /// one check / one installation at a time
 static UPDATE_BUSY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -54,6 +62,7 @@ const CMD_PAUSE10: usize = 108;
 const CMD_RESTORE_CLIP: usize = 109;
 const CMD_CHECK_UPDATES: usize = 110;
 const CMD_INSTALL_UPDATE: usize = 111;
+const CMD_PREVIEW: usize = 112;
 /// End of a timed pause (10 minutes).
 const TIMER_PAUSE_END: usize = 3;
 const TIMED_PAUSE_MS: u32 = 10 * 60 * 1000;
@@ -693,6 +702,9 @@ fn show_menu(hwnd: HWND) {
         }
         items.push((CMD_CHECK_UPDATES, text(l, Msg::MenuCheckUpdates).to_string(), on));
     }
+    if settings().show_bubble {
+        items.push((CMD_PREVIEW, text(l, Msg::MenuPreview).to_string(), settings().show_preview));
+    }
     if crate::host::parked_available() {
         items.push((CMD_RESTORE_CLIP, text(l, Msg::MenuRestoreClipboard).to_string(), false));
     }
@@ -712,7 +724,7 @@ fn show_menu(hwnd: HWND) {
                 AppendMenuW(menu, MF_SEPARATOR, 0, null());
             } else {
                 // a rule of the administrator is shown, ticked, but cannot be changed here
-                let grey = school && matches!(*id, CMD_RULE_DISABLE | CMD_RULE_SELECTION);
+                let grey = (school && matches!(*id, CMD_RULE_DISABLE | CMD_RULE_SELECTION)) || (*id == CMD_PREVIEW && locked().show_preview);
                 AppendMenuW(menu, MF_STRING | if *check { MF_CHECKED } else { 0 } | if grey { MF_GRAYED } else { 0 }, *id, w.as_ptr());
             }
         }
@@ -958,7 +970,12 @@ fn on_done(hwnd: HWND) {
     if let Some(msg) = done.outcome.msg {
         if s.show_bubble {
             let l = lang_of(&s);
-            bubble::show(&text_with_key(l, msg, &s.hotkey_description()), l.is_rtl(), done.caret, done.target, msg == Msg::Converted);
+            // 1.6.0: what was converted ("akuo → שלום"), from memory only, if the user wants it
+            let shown = match (&done.outcome.preview, msg == Msg::Converted && s.show_preview) {
+                (Some((before, after)), true) => klf_core::bubble::preview_text(before, after, 24),
+                _ => text_with_key(l, msg, &s.hotkey_description()),
+            };
+            bubble::show(&shown, l.is_rtl(), done.caret, done.target, msg == Msg::Converted);
         }
         if s.play_sound && msg == Msg::Converted {
             sys::beep();
@@ -1031,6 +1048,13 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     }
                 }
                 CMD_INSTALL_UPDATE if !busy() => start_update_install(hwnd),
+                CMD_PREVIEW if !locked().show_preview => {
+                    let mut s = user_settings();
+                    s.show_preview = !s.show_preview;
+                    if save_settings(&s) {
+                        apply_settings(s);
+                    }
+                }
                 CMD_RESTORE_CLIP if !busy() => {
                     use klf_core::flow::RestoreResult;
                     let l = lang();
@@ -1087,6 +1111,10 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
         }
         WM_APP_UPDATE => {
             on_update_message(hwnd, wparam);
+            0
+        }
+        WM_APP_WELCOME => {
+            crate::welcome::maybe_show(hwnd);
             0
         }
         WM_TIMER if wparam == TIMER_PAUSE_END => {

@@ -94,4 +94,6 @@ $RECYCLE.BIN/
 # Windows shortcuts
 *.lnk
 /target/
+installer/KeyboardLayoutFixer-Setup.exe
+/KeyboardLayoutFixer-Setup.exe
 Cargo.lock.bak

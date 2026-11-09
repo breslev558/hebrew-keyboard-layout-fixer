@@ -147,6 +147,13 @@ pub struct AppSettings {
     pub show_bubble: bool,
     #[serde(rename = "PlaySound", deserialize_with = "de_bool_false")]
     pub play_sound: bool,
+    // --- new in 1.6.0 ---
+    /// the bubble shows what was converted ("akuo → שלום"); never saved anywhere else
+    #[serde(rename = "ShowPreview", deserialize_with = "de_bool_true")]
+    pub show_preview: bool,
+    /// the welcome window (public install) was closed with "do not show again"
+    #[serde(rename = "WelcomeDone", deserialize_with = "de_bool_false")]
+    pub welcome_done: bool,
     // --- new in 1.5.5 : update in one click (public per-user install only) ---
     #[serde(rename = "CheckUpdates", deserialize_with = "de_bool_true")]
     pub check_updates: bool,
@@ -262,6 +269,8 @@ impl Default for AppSettings {
             play_sound: false,
             bubble_position: BUBBLE_TOP,
             check_updates: true,
+            show_preview: true,
+            welcome_done: false,
             update_skip_tag: String::new(),
             update_skip_at: 0,
             ui_language: UiLanguage::Auto,

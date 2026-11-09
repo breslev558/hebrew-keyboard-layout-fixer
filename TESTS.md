@@ -85,3 +85,10 @@ Version : ______  PC : ______  Date : ______  Windows : ______  Échelle : _____
 - [ ] A07 : régler Win+F9 (fichier settings.json), ouvrir les réglages, Enregistrer sans toucher aux touches : Win+F9 reste.
 - [ ] A08 : bloquer le presse-papiers (programme qui le garde ouvert) pendant F10 : message « presse-papiers non remis », puis menu de l'icône « Remettre le presse-papiers précédent » (moins de 10 minutes) : l'ancienne copie revient ; après une nouvelle copie, rien n'est remis.
 - [ ] A04/A13 (version publique) : installer, vérifier « Paramètres > Applications > Applications installées > Keyboard Layout Fixer », désinstaller depuis là ; les autres programmes de « Démarrage » sont toujours là.
+
+## 1.6.0
+- [ ] Version publique : télécharger KeyboardLayoutFixer-Setup.exe, double-clic, « Exécuter quand même » : installé, icône près de l'horloge, fenêtre de bienvenue ; « Essayer maintenant » ouvre la zone d'essai ; « Ne plus afficher » : plus jamais au redémarrage.
+- [ ] Bulle « akuo → שלום » après F10 (hébreu et latin dans le bon ordre, interface en hébreu aussi) ; menu de l'icône « Montrer le texte corrigé » décoché : bulle « Corrigé » seulement.
+- [ ] Champ mot de passe (fenêtre Windows et page web) : jamais de bulle avec du texte.
+- [ ] Installeur lancé pendant que le programme tourne : fermé, remplacé, relancé ; Paramètres › Applications installées › Désinstaller : tout retiré, réglages gardés.
+- [ ] PC géré par un administrateur (installation dans Program Files ou clé de politique) : pas de fenêtre de bienvenue, pas de mise à jour.

@@ -27,14 +27,29 @@ jobs:
       - name: Clippy (indicatif)
         continue-on-error: true
         run: rustup component add clippy && cargo clippy --locked -p klf-core --all-targets
+      - name: Installeur unique (NSIS)
+        run: |
+          sudo apt-get install -y nsis
+          V=$(grep -m1 '^version' crates/klf-win/Cargo.toml | cut -d'"' -f2)
+          makensis -V2 -DVERSION=$V -DEXE=$PWD/target/x86_64-pc-windows-gnu/release/KeyboardLayoutFixer.exe -DICON=$PWD/crates/klf-win/res/klf.ico installer/KeyboardLayoutFixer.nsi
       - uses: actions/upload-artifact@v4
         with:
           name: KeyboardLayoutFixer-exe
-          path: target/x86_64-pc-windows-gnu/release/KeyboardLayoutFixer.exe
+          path: |
+            target/x86_64-pc-windows-gnu/release/KeyboardLayoutFixer.exe
+            installer/KeyboardLayoutFixer-Setup.exe
   scripts-windows:
     runs-on: windows-latest
+    needs: coeur-et-compilation
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: KeyboardLayoutFixer-exe
+          path: artefacts
+      - name: Installeur unique à côté des tests
+        shell: powershell
+        run: Copy-Item artefacts\installer\KeyboardLayoutFixer-Setup.exe .\KeyboardLayoutFixer-Setup.exe
       - name: Syntaxe des scripts PowerShell
         shell: powershell
         run: |

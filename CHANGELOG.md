@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.6.0 (November 2026)
+- Single installer: download **KeyboardLayoutFixer-Setup.exe** and double-click it (per-user, no administrator rights). It closes a running copy cleanly, adds the program to the Start menu, to the startup programs and to Windows "Installed apps"; the zip stays available.
+- Welcome window on first start: F10, F9, where the icon is, and "Try it now" (opens the test box); "Do not show again".
+- The confirmation bubble shows what was converted (`akuo → שלום`). Shown from memory only, never logged; can be switched off in the tray menu ("Show the corrected text in the bubble") or by an administrator (`ShowPreview`).
+
 ## 1.5.5 (November 2026)
 - Update in one click (per-user install only): once a day the program asks GitHub for the latest release; if a newer version exists, a bubble says so and the tray menu offers "Install version X". The exe is downloaded directly, its SHA-256 and an ECDSA P-256 signature (key kept outside GitHub) are checked by Windows, the file version must match, then it is swapped in place (old one kept until the new one starts). Can be switched off in the tray menu; never active when an administrator manages the PC. No other network access, no telemetry.
 

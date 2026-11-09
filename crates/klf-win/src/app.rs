@@ -1087,11 +1087,13 @@ fn on_done(hwnd: HWND) {
         if s.show_bubble {
             let l = lang_of(&s);
             // 1.6.0: what was converted ("akuo → שלום"), from memory only, if the user wants it
-            let shown = match (&done.outcome.preview, msg == Msg::Converted && s.show_preview) {
-                (Some((before, after)), true) => klf_core::bubble::preview_text(before, after, 24),
-                _ => text_with_key(l, msg, &s.hotkey_description()),
+            // the preview "before → after" is always a left-to-right line (1.8.4: its parts keep
+            // their own direction with LRM/RLM marks); other messages follow the interface
+            let (shown, rtl) = match (&done.outcome.preview, msg == Msg::Converted && s.show_preview) {
+                (Some((before, after)), true) => (klf_core::bubble::preview_text(before, after, 24), false),
+                _ => (text_with_key(l, msg, &s.hotkey_description()), l.is_rtl()),
             };
-            bubble::show(&shown, l.is_rtl(), done.caret, done.target, msg == Msg::Converted);
+            bubble::show(&shown, rtl, done.caret, done.target, msg == Msg::Converted);
         }
         if s.play_sound && msg == Msg::Converted {
             sys::beep();

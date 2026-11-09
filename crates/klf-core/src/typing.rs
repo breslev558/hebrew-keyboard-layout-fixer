@@ -38,6 +38,10 @@ pub const NGRAM_MIN: f64 = -3.0;
 pub const NGRAM_MIN_CHARS: usize = 5;
 /// ...and what was typed must look bad in its own language (typos of real words do not).
 pub const NGRAM_OWN_MAX: f64 = -3.6;
+/// 1.8.4, a Hebrew word in no list that looks like Hebrew this much keeps its place against an
+/// English reading of this rank or more (measured on real sentences).
+pub const HE_LOOKS_OK: f64 = -2.4;
+pub const HE_LOOKS_OK_RANK: u32 = 300;
 /// 1.8.2, short words fixed with the next one: rare on this layout, among the most common on the other.
 pub const SHORT_OWN_RANK: u32 = 3_000;
 pub const SHORT_OTHER_RANK: u32 = 300;
@@ -162,6 +166,11 @@ impl Dict {
         let (r, t) = (other.score(read), own.score(typed));
         r >= min && r - t >= gap && t <= NGRAM_OWN_MAX
     }
+    /// 1.8.4: the word looks like a word of that language (average log-probability per letter).
+    pub fn looks_like(&self, w: &str, hebrew: bool, min: f64) -> bool {
+        let m = if hebrew { &self.he_model } else { &self.en_model };
+        !m.is_empty() && m.score(w) >= min
+    }
     pub fn is_he(&self, w: &str) -> bool {
         if self.he.contains_key(w) {
             return true;
@@ -203,6 +212,33 @@ pub const CODE_EDITORS: &[&str] = &[
     "idea64.exe", "pycharm64.exe", "webstorm64.exe", "clion64.exe", "rider64.exe", "goland64.exe", "phpstorm64.exe",
     "rubymine64.exe", "datagrip64.exe", "studio64.exe", "rustrover64.exe", "dataspell64.exe", "aqua64.exe", "idea.exe", "pycharm.exe", "fleet.exe", "zed.exe", "atom.exe", "eclipse.exe", "vim.exe", "gvim.exe",
 ];
+
+/// 1.8.4: programs where typing help never acts (F10 still works): password managers and crypto
+/// wallets (their fields are not always seen as password fields), and remote desktop clients
+/// (the keys go to another PC: a fix could land in the wrong place).
+pub const SENSITIVE_APPS: &[&str] = &[
+    // password managers
+    "keepass.exe", "keepassxc.exe", "keeweb.exe", "bitwarden.exe", "1password.exe", "lastpass.exe", "dashlane.exe", "proton pass.exe",
+    "protonpass.exe", "enpass.exe", "roboform.exe", "nordpass.exe", "keeper password manager.exe", "keeperpasswordmanager.exe", "pwsafe.exe",
+    "stpass.exe", "authy desktop.exe", "passwordsafe.exe", "psono.exe",
+    // crypto wallets
+    "exodus.exe", "electrum.exe", "ledger live.exe", "trezor suite.exe", "atomic wallet.exe", "bitcoin-qt.exe", "monero-wallet-gui.exe",
+    "sparrow.exe", "wassabee.exe", "guarda.exe", "coinomi.exe", "trust wallet.exe",
+    // remote desktop
+    "mstsc.exe", "msrdc.exe", "msrdcw.exe", "anydesk.exe", "rustdesk.exe", "teamviewer.exe", "parsecd.exe", "vncviewer.exe", "tvnviewer.exe",
+    "mremoteng.exe", "royalts.exe", "remotedesktopmanager.exe", "remotedesktopmanager64.exe", "nxplayer.exe", "supremo.exe", "aeroadmin.exe",
+    "strwinclt.exe", "rdclient.windows.exe", "windows365.exe", "wfica32.exe", "cdviewer.exe", "vmware-view.exe", "horizon_client.exe",
+    "vmconnect.exe", "vmware.exe", "vmplayer.exe", "virtualboxvm.exe", "quickassist.exe", "workspaces.exe", "screenconnect.windowsclient.exe",
+    "moonlight.exe",
+];
+// Not covered (shown in a browser tab): Chrome Remote Desktop, web vaults and password manager
+// extensions; the password-field check still applies there.
+
+pub fn is_sensitive_app(exe: &str) -> bool {
+    // the file name only, whatever the case ("C:\\...\\KeePass.exe")
+    let e = exe.rsplit(['\\', '/']).next().unwrap_or(exe).to_lowercase();
+    SENSITIVE_APPS.iter().any(|x| *x == e) || (e.ends_with(".exe") && ["electrum", "keepass", "bitwarden", "1password"].iter().any(|p| e.starts_with(p)))
+}
 
 pub fn is_code_editor(exe: &str) -> bool {
     CODE_EDITORS.iter().any(|e| e.eq_ignore_ascii_case(exe))
@@ -303,6 +339,11 @@ pub fn suggest(words: &[(String, String)], hebrew_active: bool, dict: &Dict) -> 
             return false;
         }
         if dict.common_enough(read, !hebrew_active) {
+            // 1.8.4 (real sentences): a rare Hebrew word that looks like Hebrew ("פרם", "נשאי")
+            // whose reading is a less common English word ("pro", "bath") is left alone
+            if hebrew_active && dict.rank(read, false).is_some_and(|r| r >= HE_LOOKS_OK_RANK) && dict.looks_like(core, true, HE_LOOKS_OK) {
+                return false;
+            }
             return true;
         }
         // 1.8.2: the reading is in no list (a rare word, a Hebrew word with prefixes)
@@ -378,6 +419,10 @@ pub fn suggest_any(words: &[(String, String)], hebrew_active: bool, dict: &Dict)
         return None;
     }
     let fixed = two_capitals(last)?;
+    // 1.8.4: only when the fixed word is a word ("SHalom") or one of the user's, not "DJing"
+    if !dict.is_empty() && !dict.is_en(&fixed) && !dict.personal(&fixed) {
+        return None;
+    }
     Some(Suggestion { erase: last.chars().count() + 1, text: format!("{fixed} "), to_hebrew: false, keep_layout: true, auto: false })
 }
 
@@ -428,6 +473,14 @@ impl Buffer {
             // back into the previous word: simpler and safer to start again
             self.clear();
         }
+    }
+    /// Nothing typed yet in the current word.
+    pub fn is_empty_word(&self) -> bool {
+        self.current.is_empty()
+    }
+    /// The layout of the words being typed, if any.
+    pub fn is_hebrew(&self) -> Option<bool> {
+        self.hebrew
     }
     /// Nothing typed after the last space, and the last words are exactly `words`.
     pub fn ends_with_words(&self, words: &[String]) -> bool {
@@ -862,12 +915,122 @@ mod measure {
     }
 }
 
+/// 1.8.4, false proposals on REAL sentences typed correctly (not shipped: a measurement run by
+/// hand). KLF_SENTENCES = a folder with he.txt and en.txt, one sentence per line (Tatoeba, CC BY
+/// 2.0 FR, used for testing only). Each sentence is typed key by key as the program sees it:
+/// letters (and the sign keys) make words, Space checks, anything else starts again; Hebrew
+/// letters are typed on the Hebrew layout, Latin ones on the Latin layout.
+#[cfg(test)]
+mod sentences {
+    use super::*;
+    use crate::convert::{convert_with, us_map};
+    use crate::settings::MixedTextMode;
+
+    /// What the hook sees for a character: (char, Hebrew layout). Letters typable on a US or Hebrew
+    /// keyboard only; the sign keys , . ; / ' anywhere in a word (as the hook keeps them); ’ = '.
+    fn key_of(c: char, buf: &Buffer) -> Option<(char, bool)> {
+        let c = if c == '’' { '\'' } else { c };
+        if crate::layouts::is_hebrew_letter(c) {
+            return Some((c, true));
+        }
+        if c.is_ascii_alphabetic() {
+            return Some((c, false));
+        }
+        WORD_SIGNS.contains(&c).then(|| (c, buf.is_hebrew().unwrap_or(false)))
+    }
+
+    #[test]
+    #[ignore]
+    fn sentences_measure() {
+        let Ok(dir) = std::env::var("KLF_SENTENCES") else { return };
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../data/words/");
+        let read = |p: &str| std::fs::read_to_string(p).ok();
+        let (Some(he), Some(en)) = (read(&format!("{root}KeyboardLayoutFixer-words-he.txt")), read(&format!("{root}KeyboardLayoutFixer-words-en.txt"))) else { return };
+        let d = Dict::from_lists(&he, &en, DICT_SIZE);
+        let m = us_map();
+        let show = std::env::var("KLF_SHOW").is_ok();
+        for (name, file) in [("hébreu", "he.txt"), ("anglais", "en.txt")] {
+            let Some(text) = read(&format!("{dir}/{file}")) else { continue };
+            let (mut n, mut bad, mut words, mut props) = (0usize, 0usize, 0usize, 0usize);
+            let mut shown = 0;
+            for line in text.lines().filter(|l| !l.trim().is_empty()) {
+                n += 1;
+                let mut buf = Buffer::default();
+                let mut wrong_here = false;
+                for c in line.chars().chain(std::iter::once(' ')) {
+                    if c == ' ' {
+                        if let Some((w, h)) = buf.space() {
+                            words += 1;
+                            let pairs: Vec<(String, String)> = w.iter().map(|x| (x.clone(), convert_with(&m, x, MixedTextMode::ToggleAll, true))).collect();
+                            if let Some(sg) = suggest_any(&pairs, h, &d) {
+                                props += 1;
+                                wrong_here = true;
+                                if show && shown < 60 {
+                                    shown += 1;
+                                    println!("  {name} : « {line} » -> {:?}", sg.text);
+                                }
+                            }
+                        }
+                    } else if let Some(k) = key_of(c, &buf) {
+                        buf.push(k.0, k.1);
+                    } else if c == '"' {
+                        buf.invalidate(); // Shift on the Hebrew layout (צה"ל): the hook does the same
+                    } else {
+                        buf.clear();
+                    }
+                }
+                if wrong_here {
+                    bad += 1;
+                }
+            }
+            // the same sentences typed on the WRONG layout: how many words get a proposal
+            let (mut wn, mut wfixed) = (0usize, 0usize);
+            for line in text.lines().filter(|l| !l.trim().is_empty()).step_by(4) {
+                let typed = convert_with(&m, &line.replace('’', "'"), MixedTextMode::ToggleAll, true);
+                let mut buf = Buffer::default();
+                for c in typed.chars().chain(std::iter::once(' ')) {
+                    if c == ' ' {
+                        if let Some((w, h)) = buf.space() {
+                            wn += 1;
+                            let pairs: Vec<(String, String)> = w.iter().map(|x| (x.clone(), convert_with(&m, x, MixedTextMode::ToggleAll, true))).collect();
+                            if let Some(sg) = suggest_any(&pairs, h, &d) {
+                                wfixed += sg.text.split_whitespace().count().min(w.len());
+                                buf.clear(); // accepted with Tab
+                            }
+                        }
+                    } else if let Some(k) = key_of(c, &buf) {
+                        buf.push(k.0, k.1);
+                    } else {
+                        buf.clear();
+                    }
+                }
+            }
+            println!("{name} : mêmes phrases tapées sur le MAUVAIS clavier (1 sur 4) : {wn} mots, corrigés {:.1} %", 100.0 * wfixed as f64 / wn.max(1) as f64);
+            println!("{name} : {n} phrases bien tapées, {words} mots vérifiés ; phrases avec une fausse proposition : {bad} ({:.2} %) ; propositions par mot : {:.3} %", 100.0 * bad as f64 / n.max(1) as f64, 100.0 * props as f64 / words.max(1) as f64);
+        }
+    }
+}
+
 /// tests/typing-cases.tsv: real cases reported by users, checked with the real word lists.
 #[cfg(test)]
 mod cases {
     use super::*;
     use crate::convert::{convert_with, us_map};
     use crate::settings::MixedTextMode;
+
+    #[test]
+    fn sensitive_apps_left_alone() {
+        assert!(is_sensitive_app("KeePassXC.exe") && is_sensitive_app("mstsc.exe") && is_sensitive_app("electrum-4.5.8.exe") && is_sensitive_app("AnyDesk.exe"));
+        assert!(is_sensitive_app("C:\\Tools\\KeePass-2.57.exe") && is_sensitive_app("RdClient.Windows.exe") && is_sensitive_app("Windows365.exe"));
+        assert!(!is_sensitive_app("winword.exe") && !is_sensitive_app("notepad.exe"));
+        // "DJing": two capitals left alone when the fixed word is no word
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../");
+        let read = |p: &str| std::fs::read_to_string(format!("{root}{p}")).ok();
+        let (Some(he), Some(en)) = (read("data/words/KeyboardLayoutFixer-words-he.txt"), read("data/words/KeyboardLayoutFixer-words-en.txt")) else { return };
+        let d = Dict::from_lists(&he, &en, DICT_SIZE);
+        assert!(suggest_any(&[("DJing".into(), "גחןמע".into())], false, &d).is_none());
+        assert!(suggest_any(&[("HEllo".into(), "יקךךם".into())], false, &d).is_some_and(|s| s.text == "Hello "));
+    }
 
     #[test]
     fn short_words_fixed_with_the_next_one() {

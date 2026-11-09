@@ -30,20 +30,32 @@ pub fn place(pos: u32, caret: Option<(i32, i32)>, size: (i32, i32), wa: (i32, i3
 }
 
 /// Bubble text for a conversion: "before → after", each part on one line, at most `max`
-/// characters (then "…"), each wrapped in Unicode isolates so that Hebrew and Latin text keep
-/// their own direction whatever the interface language (1.6.0).
+/// characters (then "…"), drawn as a LEFT-TO-RIGHT line whatever the interface language.
+/// 1.8.4: only the invisible marks LRM / RLM (U+200E / U+200F) keep each part in its own
+/// direction: the isolates used before (U+2066–U+2069) were drawn as boxes "FSI", "LRI", "PDI"
+/// by Windows on some PCs. A Hebrew part is framed by RLM, a Latin part by LRM, so that its
+/// signs (".", ",", "?") stay at its own end and the arrow stays between the two parts.
 pub fn preview_text(before: &str, after: &str, max: usize) -> String {
     fn part(t: &str, max: usize) -> String {
         let one: String = t.split_whitespace().collect::<Vec<_>>().join(" ");
-        let mut c: Vec<char> = one.chars().filter(|ch| !ch.is_control() && !('\u{2066}'..='\u{2069}').contains(ch) && !('\u{202a}'..='\u{202e}').contains(ch) && !matches!(ch, '\u{200e}' | '\u{200f}' | '\u{061c}')).collect();
+        let mut c: Vec<char> = one.chars().filter(|ch| !is_direction_mark(*ch)).collect();
         if c.len() > max {
             c.truncate(max.saturating_sub(1));
             c.push('…');
         }
-        c.into_iter().collect()
+        let s: String = c.into_iter().collect();
+        let he = s.chars().filter(|c| crate::layouts::is_hebrew_letter(*c)).count();
+        let la = s.chars().filter(|c| c.is_alphabetic() && !crate::layouts::is_hebrew_letter(*c)).count();
+        let m = if he > la { '\u{200F}' } else { '\u{200E}' };
+        format!("{m}{s}{m}")
     }
-    // the whole line left to right (before, then after), whatever the interface direction
-    format!("\u{2066}\u{2068}{}\u{2069} → \u{2068}{}\u{2069}\u{2069}", part(before, max), part(after, max))
+    format!("\u{200E}{} \u{2192} {}\u{200E}", part(before, max), part(after, max))
+}
+
+/// Controls and every direction character (marks, embeddings, overrides, isolates, Arabic
+/// letter mark): taken out of a text before it is shown.
+pub fn is_direction_mark(c: char) -> bool {
+    c.is_control() || ('\u{2066}'..='\u{2069}').contains(&c) || ('\u{202A}'..='\u{202E}').contains(&c) || matches!(c, '\u{200E}' | '\u{200F}' | '\u{061C}')
 }
 
 #[cfg(test)]
@@ -53,16 +65,25 @@ mod tests {
     const WA: (i32, i32, i32, i32) = (0, 0, 1920, 1040); // 1080p, taskbar 40 px at the bottom
 
     #[test]
-    fn preview_is_short_one_line_and_isolated() {
-        assert_eq!(preview_text("akuo", "שלום", 24), "\u{2066}\u{2068}akuo\u{2069} → \u{2068}שלום\u{2069}\u{2069}");
-        assert!(!preview_text("a\u{200f}b", "c", 24).contains('\u{200f}'));
+    fn preview_is_short_one_line_and_has_no_isolates() {
+        assert_eq!(preview_text("akuo", "שלום", 24), "\u{200E}\u{200E}akuo\u{200E} \u{2192} \u{200F}שלום\u{200F}\u{200E}");
+        assert_eq!(preview_text("שלום.", "akuo/", 24), "\u{200E}\u{200F}שלום.\u{200F} \u{2192} \u{200E}akuo/\u{200E}\u{200E}");
+        // mixed texts, signs and digits: never an isolate, embedding or override; marks balanced
+        for (b, a) in [("akuo, nv vekl?", "שלום, מה הקול?"), ("12 akuo 34", "12 שלום 34"), ("(akuo)", "(שלום)"), ("ac,", "שבת"), ("שלום world", "akuo עםרךג")] {
+            let p = preview_text(b, a, 24);
+            assert!(!p.chars().any(|c| ('\u{2066}'..='\u{2069}').contains(&c) || ('\u{202A}'..='\u{202E}').contains(&c)), "{p:?}");
+            assert_eq!(p.matches('\u{2192}').count(), 1);
+            assert!(p.starts_with('\u{200E}') && p.ends_with('\u{200E}'));
+        }
+        assert!(!preview_text("a\u{200f}b", "c", 24).contains("a\u{200f}b"));
         let p = preview_text("a\nb\t  c", "x", 24);
         assert!(p.contains("a b c"), "{p}");
         let long = "x".repeat(50);
         assert_eq!(preview_text(&long, "y", 10).chars().filter(|c| *c == 'x').count(), 9);
         assert!(preview_text(&long, "y", 10).contains('…'));
-        // a text cannot break the layout with its own direction marks
-        assert!(!preview_text("a\u{202e}b\u{2069}", "c", 24).contains('\u{202e}'));
+        // a text cannot break the layout with its own direction characters
+        let p = preview_text("a\u{202e}b\u{2069}\u{2066}", "c\u{2067}", 24);
+        assert!(!p.chars().any(|c| ('\u{2066}'..='\u{2069}').contains(&c) || ('\u{202A}'..='\u{202E}').contains(&c)), "{p:?}");
     }
 
     #[test]

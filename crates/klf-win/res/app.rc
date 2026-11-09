@@ -4,8 +4,8 @@
 2 ICON "klf-pause.ico"
 
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION 1,8,3,0
-PRODUCTVERSION 1,8,3,0
+FILEVERSION 1,8,4,0
+PRODUCTVERSION 1,8,4,0
 FILEFLAGSMASK 0x3fL
 FILEFLAGS 0x0L
 FILEOS VOS_NT_WINDOWS32
@@ -18,12 +18,12 @@ BEGIN
     BEGIN
       VALUE "CompanyName", "breslev558"
       VALUE "FileDescription", "Keyboard Layout Fixer - fixes Hebrew/English text typed with the wrong layout (F10)"
-      VALUE "FileVersion", "1.8.3.0"
+      VALUE "FileVersion", "1.8.4.0"
       VALUE "InternalName", "KeyboardLayoutFixer"
       VALUE "LegalCopyright", "MIT License - Copyright (c) Ravid Saadia, NOAM version breslev558"
       VALUE "OriginalFilename", "KeyboardLayoutFixer.exe"
       VALUE "ProductName", "Keyboard Layout Fixer (NOAM)"
-      VALUE "ProductVersion", "1.8.3-noam"
+      VALUE "ProductVersion", "1.8.4-noam"
     END
   END
   BLOCK "VarFileInfo"

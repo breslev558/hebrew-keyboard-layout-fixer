@@ -794,8 +794,8 @@ pub fn learn_from_f10(before: &str, after: &str) {
     // never learned where the typing correction does not act (code editors, excluded programs)
     let info = target::info(target::foreground());
     let s = app::settings();
-    if (s.typing_skip_code_editors && t::is_code_editor(&info.exe_name)) || s.rule_for(&info.exe_name) == Some(klf_core::settings::RuleMode::Disabled) {
-        return;
+    if (s.typing_skip_code_editors && t::is_code_editor(&info.exe_name)) || s.rule_for(&info.exe_name) == Some(klf_core::settings::RuleMode::Disabled) || t::is_sensitive_app(&info.exe_name) || info.exe_name.is_empty() {
+        return; // 1.8.4: nothing learned in a password manager or a remote desktop either
     }
     refresh_personal();
     let line = {
@@ -813,11 +813,15 @@ pub fn learn_from_f10(before: &str, after: &str) {
 /// editor. Read at the moment of acting, for every word.
 fn window_ok(fg: HWND, layout_fix: bool) -> bool {
     let info = target::info(fg);
+    // 1.8.4: a program whose name cannot be read is not known to be safe
+    if info.exe_name.is_empty() {
+        return false;
+    }
     if info.password_field || info.elevated == Some(true) || klf_core::policy::console_kind(&info.window_class).is_some() || !klf_core::policy::rule_allowed_for(&info.exe_name) {
         return false;
     }
-    if app::settings().rule_for(&info.exe_name) == Some(klf_core::settings::RuleMode::Disabled) {
-        return false;
+    if app::settings().rule_for(&info.exe_name) == Some(klf_core::settings::RuleMode::Disabled) || t::is_sensitive_app(&info.exe_name) {
+        return false; // 1.8.4: password managers, crypto wallets, remote desktop
     }
     !(layout_fix && app::settings().typing_skip_code_editors && t::is_code_editor(&info.exe_name))
 }
@@ -827,10 +831,13 @@ pub fn dormant_reason(fg: HWND) -> Option<Msg> {
     if !active() || !WANT_TYPING.with(|w| w.get()) || fg.is_null() {
         return None;
     }
+    let exe = target::exe_of(fg);
+    if t::is_sensitive_app(&exe) {
+        return Some(Msg::DormantSensitive);
+    }
     if fullscreen_or_game() {
         return Some(Msg::DormantFullscreen);
     }
-    let exe = target::exe_of(fg);
     if app::settings().rule_for(&exe) == Some(klf_core::settings::RuleMode::Disabled) || !klf_core::policy::rule_allowed_for(&exe) {
         return Some(Msg::DormantExcluded);
     }

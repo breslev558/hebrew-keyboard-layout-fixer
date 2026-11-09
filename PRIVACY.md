@@ -28,7 +28,8 @@ To suggest fixes while you type, the program watches the keys typed (a low-level
 a click, arrow keys, Enter, a shortcut, another window, sleep or lock, or a pause of 15 seconds. A
 word is checked only when you type a space, so a password without spaces is never checked. It
 never works in password fields it can detect, consoles, administrator windows, full-screen games or
-presentations, code editors (by default) or programs you turned the fixer off for.
+presentations, code editors (by default), password managers, crypto wallets, remote desktop windows
+or programs you turned the fixer off for.
 
 Words you teach it (F10 on a single word, or Backspace to undo a fix) are written to
 `%APPDATA%\KeyboardLayoutFixer\my-words.txt`, a plain text file you can read, edit or delete.

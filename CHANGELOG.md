@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.8.4 (November 2026)
+- **Fix: the F10 preview bubble** ("before → after") could show boxes labelled FSI, LRI or PDI and put the parts in the wrong order on some PCs (since 1.6.0). It now uses only the invisible marks LRM/RLM and is always drawn left to right, each part keeping its own direction.
+- Fix while typing and text replacements never act in **password managers** (KeePass, KeePassXC, Bitwarden, 1Password, LastPass, Dashlane, Proton Pass…), **crypto wallets** (Exodus, Electrum, Ledger Live…) or **remote desktop and virtual machine** windows (Remote Desktop, Windows App, AnyDesk, RustDesk, TeamViewer, Parsec, VNC, Citrix, Horizon, Hyper-V, VirtualBox, Quick Assist…; not Chrome Remote Desktop, which runs in a browser tab): their fields are not always seen as password fields, and in a remote desktop the keys go to another PC. The tray icon turns grey there; F10 still works.
+- Measured on **real sentences typed correctly** (Tatoeba, used for testing only, not shipped): 212,926 Hebrew sentences (1,038,269 words): 26 with a false proposal (0.012 %); 204,056 English sentences (1,539,424 words): 5 (0.002 %). The same sentences typed on the wrong layout: 65.8 % (Hebrew) and 61.1 % (English) of the words fixed. Two fixes came from it, with no loss of fixes: a rare Hebrew word that looks like Hebrew is no longer taken for a less common English word, and "TWo capitals" is fixed only when the result is a word (`DJing` stays). Also nothing is learned from F10 in those programs, and a program whose name cannot be read is treated as unsafe.
+
 ## 1.8.3 (November 2026)
 - F10 on text typed with Caps Lock on (for example `AKUO`, meant as שלום) now also switches Caps Lock off after turning it into Hebrew; before, it stayed on and the next Hebrew words came out as Latin capitals again. Only for a text entirely in Latin capitals (2 letters or more, no Hebrew in it) converted to Hebrew, and only if the setting "Turn Caps Lock off after fixing text typed in capitals" is on (default). Fixing while typing still never touches words in capitals.
 

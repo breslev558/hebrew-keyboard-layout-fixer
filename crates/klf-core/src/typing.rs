@@ -278,7 +278,7 @@ mod tests {
     #[test]
     fn hebrew_prefixes_count_as_words() {
         let d = dict();
-        assert!(d.is_he("והלכתי") && d.is_he("וכשהלכתי") == false && d.is_he("שהלכתי"));
+        assert!(d.is_he("והלכתי") && !d.is_he("וכשהלכתי") && d.is_he("שהלכתי"));
         assert!(suggest(&[w("וקט", "and")], true, &d).is_none(), "not an English word: nothing");
     }
 

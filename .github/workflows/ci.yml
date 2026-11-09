@@ -9,6 +9,7 @@ permissions:
 jobs:
   coeur-et-compilation:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Outils (MinGW pour la cible Windows)
@@ -40,6 +41,7 @@ jobs:
             installer/KeyboardLayoutFixer-Setup.exe
   scripts-windows:
     runs-on: windows-latest
+    timeout-minutes: 15
     needs: coeur-et-compilation
     steps:
       - uses: actions/checkout@v4

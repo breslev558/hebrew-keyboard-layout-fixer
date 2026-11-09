@@ -2,6 +2,7 @@
 # Vérifie aussi qu'un AUTRE programme de démarrage (valeur de test) reste intact.
 # Sans KeyboardLayoutFixer-Setup.exe (téléchargé par la CI), le test est sauté.
 $ErrorActionPreference = 'Stop'
+# (Start-Process -Wait attendrait aussi le programme lancé par l'installeur, qui ne s'arrête jamais)
 $setup = Join-Path $PSScriptRoot '..\KeyboardLayoutFixer-Setup.exe'
 if (-not (Test-Path -LiteralPath $setup)) { 'SAUTE : KeyboardLayoutFixer-Setup.exe absent'; exit 0 }
 $run = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
@@ -12,7 +13,8 @@ function Verifie([string]$n, [bool]$c) { if ($c) { $script:ok++; "OK    $n" } el
 if (-not (Test-Path -LiteralPath $run)) { New-Item -Path $run | Out-Null }
 New-ItemProperty -Path $run -Name 'KLF-Test-Autre' -Value '"C:\x\autre.exe"' -PropertyType String -Force | Out-Null
 try {
-    $p = Start-Process -FilePath $setup -ArgumentList '/S' -PassThru -Wait
+    $p = Start-Process -FilePath $setup -ArgumentList '/S' -PassThru
+    if (-not $p.WaitForExit(120000)) { throw "installeur bloqué" }
     Verifie 'installeur : code 0' ($p.ExitCode -eq 0)
     Verifie 'programme copié' (Test-Path -LiteralPath (Join-Path $dest 'KeyboardLayoutFixer.exe'))
     Verifie 'désinstalleur copié' (Test-Path -LiteralPath (Join-Path $dest 'Uninstall.exe'))
@@ -27,12 +29,14 @@ try {
     # mise à jour par-dessus, programme en marche : elle le ferme et réussit ; le démarrage que
     # l'utilisateur a coupé reste coupé
     Remove-ItemProperty -Path $run -Name 'KeyboardLayoutFixer'
-    $p = Start-Process -FilePath $setup -ArgumentList '/S' -PassThru -Wait
+    $p = Start-Process -FilePath $setup -ArgumentList '/S' -PassThru
+    if (-not $p.WaitForExit(120000)) { throw "installeur bloqué" }
     Verifie 'réinstallation par-dessus : code 0' ($p.ExitCode -eq 0)
     Verifie 'mise à jour : démarrage coupé reste coupé' ($null -eq (Get-ItemProperty -LiteralPath $run).KeyboardLayoutFixer)
     New-ItemProperty -Path $run -Name 'KeyboardLayoutFixer' -Value ('"' + (Join-Path $dest 'KeyboardLayoutFixer.exe') + '"') -PropertyType String -Force | Out-Null
     # désinstallation (le désinstalleur NSIS se relance depuis le dossier temporaire : on attend)
-    Start-Process -FilePath (Join-Path $dest 'Uninstall.exe') -ArgumentList '/S' -Wait
+    $u = Start-Process -FilePath (Join-Path $dest 'Uninstall.exe') -ArgumentList '/S' -PassThru
+    [void]$u.WaitForExit(60000)
     for ($i = 0; $i -lt 60 -and (Test-Path -LiteralPath $arp); $i++) { Start-Sleep -Milliseconds 500 }
     Start-Sleep -Seconds 2
     Verifie 'entrée Applications installées retirée' (-not (Test-Path -LiteralPath $arp))

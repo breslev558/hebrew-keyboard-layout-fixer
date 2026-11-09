@@ -930,7 +930,7 @@ fn start_hotkey(hwnd: HWND, action: Action, delayed: bool) {
     if !delayed {
         PENDING.with(|p| p.set(None));
     }
-    // no language/Caps Lock sign during the conversion (its own switch, F9's Caps Lock press)
+    // no language/Caps Lock sign during the conversion (its own switch, the Caps Lock press after F9 or F10)
     crate::indicator::after_conversion();
     let mut s = settings();
     s.action = action;
@@ -939,11 +939,12 @@ fn start_hotkey(hwnd: HWND, action: Action, delayed: bool) {
     }
     let owner = hwnd as usize;
     let vk = key_to_vk(if action == Action::Case { s.case_hotkey_key } else { s.hotkey_key }) as u16;
-    // Caps Lock at F9: state read on the window that receives the keys + count of Caps Lock
+    // Caps Lock at the hotkey (F9, and F10 since 1.8.3): state read on the window that receives the keys + count of Caps Lock
     // presses so far (UI thread, before any key is sent; audit 1.3.7 P2)
     // the target is the window in the foreground NOW, at the hotkey (audit A03)
     let fg_at_hotkey = target::foreground() as usize;
-    let caps_at_hotkey = if action == Action::Case && s.turn_off_caps_lock {
+    // (1.8.3: at F10 too, which switches Caps Lock off after turning "AKUO" into שלום)
+    let caps_at_hotkey = if s.turn_off_caps_lock {
         let fg = fg_at_hotkey as HWND;
         let state = if fg.is_null() { None } else { crate::platform::input::caps_lock_on_now(fg) };
         (state, crate::platform::input::caps_presses())

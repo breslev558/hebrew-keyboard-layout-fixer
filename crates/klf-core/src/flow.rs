@@ -291,6 +291,20 @@ const SETTLE_MAX_MS: u64 = 100;
 const AFTER_RELEASE_MS: u64 = 20;
 pub const CONSOLE_MAX_CHARS: usize = 300;
 
+/// 1.8.3: Latin text all in capitals (2 letters or more, none small), such as "AKUO": typed with
+/// Caps Lock on. When F10 turns it into Hebrew, Caps Lock is switched off too (it is on, or the
+/// next Hebrew words would come out as Latin capitals again).
+pub fn typed_with_caps_lock(text: &str) -> bool {
+    let latin: Vec<char> = text.chars().filter(|c| c.is_alphabetic() && !crate::layouts::is_hebrew_letter(*c)).collect();
+    latin.len() >= 2 && latin.iter().all(|c| c.is_uppercase())
+}
+
+/// The whole text was Latin capitals (no Hebrew letter in it) and the result is Hebrew with no
+/// Latin capital left: the same rule for the clipboard and the console paths.
+pub fn caps_fixed_to_hebrew(text: &str, out: &str) -> bool {
+    typed_with_caps_lock(text) && !contains_hebrew(text) && contains_hebrew(out) && !out.chars().any(|c| c.is_alphabetic() && c.is_uppercase() && !crate::layouts::is_hebrew_letter(c))
+}
+
 /// The conversion of this run: keyboard layout (F10) or Caps Lock case swap (F9).
 fn transform(s: &AppSettings, map: &KeyMap, text: &str) -> String {
     match s.action {
@@ -612,7 +626,7 @@ fn convert_window(
         }
         return Outcome::say(Msg::KeysBlocked, "Ctrl+V not sent, NOT pasted");
     }
-    if s.action == Action::Case && s.turn_off_caps_lock {
+    if s.turn_off_caps_lock && (s.action == Action::Case || (s.action == Action::Layout && caps_fixed_to_hebrew(text, &out))) {
         host.caps_lock_off();
     }
     trace.mark(Step::WaitBeforeRestore, host.now_ms());
@@ -822,6 +836,7 @@ fn console_line(
     if out == text {
         return Err(Outcome::say(Msg::NothingToConvert, "Console: text unchanged"));
     }
+    let caps_typed = caps_fixed_to_hebrew(&text, &out);
     let view = ConsoleView { procs, mode, home, end, count, text };
     if !console_unchanged(host, target, &view) {
         return Err(Outcome::say(Msg::WindowChanged, "Console: cursor, line, mode or programs changed, NOT replaced"));
@@ -833,7 +848,7 @@ fn console_line(
     if s.switch_language_after_convert && s.action == Action::Layout {
         host.switch_language(target, contains_hebrew(&out));
     }
-    if s.action == Action::Case && s.turn_off_caps_lock {
+    if s.turn_off_caps_lock && (s.action == Action::Case || (s.action == Action::Layout && caps_typed)) {
         host.caps_lock_off();
     }
     let who = match reader {
@@ -1874,6 +1889,38 @@ mod tests {
         s.require_selection = true;
         let o = run(&mut m, &s);
         assert!(m.c_replaced.borrow().is_none(), "RequireSelection changed an unselected console command: {}", o.log);
+    }
+
+    // ---- 1.8.3 : F10 on text typed with Caps Lock ----
+
+    #[test]
+    fn f10_on_capitals_to_hebrew_turns_caps_lock_off() {
+        assert!(typed_with_caps_lock("AKUO"));
+        assert!(typed_with_caps_lock("AKUO 123"));
+        assert!(!typed_with_caps_lock("Akuo") && !typed_with_caps_lock("A") && !typed_with_caps_lock("akuo") && !typed_with_caps_lock("שלום"));
+        assert!(caps_fixed_to_hebrew("AKUO", "שלום"));
+        assert!(!caps_fixed_to_hebrew("שלום AB", "akuo שב"), "mixed text: Caps Lock left alone");
+        assert!(!caps_fixed_to_hebrew("AKUO", "AKUO"), "capitals left in the result");
+        let mut m = Mock::new();
+        *m.selected.borrow_mut() = Some("AKUO".into());
+        let o = run(&mut m, &settings());
+        assert_eq!(o.msg, Some(Msg::Converted), "{}", o.log);
+        assert_eq!(m.pasted.borrow().as_deref(), Some("שלום"));
+        assert!(m.happened("caps-off"), "Caps Lock switched off after AKUO -> שלום");
+        // small letters, or Hebrew to Latin: Caps Lock left alone
+        let mut m = Mock::new();
+        *m.selected.borrow_mut() = Some("akuo".into());
+        run(&mut m, &settings());
+        assert!(!m.happened("caps-off"));
+        let mut m = Mock::new();
+        *m.selected.borrow_mut() = Some("שלום".into());
+        run(&mut m, &settings());
+        assert!(!m.happened("caps-off"));
+        // the user's choice "do not switch Caps Lock off" is kept
+        let mut m = Mock::new();
+        *m.selected.borrow_mut() = Some("AKUO".into());
+        run(&mut m, &AppSettings { turn_off_caps_lock: false, ..settings() });
+        assert!(!m.happened("caps-off"));
     }
 
     // ---- 1.3.5 : Caps Lock fix (F9) ----

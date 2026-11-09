@@ -227,7 +227,7 @@ impl Host for WinHost {
         }
     }
     fn caps_lock_off(&self) {
-        // one press ONLY if it was on at F9, is still on now, and Caps Lock was not pressed in
+        // one press ONLY if it was on at the hotkey, is still on now, and Caps Lock was not pressed in
         // between (seen by the hook): otherwise it is left as it is, never a press "to be sure"
         // (audit 1.3.7, P2; rule tested in klf_core::policy).
         let (was, presses_before) = self.caps_at_hotkey;

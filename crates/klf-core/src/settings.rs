@@ -162,6 +162,12 @@ pub struct AppSettings {
     // --- new in 1.8.0 : correction while typing (public install only, off by default) ---
     #[serde(rename = "TypingSuggestions", deserialize_with = "de_bool_false")]
     pub typing_suggestions: bool,
+    /// 1.8.1: never in code editors (VS Code, Visual Studio, JetBrains...): F10 only there
+    #[serde(rename = "TypingSkipCodeEditors", deserialize_with = "de_bool_true")]
+    pub typing_skip_code_editors: bool,
+    /// 1.8.1: two quick taps on Shift convert like F10 (public install only, off by default)
+    #[serde(rename = "DoubleShiftConvert", deserialize_with = "de_bool_false")]
+    pub double_shift_convert: bool,
     // --- new in 1.5.5 : update in one click (public per-user install only) ---
     #[serde(rename = "CheckUpdates", deserialize_with = "de_bool_true")]
     pub check_updates: bool,
@@ -281,6 +287,8 @@ impl Default for AppSettings {
             welcome_done: false,
             report_mode: 0,
             typing_suggestions: false,
+            typing_skip_code_editors: true,
+            double_shift_convert: false,
             update_skip_tag: String::new(),
             update_skip_at: 0,
             ui_language: UiLanguage::Auto,

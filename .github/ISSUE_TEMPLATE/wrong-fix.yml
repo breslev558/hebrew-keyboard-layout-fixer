@@ -1,0 +1,42 @@
+name: Wrong fix while typing
+description: The optional "fix while typing" changed a word it should not have, or missed one
+labels: [typing-fix]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you! Please give **one word only**, never a sentence, a password or personal text.
+        Accepted reports become a line of `tests/typing-cases.tsv`, checked by the automatic tests.
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What happened?
+      options:
+        - A correct word was proposed for a fix (should be kept)
+        - A word typed on the wrong layout was not fixed
+    validations:
+      required: true
+  - type: dropdown
+    id: layout
+    attributes:
+      label: Keyboard layout the word was typed with
+      options: [English (Latin), Hebrew]
+    validations:
+      required: true
+  - type: input
+    id: typed
+    attributes:
+      label: The word exactly as it appeared on the screen
+      placeholder: "akuo"
+    validations:
+      required: true
+  - type: input
+    id: meant
+    attributes:
+      label: The word you meant (for a missed fix) or "keep"
+      placeholder: "שלום"
+  - type: input
+    id: version
+    attributes:
+      label: Program version
+      placeholder: "1.8.1"

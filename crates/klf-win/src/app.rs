@@ -72,6 +72,8 @@ const CMD_REPORT_NEVER: usize = 116;
 const MENU_REPORTS: usize = 199;
 // 1.8.0: correction while typing (public install only)
 const CMD_TYPING: usize = 117;
+const CMD_TYPING_WORDS: usize = 118;
+const CMD_DOUBLE_SHIFT: usize = 119;
 /// End of a timed pause (10 minutes).
 const TIMER_PAUSE_END: usize = 3;
 const TIMED_PAUSE_MS: u32 = 10 * 60 * 1000;
@@ -745,6 +747,10 @@ fn show_menu(hwnd: HWND) {
     }
     if crate::typing::allowed() {
         items.push((CMD_TYPING, text(l, Msg::MenuTyping).to_string(), s.typing_suggestions));
+        if s.typing_suggestions {
+            items.push((CMD_TYPING_WORDS, text(l, Msg::MenuTypingWords).to_string(), false));
+        }
+        items.push((CMD_DOUBLE_SHIFT, text(l, Msg::MenuDoubleShift).to_string(), s.double_shift_convert));
     }
     let reports = crate::report::enabled();
     if reports {
@@ -842,6 +848,14 @@ struct Done {
     outcome: Outcome,
     caret: Option<(i32, i32)>,
     target: usize,
+}
+
+/// 1.8.1: double Shift (option) converts like the layout key.
+pub fn convert_now() {
+    let hwnd = main_window();
+    if !hwnd.is_null() && !busy() {
+        on_hotkey(hwnd, Action::Layout);
+    }
 }
 
 fn on_hotkey(hwnd: HWND, action: Action) {
@@ -1027,6 +1041,10 @@ fn on_done(hwnd: HWND) {
     }
     log(&done.outcome.log);
     crate::report::after_conversion(hwnd, done.outcome.msg);
+    // 1.8.1: a single word fixed with F10 is learned by the "fix while typing" option
+    if let (Some(Msg::Converted), Some((before, after))) = (done.outcome.msg, &done.outcome.preview) {
+        crate::typing::learn_from_f10(before, after);
+    }
     let s = settings();
     if let Some(msg) = done.outcome.msg {
         if s.show_bubble {
@@ -1104,6 +1122,14 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 }
                 CMD_PAUSE10 => pause_for_a_while(),
                 CMD_REPORT_SEND => crate::report::send_pending(hwnd),
+                CMD_TYPING_WORDS if crate::typing::allowed() => crate::typing::open_personal(),
+                CMD_DOUBLE_SHIFT if crate::typing::allowed() => {
+                    let mut s = user_settings();
+                    s.double_shift_convert = !s.double_shift_convert;
+                    if save_settings(&s) {
+                        apply_settings(s);
+                    }
+                }
                 CMD_TYPING if crate::typing::allowed() => {
                     let mut s = user_settings();
                     s.typing_suggestions = !s.typing_suggestions;
@@ -1225,6 +1251,16 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 settings_ui::refresh_status();
             }
             0
+        }
+        WM_POWERBROADCAST | WM_WTSSESSION_CHANGE => {
+            // sleep, lock, user switch: the words kept are forgotten (not for a battery change)
+            let suspend = msg == WM_POWERBROADCAST && wparam == PBT_APMSUSPEND as usize;
+            let away = msg == WM_WTSSESSION_CHANGE && matches!(wparam as u32, 2 | 4 | 7); // console/remote disconnect, lock
+            if suspend || away {
+                crate::typing::reset();
+            }
+            // SAFETY: default handling.
+            unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
         }
         WM_DESTROY => {
             unregister_hotkey();

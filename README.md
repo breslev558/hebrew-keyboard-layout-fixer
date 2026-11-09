@@ -56,9 +56,12 @@ To update by hand, run the new installer over the existing installation: the run
 - **Settings window** (click the icon), in English, Hebrew or French: change the keys, conversion direction, careful mode (selection only), Caps Lock behaviour, confirmation bubble (top, bottom or near the cursor), per-program rules, diagnostic and export/import of your settings.
 
 ### Fix while typing (optional, off by default)
-Tray menu › **Suggest fixes while typing (Tab)**. While you type, when the keys of the last words spell a real word on the *other* layout (and not on the current one), a small bubble shows the fix: **Tab** fixes the whole run of wrong words and switches the keyboard; any other key ignores it. Names, brands and typos are left alone, because their other reading is not a word. Never in password fields, consoles, administrator windows, full-screen games or presentations, or programs you turned the fixer off for.
+Tray menu › **Suggest fixes while typing (Tab)**. While you type, when the keys of the last words spell a real word on the *other* layout (and not on the current one), a small bubble shows the fix: **Tab** fixes the whole run of wrong words and switches the keyboard; any other key ignores it. Names, brands and typos are left alone, because their other reading is not a word. It learns from you: a single word you fix with **F10** is fixed at once next time, and **Backspace** right after a fix undoes it and that word is never fixed again (your list: tray menu › **My words…**). Never in password fields, consoles, administrator windows, full-screen games or presentations, code editors (VS Code, Visual Studio, JetBrains…, by default), or programs you turned the fixer off for. Wrong or missing fix? Use the [wrong fix form](https://github.com/breslev558/hebrew-keyboard-layout-fixer/issues/new?template=wrong-fix.yml): real cases go into `tests/typing-cases.tsv`, checked by the tests.
 
 To do this the program watches the keys typed (a low-level keyboard hook), **only while this option is on**. It keeps only the last few words, in memory, and forgets them on a click, arrow keys, Enter, a shortcut, another window or a pause. Nothing is written to disk or sent. The word lists (Hebrew and English, 40,000 words each) are downloaded once from this repository when you switch the option on, signed and checked before use (see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)). Not available when an administrator manages the PC.
+
+### Double-tap Shift (optional)
+Tray menu › **Double-tap Shift to convert**: two quick taps on Shift convert like F10, handy on laptops where F10 needs the Fn key. Off by default; never with Ctrl, Alt or Win held, in full-screen games, or in JetBrains IDEs (where double Shift opens their search).
 
 ### Updates
 Once a day the program asks GitHub whether a newer version exists. If one does, a bubble tells you and the tray menu offers **Install version X**. Nothing is installed without your click. Before the new version replaces the old one, the program checks its SHA-256 and a digital signature made with a key kept outside GitHub (using Windows cryptography). The old version stays in place if anything fails. You can switch updates off with **Check for updates** in the tray menu. Updates are disabled when settings are enforced by an administrator (see *For administrators*).
@@ -114,7 +117,7 @@ bash tools/construire.sh
 The script runs the tests, checks the dependency licences and builds `target/x86_64-pc-windows-gnu/release/KeyboardLayoutFixer.exe` with a `BUILD-INFO.txt`. The installer is built with NSIS: `makensis -DVERSION=x.y.z -DEXE=… -DICON=crates/klf-win/res/klf.ico installer/KeyboardLayoutFixer.nsi`. The same checks run on GitHub for every change. Releases are built by `.github/workflows/release.yml`, with a build provenance attestation. Manual checks on Windows are listed in `TESTS.md`.
 
 ### Project files
-[CHANGELOG.md](CHANGELOG.md) · [CONTRIBUTING.md](CONTRIBUTING.md) (issues and pull requests) · [SECURITY.md](SECURITY.md) (report security problems privately) · [CODE_SIGNING_POLICY.md](CODE_SIGNING_POLICY.md) · [audits/](audits)
+[CHANGELOG.md](CHANGELOG.md) · [PRIVACY.md](PRIVACY.md) · [PERFORMANCE.md](PERFORMANCE.md) · [CONTRIBUTING.md](CONTRIBUTING.md) (issues and pull requests) · [SECURITY.md](SECURITY.md) (report security problems privately) · [CODE_SIGNING_POLICY.md](CODE_SIGNING_POLICY.md) · [audits/](audits)
 
 ## Français
 

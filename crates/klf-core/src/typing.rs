@@ -4,7 +4,7 @@
 //! other layout is a REAL word and what was typed is not: names, brands and typos are left alone.
 //! The word lists are separate data files (see THIRD_PARTY_NOTICES.md), never compiled in.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// Hebrew one-letter prefixes (ו ה ש ב ל מ כ): "והלכתי" is a word if "הלכתי" is.
 const HE_PREFIXES: &[char] = &['ו', 'ה', 'ש', 'ב', 'ל', 'מ', 'כ'];
@@ -15,22 +15,79 @@ pub const MAX_WORD_CHARS: usize = 30;
 
 #[derive(Debug, Default)]
 pub struct Dict {
-    he: HashSet<String>,
-    en: HashSet<String>,
+    /// word -> rank (0 = most frequent)
+    he: HashMap<String, u32>,
+    en: HashMap<String, u32>,
+    /// 1.8.1, personal dictionary (priority over the lists): words of the user, valid in either
+    /// language; and words never to fix (learned when a fix is undone), in lower case
+    personal: HashSet<String>,
+    never: HashSet<String>,
+    /// words the user fixed with F10 ("+word"): fixed at once next time
+    learned: HashSet<String>,
+}
+
+/// The personal file: one word per line; "-word" = never fix this word as typed; "+word" = a word
+/// fixed with F10, fixed at once next time. "#" comments.
+pub fn parse_personal(text: &str) -> (HashSet<String>, HashSet<String>) {
+    let p = parse_personal_full(text);
+    (p.0, p.1)
+}
+
+pub fn parse_personal_full(text: &str) -> (HashSet<String>, HashSet<String>, HashSet<String>) {
+    let (mut known, mut never, mut learned) = (HashSet::new(), HashSet::new(), HashSet::new());
+    for l in text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).take(10_000) {
+        let (set, w) = match (l.strip_prefix('-'), l.strip_prefix('+')) {
+            (Some(w), _) => (&mut never, w.trim()),
+            (_, Some(w)) => (&mut learned, w.trim()),
+            _ => (&mut known, l),
+        };
+        if !w.is_empty() {
+            set.insert(w.to_lowercase());
+        }
+    }
+    // a word never to fix wins over a learned one
+    learned.retain(|w| !never.contains(w));
+    (known, never, learned)
+}
+
+/// Line added to the personal file when a single word was fixed with F10.
+pub fn learned_line(typed: &str) -> Option<String> {
+    let w = typed.trim();
+    (w.chars().count() >= 2 && w.chars().count() <= MAX_WORD_CHARS && w.chars().all(|c| c.is_alphabetic() || c == '\'')).then(|| format!("+{}", w.to_lowercase()))
+}
+
+/// Line added to the personal file when a fix is undone.
+pub fn never_line(typed: &str) -> String {
+    format!("-{}", typed.trim().to_lowercase())
 }
 
 impl Dict {
     /// Lists of "word [count]" lines, most frequent first; only the first `max` words are kept.
     pub fn from_lists(he: &str, en: &str, max: usize) -> Dict {
-        let take = |t: &str, lower: bool| -> HashSet<String> {
-            t.lines()
-                .filter_map(|l| l.split_whitespace().next())
-                .filter(|w| !w.is_empty() && w.chars().count() <= MAX_WORD_CHARS)
-                .take(max)
-                .map(|w| if lower { w.to_lowercase() } else { w.to_string() })
-                .collect()
+        let take = |t: &str, lower: bool| -> HashMap<String, u32> {
+            let mut m = HashMap::new();
+            for (i, w) in t.lines().filter_map(|l| l.split_whitespace().next()).filter(|w| !w.is_empty() && w.chars().count() <= MAX_WORD_CHARS).take(max).enumerate() {
+                m.entry(if lower { w.to_lowercase() } else { w.to_string() }).or_insert(i as u32);
+            }
+            m
         };
-        Dict { he: take(he, false), en: take(en, true) }
+        Dict { he: take(he, false), en: take(en, true), personal: HashSet::new(), never: HashSet::new(), learned: HashSet::new() }
+    }
+    /// The personal dictionary (replaces the previous one).
+    pub fn set_personal(&mut self, text: &str) {
+        let (k, n, l) = parse_personal_full(text);
+        self.personal = k;
+        self.never = n;
+        self.learned = l;
+    }
+    fn learned(&self, w: &str) -> bool {
+        self.learned.contains(&w.to_lowercase())
+    }
+    fn personal(&self, w: &str) -> bool {
+        self.personal.contains(&w.to_lowercase())
+    }
+    fn never(&self, w: &str) -> bool {
+        self.never.contains(&w.to_lowercase())
     }
     pub fn is_empty(&self) -> bool {
         self.he.is_empty() || self.en.is_empty()
@@ -38,13 +95,24 @@ impl Dict {
     /// The word itself is in the Hebrew list (no prefix removed): for a proposal, which must be
     /// sure (prefixed forms of common words are in the frequency list anyway).
     pub fn is_he_exact(&self, w: &str) -> bool {
-        self.he.contains(w)
+        self.he.contains_key(w)
     }
     pub fn is_en(&self, w: &str) -> bool {
-        self.en.contains(&w.to_lowercase())
+        self.en.contains_key(&w.to_lowercase())
+    }
+    /// A reading worth a proposal: short words must be common (3 letters: the 5 000 most
+    /// frequent, 4 letters: 20 000), as rare short words (names, slang) collide with typos.
+    pub fn common_enough(&self, read: &str, hebrew: bool) -> bool {
+        let rank = if hebrew { self.he.get(read) } else { self.en.get(&read.to_lowercase()) };
+        let Some(&r) = rank else { return false };
+        match read.chars().count() {
+            0..=3 => r < 5_000,
+            4 => r < 20_000,
+            _ => true,
+        }
     }
     pub fn is_he(&self, w: &str) -> bool {
-        if self.he.contains(w) {
+        if self.he.contains_key(w) {
             return true;
         }
         // up to two prefixes ("ושב...", "וה...")
@@ -54,7 +122,7 @@ impl Dict {
             match it.next() {
                 Some(c) if HE_PREFIXES.contains(&c) && it.as_str().chars().count() >= 2 => {
                     s = it.as_str();
-                    if self.he.contains(s) {
+                    if self.he.contains_key(s) {
                         return true;
                     }
                 }
@@ -74,6 +142,56 @@ pub struct Suggestion {
     pub to_hebrew: bool,
     /// the keyboard is left as it is (a capitals fix, not a layout fix)
     pub keep_layout: bool,
+    /// fixed without asking (a word the user taught with F10)
+    pub auto: bool,
+}
+
+/// Code editors: no correction while typing there by default (F10 still works).
+pub const CODE_EDITORS: &[&str] = &[
+    "code.exe", "code - insiders.exe", "cursor.exe", "windsurf.exe", "devenv.exe", "sublime_text.exe", "notepad++.exe",
+    "idea64.exe", "pycharm64.exe", "webstorm64.exe", "clion64.exe", "rider64.exe", "goland64.exe", "phpstorm64.exe",
+    "rubymine64.exe", "datagrip64.exe", "studio64.exe", "rustrover64.exe", "dataspell64.exe", "aqua64.exe", "idea.exe", "pycharm.exe", "fleet.exe", "zed.exe", "atom.exe", "eclipse.exe", "vim.exe", "gvim.exe",
+];
+
+pub fn is_code_editor(exe: &str) -> bool {
+    CODE_EDITORS.iter().any(|e| e.eq_ignore_ascii_case(exe))
+}
+
+/// A conversion made with F10 that the typing option may learn: one word, letters only, one
+/// side Hebrew and the other Latin. Returns the line for the personal file.
+pub fn f10_lesson(before: &str, after: &str) -> Option<String> {
+    f10_lesson_checked(before, after, None)
+}
+
+/// With the lists: only when what was typed is not a word and the result is one (an F10 that
+/// goes back, a part of a word or a real word converted by mistake teaches nothing), 3 letters
+/// or more, and never a word of the personal list.
+pub fn f10_lesson_checked(before: &str, after: &str, dict: Option<&Dict>) -> Option<String> {
+    let (b, a) = (before.trim(), after.trim());
+    if b.chars().count() < 3 {
+        return None;
+    }
+    if let Some(d) = dict {
+        let b_he = b.chars().any(crate::layouts::is_hebrew_letter);
+        let b_word = if b_he { d.is_he(b) } else { d.is_en(b) };
+        let a_word = if b_he { d.is_en(a) } else { d.is_he_exact(a) } || d.personal(a);
+        if b_word || !a_word || d.personal(b) || d.never(b) {
+            return None;
+        }
+    }
+    let he = |s: &str| s.chars().all(|c| crate::layouts::is_hebrew_letter(c) || c == '\'' || c == '"');
+    let la = |s: &str| s.chars().all(|c| (c.is_alphabetic() && !crate::layouts::is_hebrew_letter(c)) || c == '\'');
+    let (b, a) = (before.trim(), after.trim());
+    if b.contains(char::is_whitespace) || a.contains(char::is_whitespace) || !((he(b) && la(a)) || (la(b) && he(a))) {
+        return None;
+    }
+    learned_line(b)
+}
+
+/// Looks like code or a name made of parts: "getElementById", "iPhone", "McDonald".
+fn code_like(w: &str) -> bool {
+    let letters: Vec<char> = w.chars().filter(|c| c.is_alphabetic()).collect();
+    letters.iter().skip(1).any(|c| c.is_uppercase()) && !letters.iter().all(|c| c.is_uppercase())
 }
 
 fn letters_only(w: &str, hebrew: bool) -> bool {
@@ -88,10 +206,23 @@ pub fn suggest(words: &[(String, String)], hebrew_active: bool, dict: &Dict) -> 
         return None;
     }
     let wrong = |typed: &str, read: &str| -> bool {
+        // personal dictionary first: a word of the user, or a word never to fix, is never wrong;
+        // a reading that is a word of the user counts as a real word
+        if dict.never(typed) || dict.personal(typed) || (!hebrew_active && code_like(typed)) {
+            return false;
+        }
+        // taught with F10: wrong whatever the lists say
+        if dict.learned(typed) && letters_only(read, !hebrew_active) {
+            return true;
+        }
+        let typed_is_word = if hebrew_active { dict.is_he(typed) } else { dict.is_en(typed) };
+        if dict.personal(read) && letters_only(read, !hebrew_active) && !typed_is_word {
+            return true;
+        }
         if hebrew_active {
-            letters_only(read, false) && !dict.is_he(typed) && dict.is_en(read)
+            letters_only(read, false) && !dict.is_he(typed) && dict.common_enough(read, false)
         } else {
-            letters_only(read, true) && !dict.is_en(typed) && dict.is_he_exact(read)
+            letters_only(read, true) && !dict.is_en(typed) && dict.common_enough(read, true)
         }
     };
     let len = |s: &str| s.chars().count();
@@ -109,7 +240,9 @@ pub fn suggest(words: &[(String, String)], hebrew_active: bool, dict: &Dict) -> 
     let run = &words[start..];
     let erase = run.iter().map(|(t, _)| len(t)).sum::<usize>() + run.len(); // each word + its space
     let text = run.iter().map(|(_, r)| r.as_str()).collect::<Vec<_>>().join(" ") + " ";
-    Some(Suggestion { erase, text, to_hebrew: !hebrew_active, keep_layout: false })
+    // a single word taught with F10 is fixed at once (Backspace still undoes it)
+    let auto = run.len() == 1 && dict.learned(&run[0].0);
+    Some(Suggestion { erase, text, to_hebrew: !hebrew_active, keep_layout: false, auto })
 }
 
 /// "SHalom" -> "Shalom": two capitals then only small letters (4 letters or more, Latin), the
@@ -136,11 +269,11 @@ pub fn suggest_any(words: &[(String, String)], hebrew_active: bool, dict: &Dict)
         return Some(s);
     }
     let (last, _) = words.last()?;
-    if hebrew_active {
+    if hebrew_active || dict.never(last) {
         return None;
     }
     let fixed = two_capitals(last)?;
-    Some(Suggestion { erase: last.chars().count() + 1, text: format!("{fixed} "), to_hebrew: false, keep_layout: true })
+    Some(Suggestion { erase: last.chars().count() + 1, text: format!("{fixed} "), to_hebrew: false, keep_layout: true, auto: false })
 }
 
 /// The words being typed: letters are added, Backspace removes, Space ends a word. Anything
@@ -191,6 +324,51 @@ impl Buffer {
             self.words.remove(0);
         }
         Some((self.words.clone(), self.hebrew?))
+    }
+}
+
+/// 1.8.1, option: two quick taps on Shift convert like F10 (handy on laptops where F10 needs Fn).
+/// A tap is Shift pressed and released within `TAP_MS` with no other key; two taps must follow
+/// within `GAP_MS`. Any other key, or Shift held longer (typing a capital), starts again.
+pub const TAP_MS: u64 = 300;
+pub const GAP_MS: u64 = 400;
+
+#[derive(Debug, Default)]
+pub struct DoubleShift {
+    down_at: Option<u64>,
+    last_tap: Option<u64>,
+}
+
+impl DoubleShift {
+    /// One key event; true when the second quick tap ends.
+    pub fn key(&mut self, is_shift: bool, down: bool, now: u64) -> bool {
+        if !is_shift {
+            if down {
+                *self = DoubleShift::default();
+            }
+            return false;
+        }
+        if down {
+            if self.down_at.is_none() {
+                self.down_at = Some(now); // key repeat while held: ignored
+            }
+            return false;
+        }
+        let Some(d) = self.down_at.take() else { return false };
+        if now.saturating_sub(d) > TAP_MS {
+            self.last_tap = None; // held: a capital letter, not a tap
+            return false;
+        }
+        match self.last_tap {
+            Some(l) if now.saturating_sub(l) <= GAP_MS => {
+                self.last_tap = None;
+                true
+            }
+            _ => {
+                self.last_tap = Some(now);
+                false
+            }
+        }
     }
 }
 
@@ -254,7 +432,7 @@ mod tests {
     #[test]
     fn latin_keys_that_spell_a_hebrew_word() {
         let s = suggest(&[w("akuo", "שלום")], false, &dict()).unwrap();
-        assert_eq!(s, Suggestion { erase: 5, text: "שלום ".into(), to_hebrew: true, keep_layout: false });
+        assert_eq!(s, Suggestion { erase: 5, text: "שלום ".into(), to_hebrew: true, keep_layout: false, auto: false });
     }
 
     #[test]
@@ -280,6 +458,75 @@ mod tests {
         let d = dict();
         assert!(d.is_he("והלכתי") && !d.is_he("וכשהלכתי") && d.is_he("שהלכתי"));
         assert!(suggest(&[w("וקט", "and")], true, &d).is_none(), "not an English word: nothing");
+    }
+
+    #[test]
+    fn personal_dictionary_has_priority_and_undo_teaches() {
+        let mut d = dict();
+        assert!(suggest(&[w("akuo", "שלום")], false, &d).is_some());
+        d.set_personal(&format!("# my words\nakuo\n{}\nבריסלב\n", never_line("XXX")));
+        assert!(suggest(&[w("akuo", "שלום")], false, &d).is_none(), "a word of the user is never fixed");
+        assert!(suggest(&[w("cr,xkc", "בריסלב")], false, &d).is_some(), "a personal word counts as a real word");
+        d.set_personal(&never_line("Akuo"));
+        assert!(suggest(&[w("akuo", "שלום")], false, &d).is_none(), "after an undo: never again (case ignored)");
+        assert_eq!(parse_personal("-\n  \nא\n").0.len(), 1);
+    }
+
+    #[test]
+    fn f10_teaches_and_code_is_left_alone() {
+        let mut d = dict();
+        // "cr,xkc" (בריסלב) is in no list: nothing, until the user fixes it once with F10
+        assert!(suggest(&[w("cr,xkc", "בריסלב")], false, &d).is_none());
+        d.set_personal(&learned_line("cr,xkc").unwrap_or_default());
+        assert_eq!(learned_line("akuo").as_deref(), Some("+akuo"));
+        assert_eq!(learned_line("a b"), None, "a single word only");
+        // learned_line refuses signs: "cr,xkc" itself is not taught that way; the word taught is a letters word
+        d.set_personal("+zzzz\n");
+        let s = suggest(&[w("zzzz", "זזזז")], false, &d).unwrap();
+        assert!(s.auto, "taught with F10: fixed at once");
+        d.set_personal("+zzzz\n-zzzz\n");
+        assert!(suggest(&[w("zzzz", "זזזז")], false, &d).is_none(), "never wins over learned");
+        assert!(suggest(&[w("getElementById", "שלום")], false, &dict()).is_none(), "code-like word: never");
+        assert!(!code_like("CR,XKC"), "Caps Lock: not code");
+    }
+
+    #[test]
+    fn what_f10_teaches() {
+        assert_eq!(f10_lesson("akuo", "שלום").as_deref(), Some("+akuo"));
+        assert_eq!(f10_lesson("שלום", "akuo").as_deref(), Some("+שלום"));
+        assert_eq!(f10_lesson("akuo kuo", "שלום לום"), None, "one word only");
+        let d = dict();
+        assert_eq!(f10_lesson_checked("akuo", "שלום", Some(&d)).as_deref(), Some("+akuo"));
+        assert_eq!(f10_lesson_checked("שלום", "akuo", Some(&d)), None, "an F10 that goes back teaches nothing");
+        assert_eq!(f10_lesson_checked("kuo", "לום", Some(&d)), None, "a part of a word teaches nothing");
+        assert_eq!(f10_lesson_checked("ab", "שנ", Some(&d)), None, "too short");
+        assert_eq!(f10_lesson("hELLO", "Hello"), None, "a Caps Lock fix is not a layout lesson");
+        assert!(is_code_editor("Code.exe") && !is_code_editor("winword.exe"));
+    }
+
+    #[test]
+    fn double_shift_only_for_two_quick_lonely_taps() {
+        let mut d = DoubleShift::default();
+        assert!(!d.key(true, true, 0) && !d.key(true, false, 80));
+        assert!(!d.key(true, true, 200) && d.key(true, false, 260), "two quick taps");
+        // Shift held to type a capital, then a tap: nothing
+        assert!(!d.key(true, true, 1000) && !d.key(true, false, 1500) && !d.key(true, true, 1600) && !d.key(true, false, 1650));
+        // a letter between the taps: nothing
+        let mut d = DoubleShift::default();
+        d.key(true, true, 0);
+        d.key(true, false, 50);
+        d.key(false, true, 100);
+        assert!(!d.key(true, true, 150) && !d.key(true, false, 200));
+        // taps too far apart
+        let mut d = DoubleShift::default();
+        d.key(true, true, 0);
+        d.key(true, false, 50);
+        assert!(!d.key(true, true, 600) && !d.key(true, false, 650));
+        // key repeat while held does not count as a second tap
+        let mut d = DoubleShift::default();
+        d.key(true, true, 0);
+        d.key(true, true, 30);
+        assert!(!d.key(true, false, 60));
     }
 
     #[test]
@@ -392,5 +639,39 @@ mod measure {
         for r in rows {
             println!("{r}");
         }
+    }
+}
+
+/// tests/typing-cases.tsv: real cases reported by users, checked with the real word lists.
+#[cfg(test)]
+mod cases {
+    use super::*;
+    use crate::convert::{convert_with, us_map};
+    use crate::settings::MixedTextMode;
+
+    #[test]
+    fn typing_cases() {
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../");
+        let read = |p: &str| std::fs::read_to_string(format!("{root}{p}")).ok();
+        let (Some(he), Some(en), Some(cases)) = (read("data/words/KeyboardLayoutFixer-words-he.txt"), read("data/words/KeyboardLayoutFixer-words-en.txt"), read("tests/typing-cases.tsv")) else { return };
+        let d = Dict::from_lists(&he, &en, DICT_SIZE);
+        let m = us_map();
+        let mut bad = Vec::new();
+        for l in cases.lines().filter(|l| !l.trim().is_empty() && !l.starts_with('#')) {
+            let c: Vec<&str> = l.split('\t').collect();
+            assert!(c.len() >= 3, "bad line: {l}");
+            let (expect, hebrew, typed) = (c[0], c[1] == "he", c[2]);
+            let read = convert_with(&m, typed, MixedTextMode::ToggleAll, true);
+            let got = suggest_any(&[(typed.to_string(), read.clone())], hebrew, &d);
+            let ok = match expect {
+                "fix" => got.as_ref().is_some_and(|s| c.get(3).is_none_or(|w| s.text.trim() == w.trim())),
+                "keep" => got.is_none(),
+                other => panic!("expect must be fix or keep, not {other}"),
+            };
+            if !ok {
+                bad.push(format!("{l}  ->  {:?}", got.map(|s| s.text)));
+            }
+        }
+        assert!(bad.is_empty(), "cases not met:\n{}", bad.join("\n"));
     }
 }

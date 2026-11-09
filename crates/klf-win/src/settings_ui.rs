@@ -854,6 +854,8 @@ fn on_import() {
     let mut new = new;
     new.report_mode = old.report_mode;
     new.typing_suggestions = old.typing_suggestions; // watching the keys is the user's own choice
+    new.double_shift_convert = old.double_shift_convert;
+    new.typing_skip_code_editors = old.typing_skip_code_editors;
     let diff = klf_core::profile::differences(&old, &new, &app::locked());
     if diff.is_empty() {
         message(text(l, Msg::ImportNothing), MB_ICONINFORMATION);

@@ -66,13 +66,26 @@ for ($essai = 1; $essai -le 3 -and -not $ok; $essai++) {
 }
 if (-not $ok) { Fail "impossible de taper « akuo » dans le Bloc-notes" }
 Start-Sleep 1
+$sw = [Diagnostics.Stopwatch]::StartNew()
 [W]::Key(0x79)   # F10
-Start-Sleep 4
+# temps jusqu'au texte corrigé (mesure de performance), 4 s au plus
+$cible = [string][char]0x05E9 + [char]0x05DC + [char]0x05D5 + [char]0x05DD
+while ($sw.ElapsedMilliseconds -lt 4000 -and (Texte) -ne $cible) { Start-Sleep -Milliseconds 20 }
+$ms = $sw.ElapsedMilliseconds
+Start-Sleep 1
 
 # 4. lecture du texte du Bloc-notes
 $txt = Texte
 Stop-Process -Id $n.Id -Force -ErrorAction SilentlyContinue
 "Texte obtenu : '$txt'"
 if ($txt -ne ([string][char]0x05E9 + [char]0x05DC + [char]0x05D5 + [char]0x05DD)) { Fail "attendu « שלום »" }
-"OK    akuo + F10 = שלום (bout en bout)"
+"OK    akuo + F10 = shalom (bout en bout), en $ms ms"
+$pr = Get-Process KeyboardLayoutFixer -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($pr) {
+  $ws = [math]::Round($pr.WorkingSet64 / 1MB, 1); $pv = [math]::Round($pr.PrivateMemorySize64 / 1MB, 1); $cpu = [math]::Round($pr.TotalProcessorTime.TotalMilliseconds)
+  "MESURE mémoire de travail $ws Mo ; mémoire privée $pv Mo ; processeur depuis le démarrage $cpu ms ; correction F10 $ms ms"
+  if ($env:GITHUB_STEP_SUMMARY) {
+    @("### Mesures (Windows, machine GitHub)", "", "| Mesure | Valeur |", "|---|---|", "| Correction F10 (akuo -> shalom), de la touche au texte corrigé | $ms ms |", "| Mémoire de travail | $ws Mo |", "| Mémoire privée | $pv Mo |", "| Temps processeur depuis le démarrage | $cpu ms |") | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+  }
+}
 exit 0

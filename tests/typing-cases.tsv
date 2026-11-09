@@ -1,0 +1,18 @@
+# Real cases for the optional "fix while typing" (checked by `cargo test -p klf-core typing_cases`).
+# Columns (tab-separated): expect<TAB>layout<TAB>typed<TAB>meaning
+#   expect: fix (a fix must be proposed) or keep (nothing must be proposed)
+#   layout: the keyboard layout the word was typed with: en (Latin) or he (Hebrew)
+#   typed:  exactly the keys as they came out on the screen (one word)
+#   meaning: what the user meant (for fix) or a short note (for keep)
+# Add a line for every wrong or missing fix you report: never personal text, one word only.
+fix	en	akuo	שלום
+keep	en	nv	two letters alone
+keep	he	ןמ	two letters alone
+fix	he	יקךךם	hello
+fix	he	אםגשט	today
+keep	en	github	brand, English reading is not a Hebrew word
+keep	en	teh	typo, its Hebrew reading is no word
+keep	en	hello	a real English word
+keep	he	שלום	a real Hebrew word
+keep	en	getElementById	code
+keep	en	iPhone	brand with an inner capital

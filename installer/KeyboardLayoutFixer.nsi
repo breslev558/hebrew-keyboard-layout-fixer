@@ -16,7 +16,12 @@ RequestExecutionLevel user
   !error "VERSION manquante"
 !endif
 Name "Keyboard Layout Fixer"
-OutFile "KeyboardLayoutFixer-Setup.exe"
+; 1.7.0 : le même installeur pour le programme ARM64 (-DOUTFILE=KeyboardLayoutFixer-Setup-arm64.exe)
+!ifdef OUTFILE
+  OutFile "${OUTFILE}"
+!else
+  OutFile "KeyboardLayoutFixer-Setup.exe"
+!endif
 InstallDir "$LOCALAPPDATA\Programs\KeyboardLayoutFixer"
 BrandingText "Keyboard Layout Fixer ${VERSION}"
 VIProductVersion "${VERSION}.0"

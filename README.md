@@ -7,7 +7,7 @@ Fixes text typed with the wrong keyboard layout (Hebrew ⇄ English, also French
 
 <p align="center">
 <a href="https://github.com/breslev558/hebrew-keyboard-layout-fixer/releases/latest/download/KeyboardLayoutFixer-Setup.exe"><b>⬇ Download for Windows 10 / 11</b></a><br>
-<sub>one file, no administrator rights · <a href="https://github.com/breslev558/hebrew-keyboard-layout-fixer/releases/latest/download/KeyboardLayoutFixer.zip">zip version</a></sub>
+<sub>one file, no administrator rights · <a href="https://github.com/breslev558/hebrew-keyboard-layout-fixer/releases/latest/download/KeyboardLayoutFixer-Setup-arm64.exe">Windows on ARM version</a> · <a href="https://github.com/breslev558/hebrew-keyboard-layout-fixer/releases/latest/download/KeyboardLayoutFixer.zip">zip version</a> · <a href="https://breslev558.github.io/hebrew-keyboard-layout-fixer/">presentation page</a></sub>
 </p>
 
 <p align="center">
@@ -28,10 +28,10 @@ Fixes text typed with the wrong keyboard layout (Hebrew ⇄ English, also French
 - **F9** – fixes text typed with Caps Lock on (`hELLO wORLD` → `Hello World`) and switches Caps Lock off.
 - A small bubble shows what was converted (`akuo → שלום`); it can be switched off in the tray menu.
 - Your clipboard is saved beforehand and restored afterwards; password fields, administrator windows and consoles are left alone.
-- A small tray app (icon near the clock): one 650 KB executable written in Rust, no runtime to install, a few MB of memory.
+- A small tray app (icon near the clock): one executable of about 700 KB written in Rust, no runtime to install (no .NET), a few MB of memory. Native builds for x64 and ARM64 (Windows on ARM).
 
 ### Install (no administrator rights needed)
-1. [Download **KeyboardLayoutFixer-Setup.exe**](https://github.com/breslev558/hebrew-keyboard-layout-fixer/releases/latest/download/KeyboardLayoutFixer-Setup.exe) and double-click it.
+1. [Download **KeyboardLayoutFixer-Setup.exe**](https://github.com/breslev558/hebrew-keyboard-layout-fixer/releases/latest/download/KeyboardLayoutFixer-Setup.exe) and double-click it. On a Windows on ARM PC (Snapdragon, Copilot+), take [KeyboardLayoutFixer-Setup-arm64.exe](https://github.com/breslev558/hebrew-keyboard-layout-fixer/releases/latest/download/KeyboardLayoutFixer-Setup-arm64.exe) instead.
 2. That's all: the program is installed for your account only (in `%LOCALAPPDATA%\Programs\KeyboardLayoutFixer`), starts with Windows, appears near the clock and shows a short welcome window. (Without the installer: download the [zip](https://github.com/breslev558/hebrew-keyboard-layout-fixer/releases/latest/download/KeyboardLayoutFixer.zip), extract it and double-click **Installer.cmd**.)
 3. On first run, SmartScreen may show *“Windows protected your PC”* because the program is not yet signed by a public certificate (a free [SignPath](https://signpath.org) signature has been requested). To check the download, compare its SHA-256 with the one on the [release page](https://github.com/breslev558/hebrew-keyboard-layout-fixer/releases/latest) (`Get-FileHash KeyboardLayoutFixer-Setup.exe` in PowerShell), then click **More info › Run anyway**.
 

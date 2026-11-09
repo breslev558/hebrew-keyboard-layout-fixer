@@ -91,6 +91,44 @@ jobs:
       - name: Essais PowerShell
         shell: powershell
         run: Get-ChildItem tests-ps -Filter *.ps1 | ForEach-Object { & powershell -NoProfile -ExecutionPolicy Bypass -File $_.FullName; if ($LASTEXITCODE) { exit $LASTEXITCODE } }
+  arm64:
+    # programme pour les PC Windows à processeur ARM (Snapdragon), compilé et testé sur un vrai PC ARM
+    runs-on: windows-11-arm
+    timeout-minutes: 30
+    # attestation de provenance de l'exe ARM64 (vérifiée par le script de publication avant signature)
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Rust (version fixée) et cible ARM64
+        shell: pwsh
+        run: |
+          rustup show
+          rustup target add aarch64-pc-windows-msvc
+      - name: Tests du cœur sur ARM64
+        run: cargo test --locked -p klf-core --target aarch64-pc-windows-msvc
+      - name: Compilation ARM64
+        run: cargo build --locked --release --target aarch64-pc-windows-msvc -p KeyboardLayoutFixer
+      - name: Exe autonome (aucune DLL de Visual C++ requise)
+        shell: pwsh
+        run: |
+          $b = [IO.File]::ReadAllBytes("target/aarch64-pc-windows-msvc/release/KeyboardLayoutFixer.exe")
+          $t = [Text.Encoding]::ASCII.GetString($b)
+          if ($t -match 'VCRUNTIME140|vcruntime140|api-ms-win-crt') { Write-Host "ECHEC : l'exe dépend de la bibliothèque Visual C++"; exit 1 }
+          "OK exe ARM64 autonome, $($b.Length) octets"
+      - name: Clippy ARM64
+        run: |
+          rustup component add clippy
+          cargo clippy --locked --release --target aarch64-pc-windows-msvc -p KeyboardLayoutFixer -- -D warnings
+      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: target/aarch64-pc-windows-msvc/release/KeyboardLayoutFixer.exe
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: KeyboardLayoutFixer-arm64
+          path: target/aarch64-pc-windows-msvc/release/KeyboardLayoutFixer.exe
   bout-en-bout:
     # vrai essai sous Windows : installeur, Bloc-notes, « akuo » + F10 = « שלום ».
     # Non bloquant tant qu'il n'a pas prouvé sa fiabilité sur les machines de GitHub.

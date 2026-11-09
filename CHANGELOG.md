@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.7.0 (November 2026)
+- Native build for Windows on ARM (Snapdragon / Copilot+ PCs): KeyboardLayoutFixer-Setup-arm64.exe. It is built and tested on an ARM64 machine by GitHub Actions, and updates itself with its own ARM64 files. The x64 version runs as before.
+- Presentation page: https://breslev558.github.io/hebrew-keyboard-layout-fixer/ (short animation of F10).
+- Available with the Windows Package Manager once accepted by Microsoft: `winget install breslev558.KeyboardLayoutFixer`.
+
 ## 1.6.4 (November 2026)
 - Safer updates: the update is described by a signed file that includes its version, size and SHA-256, so an older signed release can never be passed off as a newer one. The new version is kept only once it has really started (window and keys ready); if it does not start within 60 seconds, the previous version is put back and started again automatically. No more fixed waiting time.
 - Copying from programs that offer dozens of private clipboard formats (Excel ranges) can no longer make F10 slow: past 300 ms, the remaining private formats are not kept (text, pictures and files always are).

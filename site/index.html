@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Keyboard Layout Fixer</title>
+<meta name="description" content="Typed akuo instead of שלום? Press F10. A tiny Windows 10/11 tray app that fixes text typed with the wrong keyboard layout (Hebrew ⇄ English, also French AZERTY).">
+<link rel="icon" href="logo.png">
+<style>
+:root{--bg:#f4f7fb;--fg:#0f1d2e;--muted:#506078;--card:#fff;--line:#d9e2ee;--accent:#1d5fd6;--teal:#13a89e;--key:#e9eef6}
+@media (prefers-color-scheme:dark){:root{--bg:#0d141f;--fg:#e6edf7;--muted:#9aabc2;--card:#152033;--line:#26344c;--accent:#6ea1ff;--teal:#39d0c4;--key:#1e2b42;color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 "Segoe UI",system-ui,-apple-system,sans-serif}
+main{max-width:860px;margin:0 auto;padding:40px max(16px,env(safe-area-inset-left)) 64px;display:flex;flex-direction:column;gap:40px}
+header{display:flex;flex-direction:column;align-items:center;text-align:center;gap:14px}
+header img{width:88px;height:88px}
+h1{margin:0;font-size:2.1rem;line-height:1.2;text-wrap:balance}
+h2{font-size:1.25rem;margin:0 0 10px}
+.lead{font-size:1.15rem;color:var(--muted);max-width:40ch;margin:0}
+.btn{display:inline-block;background:var(--accent);color:#fff;text-decoration:none;font-weight:600;padding:12px 22px;border-radius:8px}
+.btn:focus-visible{outline:3px solid var(--teal);outline-offset:3px}
+.small{font-size:.88rem;color:var(--muted)}
+.small a{color:var(--accent)}
+.demo{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:22px;display:flex;flex-direction:column;gap:14px;align-items:center}
+.field{width:min(420px,100%);height:56px;border:1px solid var(--line);border-radius:8px;display:flex;align-items:center;padding:0 16px;font-size:1.5rem;background:var(--bg)}
+.field .txt{white-space:pre}
+.caret{display:inline-block;width:2px;height:1.4em;background:var(--fg);margin-left:2px;animation:blink 1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+.kbd{display:inline-flex;align-items:center;justify-content:center;min-width:54px;height:40px;padding:0 10px;border:1px solid var(--line);border-bottom-width:3px;border-radius:7px;background:var(--key);font-weight:700;transition:transform .08s}
+.kbd.down{transform:translateY(2px);border-bottom-width:1px;background:var(--teal);color:#fff}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px}
+.grid div{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px}
+.grid h3{margin:0 0 4px;font-size:1rem}
+.grid p{margin:0;color:var(--muted);font-size:.94rem}
+.langs{display:grid;gap:12px}
+.langs p{margin:0}
+[dir=rtl]{text-align:right}
+footer{text-align:center}
+@media (prefers-reduced-motion:reduce){.caret{animation:none}}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <img src="logo.png" alt="Keyboard Layout Fixer icon: white A and turquoise Aleph on a blue square" width="88" height="88">
+    <h1>Typed <code>akuo</code> instead of <span lang="he">שלום</span>? Press F10.</h1>
+    <p class="lead">A tiny Windows 10/11 app that fixes text typed with the wrong keyboard layout: Hebrew ⇄ English, also French AZERTY, and text typed with Caps Lock on.</p>
+    <a class="btn" href="https://github.com/breslev558/hebrew-keyboard-layout-fixer/releases/latest/download/KeyboardLayoutFixer-Setup.exe">Download for Windows</a>
+    <p class="small">Free and open source (MIT) · no administrator rights · <a href="https://github.com/breslev558/hebrew-keyboard-layout-fixer/releases/latest">all downloads and checksums</a> · <a href="https://github.com/breslev558/hebrew-keyboard-layout-fixer">source code</a></p>
+  </header>
+
+  <section class="demo" aria-label="Animated example">
+    <div class="field" id="field" aria-live="polite"><span class="txt" id="txt"></span><span class="caret"></span></div>
+    <div><span class="kbd" id="key">F10</span></div>
+    <p class="small" id="cap">Typed with the English layout by mistake…</p>
+  </section>
+
+  <section class="grid">
+    <div><h3>One key</h3><p>Select the text and press F10. With nothing selected, the line is fixed from the cursor back to its start. F9 fixes Caps Lock mistakes.</p></div>
+    <div><h3>Private</h3><p>What you type is never sent or written to disk. Your clipboard is put back after each fix.</p></div>
+    <div><h3>Small and fast</h3><p>One native executable written in Rust, no runtime, a few MB of memory. Native ARM64 build too.</p></div>
+    <div><h3>Safe updates</h3><p>Optional, signed one-click updates, checked by Windows cryptography before anything is replaced.</p></div>
+  </section>
+
+  <section class="langs">
+    <h2>In your language</h2>
+    <p lang="fr"><b>Français :</b> vous avez tapé avec le mauvais clavier ? Sélectionnez le texte et appuyez sur F10. Gratuit, sans droits administrateur.</p>
+    <p lang="he" dir="rtl"><b>עברית:</b> הקלדתם בשפה הלא נכונה? סמנו את הטקסט ולחצו F10. חינם, ללא הרשאות מנהל.</p>
+  </section>
+
+  <footer class="small">Based on Keyboard Layout Fixer by Ravid Saadia (MIT). Rust rewrite by breslev558. <a href="https://github.com/breslev558/hebrew-keyboard-layout-fixer/blob/main/SECURITY.md">Security</a> · <a href="https://github.com/breslev558/hebrew-keyboard-layout-fixer/issues">Report a problem</a></footer>
+</main>
+<script>
+(function(){
+  var txt=document.getElementById('txt'),key=document.getElementById('key'),cap=document.getElementById('cap'),field=document.getElementById('field');
+  var reduce=window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function wait(ms){return new Promise(function(r){setTimeout(r,ms)})}
+  async function loop(){
+    for(;;){
+      field.dir='ltr';txt.textContent='';cap.textContent='Typed with the English layout by mistake…';
+      for(var c of 'akuo'){txt.textContent+=c;await wait(reduce?0:260)}
+      await wait(900);key.classList.add('down');await wait(180);key.classList.remove('down');
+      field.dir='rtl';txt.textContent='שלום';cap.textContent='…fixed with one key.';
+      await wait(2600);
+      field.dir='ltr';txt.textContent='';cap.textContent='It works the other way too…';
+      for(var d of 'גםןמע'){txt.textContent+=d;await wait(reduce?0:260)}
+      await wait(900);key.classList.add('down');await wait(180);key.classList.remove('down');
+      txt.textContent='hello';cap.textContent='…Hebrew layout by mistake, fixed.';
+      await wait(2600);
+    }
+  }
+  loop();
+})();
+</script>
+</body>
+</html>

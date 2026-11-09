@@ -260,7 +260,7 @@ fn file_version(path: &str) -> Option<(u32, u32, u32)> {
 /// Looks for an update (worker thread). Some(release) if one should be offered.
 pub fn check(skip_tag: &str, skip_at: u64) -> Option<Release> {
     let body = get(u::API_URL, u::MAX_API_BYTES)?;
-    let r = u::parse_release(std::str::from_utf8(&body).ok()?)?;
+    let r = u::parse_release_for(std::str::from_utf8(&body).ok()?, cfg!(target_arch = "aarch64"))?;
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     let skip = (!skip_tag.is_empty()).then_some((skip_tag, skip_at));
     u::should_offer(current(), &r, skip, now).then_some(r)

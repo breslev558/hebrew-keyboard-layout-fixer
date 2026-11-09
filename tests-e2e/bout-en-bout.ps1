@@ -49,18 +49,28 @@ $t = 0; while (-not [W]::Front($h)) { Start-Sleep -Milliseconds 300; if (++$t -g
 # clavier anglais (US) dans le Bloc-notes lui-même : WM_INPUTLANGCHANGEREQUEST
 $hkl = [W]::LoadKeyboardLayout('00000409', 0)
 [void][W]::PostMessage($h, 0x0050, [IntPtr]::Zero, $hkl); Start-Sleep 1
-foreach ($vk in 0x41, 0x4B, 0x55, 0x4F) { [W]::Key([byte]$vk); Start-Sleep -Milliseconds 80 }   # a k u o
+$edit = [W]::FindWindowEx($h, [IntPtr]::Zero, 'Edit', $null)
+if ($edit -eq [IntPtr]::Zero) { $edit = [W]::FindWindowEx($h, [IntPtr]::Zero, 'RichEditD2DPT', $null) }
+if ($edit -eq [IntPtr]::Zero) { Fail "contrôle d'édition du Bloc-notes introuvable (Bloc-notes moderne ?)" }
+function Texte { $sb = New-Object System.Text.StringBuilder 256; [void][W]::SendMessage($edit, 0x000D, [IntPtr]256, $sb); $sb.ToString() }
+# la 1re touche après le passage au premier plan peut se perdre : on vérifie « akuo » avant F10
+$ok = $false
+for ($essai = 1; $essai -le 3 -and -not $ok; $essai++) {
+  [void][W]::SendMessage($edit, 0x000C, [IntPtr]::Zero, [IntPtr]::Zero)   # WM_SETTEXT vide
+  Start-Sleep -Milliseconds 500
+  foreach ($vk in 0x41, 0x4B, 0x55, 0x4F) { [W]::Key([byte]$vk); Start-Sleep -Milliseconds 120 }   # a k u o
+  Start-Sleep -Milliseconds 500
+  $avant = Texte
+  "Essai $essai, texte tapé : '$avant'"
+  $ok = ($avant -eq 'akuo')
+}
+if (-not $ok) { Fail "impossible de taper « akuo » dans le Bloc-notes" }
 Start-Sleep 1
 [W]::Key(0x79)   # F10
 Start-Sleep 4
 
 # 4. lecture du texte du Bloc-notes
-$edit = [W]::FindWindowEx($h, [IntPtr]::Zero, 'Edit', $null)
-if ($edit -eq [IntPtr]::Zero) { $edit = [W]::FindWindowEx($h, [IntPtr]::Zero, 'RichEditD2DPT', $null) }
-if ($edit -eq [IntPtr]::Zero) { Fail "contrôle d'édition du Bloc-notes introuvable (Bloc-notes moderne ?)" }
-$sb = New-Object System.Text.StringBuilder 256
-[void][W]::SendMessage($edit, 0x000D, [IntPtr]256, $sb)   # WM_GETTEXT
-$txt = $sb.ToString()
+$txt = Texte
 Stop-Process -Id $n.Id -Force -ErrorAction SilentlyContinue
 "Texte obtenu : '$txt'"
 if ($txt -ne ([string][char]0x05E9 + [char]0x05DC + [char]0x05D5 + [char]0x05DD)) { Fail "attendu « שלום »" }

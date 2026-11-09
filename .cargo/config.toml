@@ -1,2 +1,7 @@
 [target.x86_64-pc-windows-gnu]
 linker = "x86_64-w64-mingw32-gcc"
+
+# 1.7.0 : programme ARM64 autonome (bibliothèque C de Microsoft incluse dans l'exe, comme la version
+# x64) : il démarre même sur un PC ARM sans le paquet « Visual C++ Redistributable ».
+[target.aarch64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

@@ -96,8 +96,19 @@ pub fn may_check(setting_on: bool, policy_key_exists: bool, exe_dir: &str, local
     setting_on && !policy_key_exists && !local_programs.is_empty() && norm(exe_dir) == norm(local_programs)
 }
 
-/// The GitHub answer for the latest release, if it offers a usable update.
+/// 1.7.0: the ARM64 program updates itself with its own files ("KeyboardLayoutFixer-arm64.exe",
+/// ".sha256", ".update"...); the x64 names stay unchanged for the versions already installed.
+pub const ARM64_EXE_NAME: &str = "KeyboardLayoutFixer-arm64.exe";
+
+/// The GitHub answer for the latest release, if it offers a usable update (x64 program).
 pub fn parse_release(json: &str) -> Option<Release> {
+    parse_release_for(json, false)
+}
+
+/// Same for the program of this processor (`arm64`: the running exe is the ARM64 build).
+pub fn parse_release_for(json: &str, arm64: bool) -> Option<Release> {
+    let exe_name = if arm64 { ARM64_EXE_NAME } else { EXE_NAME };
+    let (sha_name, sig_name, upd_name, upd_sig_name) = (format!("{exe_name}.sha256"), format!("{exe_name}.sha256.sig"), format!("{exe_name}.update"), format!("{exe_name}.update.sig"));
     if json.len() > MAX_API_BYTES {
         return None;
     }
@@ -109,12 +120,12 @@ pub fn parse_release(json: &str) -> Option<Release> {
     let version = parse_version(&tag)?;
     let assets = v.get("assets")?.as_array()?;
     let find = |name: &str| assets.iter().find(|a| a.get("name").and_then(|n| n.as_str()) == Some(name));
-    let exe = find(EXE_NAME)?;
-    let sha = find(SHA_NAME)?;
-    let sig = find(SIG_NAME)?;
+    let exe = find(exe_name)?;
+    let sha = find(&sha_name)?;
+    let sig = find(&sig_name)?;
     // 1.6.4: a release without the signed description is not offered to this version
-    let upd = find(UPD_NAME)?;
-    let upd_sig = find(UPD_SIG_NAME)?;
+    let upd = find(&upd_name)?;
+    let upd_sig = find(&upd_sig_name)?;
     let url = |a: &serde_json::Value| a.get("browser_download_url").and_then(|u| u.as_str()).filter(|u| u.starts_with("https://github.com/")).map(String::from);
     let exe_size = exe.get("size")?.as_u64()?;
     if exe_size == 0 || exe_size > MAX_EXE_BYTES {
@@ -194,6 +205,16 @@ mod tests {
         assert!(parse_update_file("version 1.6.4\nsize 1\nsha256 aa").is_none(), "header required");
         assert!(parse_update_file(&format!("{t}version 9.9.9\n")).is_none(), "no duplicate line");
         assert!(parse_update_file(&t.replace("size 700000", "size x")).is_none());
+    }
+
+    #[test]
+    fn arm64_program_takes_its_own_files() {
+        let j = json("v1.7.0", 700_000, false);
+        assert!(parse_release_for(&j, true).is_none(), "no ARM64 files in this release: nothing offered");
+        let arm = j.replace("KeyboardLayoutFixer.exe", "KeyboardLayoutFixer-arm64.exe");
+        let r = parse_release_for(&arm, true).unwrap();
+        assert!(r.exe_url.ends_with("KeyboardLayoutFixer-arm64.exe") && r.upd_url.ends_with("KeyboardLayoutFixer-arm64.exe.update"));
+        assert!(parse_release(&arm).is_none(), "the x64 program never takes the ARM64 files");
     }
 
     #[test]

@@ -37,6 +37,8 @@ const FAILED: usize = 4;
 const TABLES: usize = 5;
 const UNDO: usize = 6;
 const DOUBLE_SHIFT: usize = 7;
+const REPLACE: usize = 8;
+const REPL_REFRESH: usize = 9;
 /// a pause longer than this starts a new run
 const PAUSE_MS: u64 = 15_000;
 /// a proposal stays valid this long
@@ -159,6 +161,8 @@ struct Proposal {
 
 /// The last fix, for 5 s: Backspace as the very next key undoes it and teaches "never again".
 struct LastFix {
+    /// undoing teaches "never fix these words" (not for a text replacement)
+    learn: bool,
     typed: String,
     fixed: String,
     hwnd: usize,
@@ -181,6 +185,15 @@ thread_local! {
     static DSHIFT: RefCell<t::DoubleShift> = RefCell::new(t::DoubleShift::default());
     /// what the hooks serve (read in the hook: no settings lock there)
     static WANT_TYPING: Cell<bool> = const { Cell::new(false) };
+    /// 1.8.2, text replacements on
+    static WANT_REPL: Cell<bool> = const { Cell::new(false) };
+    static TOKEN: RefCell<klf_core::replace::Token> = RefCell::new(klf_core::replace::Token::default());
+    static PENDING_REPL: RefCell<Option<(String, usize)>> = const { RefCell::new(None) };
+    /// characters with Shift, for shortcuts such as "@@" (prepared outside the hook too)
+    static MAPS_SHIFT: RefCell<HashMap<u32, HashMap<u32, char>>> = RefCell::new(HashMap::new());
+    static TABLES_AT: Cell<u64> = const { Cell::new(0) };
+    static MAPS_ALTGR: RefCell<HashMap<u32, HashMap<u32, char>>> = RefCell::new(HashMap::new());
+
     static WANT_DSHIFT: Cell<bool> = const { Cell::new(false) };
     /// the Tab key-up that follows a swallowed Tab is swallowed too
     static SWALLOW_TAB_UP: Cell<bool> = const { Cell::new(false) };
@@ -208,14 +221,21 @@ pub fn apply() {
     let (typing, dshift) = (s.typing_suggestions && allowed(), s.double_shift_convert && allowed());
     WANT_TYPING.with(|w| w.set(typing));
     WANT_DSHIFT.with(|w| w.set(dshift));
-    if !typing && !dshift {
+    let repl = s.text_replacements && allowed();
+    WANT_REPL.with(|w| w.set(repl));
+    if repl {
+        refresh_replacements(true);
+    }
+    if !typing && !dshift && !repl {
         stop();
+        app::refresh_dormant(None);
         return;
     }
     if typing && !dict_ready() {
         load_lists(); // the hooks start for double Shift meanwhile; the lists come later
     }
     start();
+    app::refresh_dormant(None);
 }
 
 /// Clears the words kept (another window, click...).
@@ -225,17 +245,27 @@ pub fn reset() {
     PROPOSAL.with(|p| p.borrow_mut().take());
     LAST_FIX.with(|p| p.borrow_mut().take());
     DSHIFT.with(|d| *d.borrow_mut() = t::DoubleShift::default());
+    TOKEN.with(|b| b.borrow_mut().interrupt()); // "ho" + click + "tel" is not the shortcut "tel"
+    PENDING_REPL.with(|p| p.borrow_mut().take());
 }
 
 /// Reads every installed layout once, outside the hook.
 fn prepare_tables() {
-    let mut maps = HashMap::new();
+    let (mut maps, mut shifted, mut altgr) = (HashMap::new(), HashMap::new(), HashMap::new());
     for hkl in layouts::installed() {
         if let Some(t) = layouts::read_layout(hkl) {
             maps.insert(hkl, t.into_iter().map(|k| (k.sc as u32, k.ch)).collect::<HashMap<u32, char>>());
         }
+        if let Some(t) = layouts::read_layout_shifted(hkl) {
+            shifted.insert(hkl, t.into_iter().map(|k| (k.sc as u32, k.ch)).collect::<HashMap<u32, char>>());
+        }
+        if let Some(t) = layouts::read_layout_altgr(hkl) {
+            altgr.insert(hkl, t.into_iter().map(|k| (k.sc as u32, k.ch)).collect::<HashMap<u32, char>>());
+        }
     }
     MAPS.with(|m| *m.borrow_mut() = maps);
+    MAPS_SHIFT.with(|m| *m.borrow_mut() = shifted);
+    MAPS_ALTGR.with(|m| *m.borrow_mut() = altgr);
 }
 
 fn start() {
@@ -371,7 +401,9 @@ fn focus_and_layout() -> (usize, u32) {
 
 /// true: the key is swallowed (Tab accepting a proposal).
 fn on_key(vk: u32, sc: u32) -> bool {
-    if !WANT_TYPING.with(|w| w.get()) || !dict_ready_fast() {
+    let want_t = WANT_TYPING.with(|w| w.get()) && dict_ready_fast();
+    let want_r = WANT_REPL.with(|w| w.get());
+    if !want_t && !want_r {
         return false;
     }
     let now = tick();
@@ -390,7 +422,7 @@ fn on_key(vk: u32, sc: u32) -> bool {
         return true;
     }
     let fresh = PROPOSAL.with(|p| p.borrow().as_ref().is_some_and(|x| now.saturating_sub(x.at) < PROPOSAL_MS && x.hwnd == fg));
-    if fresh && vk == VK_TAB as u32 && !down(VK_SHIFT) && !down(VK_CONTROL) && !down(VK_MENU) && !down(VK_LWIN) && !down(VK_RWIN) {
+    if want_t && fresh && vk == VK_TAB as u32 && !down(VK_SHIFT) && !down(VK_CONTROL) && !down(VK_MENU) && !down(VK_LWIN) && !down(VK_RWIN) {
         SWALLOW_TAB_UP.with(|s| s.set(true));
         post(FIX);
         return true;
@@ -398,15 +430,42 @@ fn on_key(vk: u32, sc: u32) -> bool {
     // any other key: the proposal and the words waiting for a check are dropped
     PROPOSAL.with(|p| p.borrow_mut().take());
     PENDING.with(|p| p.borrow_mut().take());
+    PENDING_REPL.with(|p| p.borrow_mut().take());
     if now.saturating_sub(LAST_KEY.with(|l| l.replace(now))) > PAUSE_MS || BUF_HWND.with(|h| h.replace(fg)) != fg {
         BUF.with(|b| b.borrow_mut().clear());
+        TOKEN.with(|b| b.borrow_mut().interrupt());
     }
-    if matches!(vk as u16, VK_SHIFT | VK_LSHIFT | VK_RSHIFT | VK_CAPITAL) {
+    // modifiers alone change nothing (AltGr = left Ctrl + right Alt: its own presses must not
+    // end the shortcut being typed); the key typed WITH them decides
+    if matches!(vk as u16, VK_SHIFT | VK_LSHIFT | VK_RSHIFT | VK_CAPITAL | VK_CONTROL | VK_LCONTROL | VK_RCONTROL | VK_MENU | VK_LMENU | VK_RMENU | VK_LWIN | VK_RWIN) {
         return false;
     }
     let hebrew = hkl & 0x3FF == 0x0D; // primary language of the layout: Hebrew
-    if down(VK_CONTROL) || down(VK_MENU) || down(VK_LWIN) || down(VK_RWIN) || (hebrew && down(VK_SHIFT)) {
+    // AltGr (right Alt, which Windows sends with left Ctrl): characters such as @ on AZERTY
+    let altgr = down(VK_RMENU) && down(VK_LCONTROL) && !down(VK_LMENU) && !down(VK_RCONTROL) && !down(VK_LWIN) && !down(VK_RWIN);
+    if altgr {
         BUF.with(|b| b.borrow_mut().clear());
+        if want_r && down(VK_SHIFT) {
+            TOKEN.with(|b| b.borrow_mut().invalidate()); // AltGr+Shift: level not prepared
+        } else if want_r {
+            token_key(vk, sc, hkl, fg, true);
+        }
+        return false;
+    }
+    if down(VK_CONTROL) || down(VK_MENU) || down(VK_LWIN) || down(VK_RWIN) {
+        BUF.with(|b| b.borrow_mut().clear());
+        TOKEN.with(|b| b.borrow_mut().interrupt());
+        return false;
+    }
+    if want_r {
+        token_key(vk, sc, hkl, fg, false);
+    }
+    if !want_t {
+        return false;
+    }
+    // Shift on the Hebrew layout, or Caps Lock there (it types Latin capitals): not tracked
+    if hebrew && (down(VK_SHIFT) || caps_on()) {
+        BUF.with(|b| b.borrow_mut().invalidate()); // what is on the screen is not what is tracked
         return false;
     }
     match vk as u16 {
@@ -425,7 +484,9 @@ fn on_key(vk: u32, sc: u32) -> bool {
                     BUF.with(|b| b.borrow_mut().clear());
                     post(TABLES);
                 }
-                Some(Some(c)) if c.is_alphabetic() || c == '\'' => {
+                // , . ; / ' : Hebrew letters on the other layout, kept inside a word (1.8.2);
+                // with Shift they are other signs (< > : ? ") and end the word
+                Some(Some(c)) if c.is_alphabetic() || (t::WORD_SIGNS.contains(&c) && !down(VK_SHIFT)) => {
                     let caps = !hebrew && (down(VK_SHIFT) ^ caps_on());
                     let c = if caps { c.to_uppercase().next().unwrap_or(c) } else { c };
                     BUF.with(|b| b.borrow_mut().push(c, hebrew));
@@ -436,6 +497,55 @@ fn on_key(vk: u32, sc: u32) -> bool {
         }
     }
     false
+}
+
+/// 1.8.2, the text replacements: what was typed since the last space (any visible character),
+/// kept only while it is the start of one of the user's shortcuts.
+fn token_key(vk: u32, sc: u32, hkl: u32, fg: usize, altgr: bool) {
+    let inval = || TOKEN.with(|b| b.borrow_mut().invalidate());
+    match vk as u16 {
+        VK_BACK => TOKEN.with(|b| b.borrow_mut().backspace()),
+        VK_SPACE => {
+            if let Some(tok) = TOKEN.with(|b| b.borrow_mut().space()) {
+                PENDING_REPL.with(|p| *p.borrow_mut() = Some((tok, fg)));
+                post(REPLACE); // posted before CHECK: a replacement wins over a layout fix
+            } else {
+                post(REPL_REFRESH); // the list may have just been saved (in Notepad itself)
+            }
+        }
+        // a new line or a new field: a shortcut may start right away
+        VK_RETURN | VK_TAB => TOKEN.with(|b| b.borrow_mut().clear()),
+        _ => {
+            // Caps Lock outside English layouts changes more than letters (AZERTY digits, Latin
+            // capitals on the Hebrew layout): not modelled, so no shortcut until the next space
+            if caps_on() && hkl & 0x3FF != 0x09 {
+                inval();
+                return;
+            }
+            let shift = down(VK_SHIFT);
+            let table = if altgr { &MAPS_ALTGR } else if shift { &MAPS_SHIFT } else { &MAPS };
+            let ch = table.with(|m| m.try_borrow().ok().map(|m| m.get(&hkl).map(|t| t.get(&sc).copied())));
+            match ch {
+                // a layout added since the start: tables prepared outside the hook
+                Some(None) => {
+                    inval();
+                    post(TABLES);
+                }
+                Some(Some(Some(c))) if !c.is_control() && !c.is_whitespace() => {
+                    let caps = !altgr && c.is_alphabetic() && !klf_core::layouts::is_hebrew_letter(c) && caps_on();
+                    let c = if caps { if shift { c.to_lowercase().next().unwrap_or(c) } else { c.to_uppercase().next().unwrap_or(c) } } else { c };
+                    TOKEN.with(|b| b.borrow_mut().push(c));
+                    // not the start of any shortcut (ordinary text, a password...): not kept
+                    let known = TOKEN.with(|b| PREFIXES.try_lock().is_ok_and(|p| p.as_ref().is_some_and(|p| p.contains(b.borrow().as_str()))));
+                    if !known {
+                        inval();
+                    }
+                }
+                // arrows, Home, Delete, a dead key...: the caret or the text may have changed
+                _ => TOKEN.with(|b| b.borrow_mut().interrupt()),
+            }
+        }
+    }
 }
 
 fn caps_on() -> bool {
@@ -498,7 +608,14 @@ pub fn on_message(code: WPARAM) {
     match code {
         CHECK => check(),
         FIX => fix(),
-        TABLES => prepare_tables(),
+        TABLES => {
+            // at most once every 2 s (a layout that cannot be read would ask at every key)
+            let now = tick();
+            if now.saturating_sub(TABLES_AT.with(|t| t.get())) >= 2_000 {
+                TABLES_AT.with(|t| t.set(now));
+                prepare_tables();
+            }
+        }
         DOUBLE_SHIFT => {
             // never in JetBrains IDEs, where double Shift opens "Search Everywhere"
             let fg = target::foreground();
@@ -509,6 +626,8 @@ pub fn on_message(code: WPARAM) {
             }
         }
         UNDO => undo(),
+        REPLACE => replace_now(),
+        REPL_REFRESH => refresh_replacements(false),
         READY => {
             if app::settings().typing_suggestions && allowed() {
                 start();
@@ -535,23 +654,17 @@ fn fullscreen_or_game() -> bool {
 
 fn check() {
     let Some((words, hebrew, hwnd)) = PENDING.with(|p| p.borrow_mut().take()) else { return };
-    refresh_personal();
-    let guard = DICT.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let Some(dict) = guard.as_ref() else { return };
     let fg = target::foreground();
     if fg as usize != hwnd || fullscreen_or_game() {
         return; // another window, or games / presentations / full-screen videos: never
     }
-    let info = target::info(fg);
-    if info.password_field || info.elevated == Some(true) || klf_core::policy::console_kind(&info.window_class).is_some() || !klf_core::policy::rule_allowed_for(&info.exe_name) {
+    // the window is checked BEFORE the lists are locked (target::info may pump messages)
+    if !window_ok(fg, true) {
         return;
     }
-    if app::settings().rule_for(&info.exe_name) == Some(klf_core::settings::RuleMode::Disabled) {
-        return;
-    }
-    if app::settings().typing_skip_code_editors && t::is_code_editor(&info.exe_name) {
-        return; // code editors: F10 only
-    }
+    refresh_personal();
+    let guard = DICT.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let Some(dict) = guard.as_ref() else { return };
     let (_, hkl) = focus_and_layout();
     let layouts::Choice::Map(map, latin_hkl) = layouts::choose(Some(hkl)) else { return }; // a 3rd layout: never
     let pairs: Vec<(String, String)> = words.iter().map(|w| (w.clone(), klf_core::convert::convert_with(&map, w, klf_core::settings::MixedTextMode::ToggleAll, true))).collect();
@@ -573,6 +686,12 @@ fn check() {
 /// (dead keys, autocorrection, autocompletion... would make the erase hit other text). Other
 /// controls cannot be read back: allowed.
 fn text_before_caret_matches(expected: &str) -> bool {
+    text_before_caret(expected, false)
+}
+
+/// 1.8.2, `word_start`: the expected text must also start a word (start of the field, or a
+/// space / line break before it): "ho" + click + "tel" is not the shortcut "tel".
+fn text_before_caret(expected: &str, word_start: bool) -> bool {
     let (focus, _) = {
         // SAFETY: structure sized.
         unsafe {
@@ -602,7 +721,10 @@ fn text_before_caret_matches(expected: &str) -> bool {
         let before = String::from_utf16_lossy(&buf[..(end as usize).min(n)]);
         let exp: Vec<u16> = wide(expected);
         let exp = String::from_utf16_lossy(&exp[..exp.len().saturating_sub(1)]);
-        before.ends_with(&exp)
+        if !before.ends_with(&exp) {
+            return false;
+        }
+        !word_start || before[..before.len() - exp.len()].chars().next_back().is_none_or(char::is_whitespace)
     }
 }
 
@@ -626,12 +748,15 @@ fn fix() {
         log("Typing correction: the fix could not be typed");
         return;
     }
-    LAST_FIX.with(|f| *f.borrow_mut() = Some(LastFix { typed: erase_text.clone(), fixed: p.s.text.clone(), hwnd: fg as usize, layout_back, at: tick() }));
+    LAST_FIX.with(|f| *f.borrow_mut() = Some(LastFix { learn: true, typed: erase_text.clone(), fixed: p.s.text.clone(), hwnd: fg as usize, layout_back, at: tick() }));
     let to = if p.s.keep_layout { None } else if p.s.to_hebrew { layouts::hebrew_layout() } else { p.latin_hkl };
     if let Some(h) = to {
         layouts::request(fg, h);
     }
     BUF.with(|b| b.borrow_mut().clear());
+    if app::settings().typing_sound {
+        crate::platform::sys::fix_sound();
+    }
     log(&format!("Typing correction: {} word(s) fixed", p.s.text.split_whitespace().count()));
 }
 
@@ -649,6 +774,10 @@ fn undo() {
         layouts::request(fg, h);
     }
     BUF.with(|b| b.borrow_mut().clear());
+    if !f.learn {
+        log("Text replacement undone");
+        return;
+    }
     let lines: Vec<String> = f.typed.split_whitespace().map(t::never_line).collect();
     append_personal(&lines);
     let l = app::lang();
@@ -677,4 +806,157 @@ pub fn learn_from_f10(before: &str, after: &str) {
     if let Some(line) = line {
         append_personal(&[line]);
     }
+}
+
+/// Where typing help may act: not a password field, not a program run as administrator, not a
+/// console, not a program the user or the school excluded, and (for layout fixes) not a code
+/// editor. Read at the moment of acting, for every word.
+fn window_ok(fg: HWND, layout_fix: bool) -> bool {
+    let info = target::info(fg);
+    if info.password_field || info.elevated == Some(true) || klf_core::policy::console_kind(&info.window_class).is_some() || !klf_core::policy::rule_allowed_for(&info.exe_name) {
+        return false;
+    }
+    if app::settings().rule_for(&info.exe_name) == Some(klf_core::settings::RuleMode::Disabled) {
+        return false;
+    }
+    !(layout_fix && app::settings().typing_skip_code_editors && t::is_code_editor(&info.exe_name))
+}
+
+/// 1.8.2, for the tray icon: why the typing help is asleep in this window, if it is.
+pub fn dormant_reason(fg: HWND) -> Option<Msg> {
+    if !active() || !WANT_TYPING.with(|w| w.get()) || fg.is_null() {
+        return None;
+    }
+    if fullscreen_or_game() {
+        return Some(Msg::DormantFullscreen);
+    }
+    let exe = target::exe_of(fg);
+    if app::settings().rule_for(&exe) == Some(klf_core::settings::RuleMode::Disabled) || !klf_core::policy::rule_allowed_for(&exe) {
+        return Some(Msg::DormantExcluded);
+    }
+    if app::settings().typing_skip_code_editors && t::is_code_editor(&exe) {
+        return Some(Msg::DormantCodeEditor);
+    }
+    None
+}
+
+// ---------------------------------------------------------------------------------------------
+// 1.8.2, text replacements (replacements.txt, empty by default)
+
+/// (file date, list)
+type Replacements = (Option<std::time::SystemTime>, HashMap<String, String>);
+static REPL: Mutex<Option<Replacements>> = Mutex::new(None);
+/// every start of every shortcut, read by the hook with try_lock (never waits)
+static PREFIXES: Mutex<Option<std::collections::HashSet<String>>> = Mutex::new(None);
+static REPL_READING: AtomicBool = AtomicBool::new(false);
+/// when the file date was last looked at (ms)
+static REPL_CHECKED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+pub fn replacements_path() -> Option<std::path::PathBuf> {
+    crate::util::app_dir().map(|d| d.join("replacements.txt"))
+}
+
+/// Reads the list again if the file changed (the date is looked at every 3 s at most, or now
+/// with `force`), on a thread of its own: a slow disk or network profile never holds the UI
+/// thread, which runs the keyboard hook. A file that cannot be read (being saved) keeps the
+/// previous list; a file too big gives no list.
+pub fn refresh_replacements(force: bool) {
+    let now = tick();
+    if !force && now.saturating_sub(REPL_CHECKED.load(Ordering::Relaxed)) < 3_000 {
+        return;
+    }
+    if REPL_READING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    REPL_CHECKED.store(now, Ordering::Relaxed);
+    let Some(p) = replacements_path() else {
+        REPL_READING.store(false, Ordering::SeqCst);
+        return;
+    };
+    let started = std::thread::Builder::new().name("klf-replacements".into()).spawn(move || {
+        let meta = std::fs::metadata(&p).ok();
+        let at = meta.as_ref().and_then(|m| m.modified().ok());
+        let same = REPL.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref().is_some_and(|(t, _)| *t == at);
+        if !same {
+            let list = match meta {
+                None => Some(HashMap::new()), // no file: no replacement
+                Some(m) if m.len() > 256 * 1024 => {
+                    log("Text replacements: replacements.txt is larger than 256 KB, not used");
+                    Some(HashMap::new())
+                }
+                Some(_) => std::fs::read(&p).ok().map(|b| klf_core::replace::parse(&decode_text(&b))),
+            };
+            if let Some(list) = list {
+                let prefixes = klf_core::replace::prefixes(&list);
+                *REPL.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((at, list));
+                *PREFIXES.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(prefixes);
+            }
+        }
+        REPL_READING.store(false, Ordering::SeqCst);
+    });
+    if started.is_err() {
+        REPL_READING.store(false, Ordering::SeqCst);
+    }
+}
+
+fn replacement_for(tok: &str) -> Option<String> {
+    let g = REPL.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    g.as_ref().and_then(|(_, m)| m.get(tok).cloned())
+}
+
+/// Another program came to the front (from Notepad after editing the list, for instance).
+pub fn on_foreground() {
+    if WANT_REPL.with(|w| w.get()) {
+        refresh_replacements(false);
+    }
+}
+
+/// Every minute (UI thread).
+pub fn periodic() {
+    if WANT_REPL.with(|w| w.get()) {
+        refresh_replacements(false);
+    }
+}
+
+pub fn open_replacements() {
+    let Some(p) = replacements_path() else { return };
+    if !p.exists() {
+        let l = app::lang();
+        let _ = std::fs::write(&p, format!("# {}\r\n", text(l, Msg::ReplacementsHelp)));
+    }
+    let _ = std::process::Command::new("notepad.exe").arg(&p).spawn();
+}
+
+fn replace_now() {
+    let Some((tok, hwnd)) = PENDING_REPL.with(|p| p.borrow_mut().take()) else { return };
+    let fg = target::foreground();
+    if fg as usize != hwnd || fullscreen_or_game() {
+        return;
+    }
+    let Some(value) = replacement_for(&tok) else { return };
+    if !window_ok(fg, false) {
+        return;
+    }
+    let typed = format!("{tok} ");
+    if !text_before_caret(&typed, true) {
+        log("Text replacement: text changed, nothing done");
+        return;
+    }
+    let fixed = format!("{value} ");
+    if !input::replace(typed.chars().count(), &fixed) {
+        log("Text replacement: could not be typed");
+        return;
+    }
+    // the layout check for the same space is dropped: the text is no longer what was typed
+    PENDING.with(|p| p.borrow_mut().take());
+    PROPOSAL.with(|p| p.borrow_mut().take());
+    BUF.with(|b| b.borrow_mut().clear());
+    // undone with Backspace only when each character is one Backspace in every program (no
+    // emoji, joiner or combining mark): else the undo could erase text before the replacement
+    if klf_core::replace::simple_text(&fixed) {
+        LAST_FIX.with(|f| *f.borrow_mut() = Some(LastFix { learn: false, typed, fixed, hwnd: fg as usize, layout_back: None, at: tick() }));
+    } else {
+        LAST_FIX.with(|f| f.borrow_mut().take());
+    }
+    log("Text replacement made");
 }

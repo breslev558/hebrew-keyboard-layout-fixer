@@ -36,8 +36,29 @@ fn handle(hkl32: u32) -> Option<HKL> {
 
 /// Unshifted level of every character key of an installed layout.
 pub fn read_layout(hkl32: u32) -> Option<Vec<KeyChar>> {
+    read_level(hkl32, false)
+}
+
+/// 1.8.2: the Shift level (for text replacement shortcuts such as "@@").
+pub fn read_layout_shifted(hkl32: u32) -> Option<Vec<KeyChar>> {
+    read_level(hkl32, true)
+}
+
+/// 1.8.2: the AltGr level (Ctrl+Alt), for shortcuts typed with AltGr (@ on AZERTY).
+pub fn read_layout_altgr(hkl32: u32) -> Option<Vec<KeyChar>> {
+    read_level_state(hkl32, &[0x11, 0x12, 0xA2, 0xA5])
+}
+
+fn read_level(hkl32: u32, shift: bool) -> Option<Vec<KeyChar>> {
+    read_level_state(hkl32, if shift { &[0x10, 0xA0] } else { &[] })
+}
+
+fn read_level_state(hkl32: u32, keys_down: &[usize]) -> Option<Vec<KeyChar>> {
     let hkl = handle(hkl32)?;
-    let state = [0u8; 256]; // no Shift, no Ctrl/Alt (so never AltGr), no Caps Lock
+    let mut state = [0u8; 256]; // no Caps Lock; only the keys asked for are down
+    for &k in keys_down {
+        state[k] = 0x80;
+    }
     let mut out = Vec::new();
     for &sc in SCAN_CODES {
         // SAFETY: plain values; the buffer is ours and its size is passed.
@@ -109,14 +130,36 @@ pub fn choose(active: Option<u32>) -> Choice {
                 None => Choice::Unsupported("français AZERTY (illisible)".into()),
             }
         }
-        // US, or any other Latin layout: the fixed US table (as before 1.4.0)
+        // 1.8.2: a Latin layout whose letters are not on the US keys (QWERTZ, Belgian AZERTY):
+        // its own table read from Windows, if it builds; else the US table as before
+        _ if latin_hkl.is_some_and(|h| classify_hkl(h) == LayoutKind::Unsupported) => {
+            let h = latin_hkl.unwrap_or(0);
+            match read_layout(h) {
+                Some(t) if !klf_core::layouts::qwerty_letters(&t) => {
+                    let he = hebrew_layout().and_then(read_layout).unwrap_or_else(klf_core::layouts::reference::hebrew);
+                    match build_keymap(LatinKind::OtherFromWindows, &t, &he) {
+                        Ok(m) => Choice::Map(m, latin_hkl),
+                        Err(e) => {
+                            crate::util::log(&format!("Latin layout {h:08X}: own table refused ({e:?}), US table used"));
+                            Choice::Map(klf_core::convert::us_map(), latin_hkl)
+                        }
+                    }
+                }
+                _ => Choice::Map(klf_core::convert::us_map(), latin_hkl),
+            }
+        }
+        // US, or a Latin layout with the US letters (UK, US-International...): the fixed US table
         _ => Choice::Map(klf_core::convert::us_map(), latin_hkl),
     }
 }
 
 /// The standard Hebrew layout, if installed.
 pub fn hebrew_layout() -> Option<u32> {
-    installed().into_iter().find(|h| classify_hkl(*h) == LayoutKind::HebrewStandard)
+    let installed = installed();
+    installed.iter().copied().find(|h| classify_hkl(*h) == LayoutKind::HebrewStandard)
+        // 1.8.2: only a variant installed ("Hebrew (Standard)" SI-1452, 0002040D): the keyboard
+        // must still switch to it after a conversion (before, it stayed on English)
+        .or_else(|| installed.iter().copied().find(|h| h & 0xFFFF == 0x040D && read_layout(*h).is_some_and(|t| klf_core::layouts::same_hebrew_letters(&t))))
 }
 
 /// Asks the window to switch to an installed layout (WM_INPUTLANGCHANGEREQUEST).

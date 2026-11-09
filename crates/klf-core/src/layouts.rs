@@ -21,6 +21,9 @@ pub enum LatinKind {
     Us,
     /// French (France), AZERTY: table built from the installed layout.
     FrenchAzerty,
+    /// 1.8.2: another Latin layout whose letters are NOT on the US keys (German or Swiss QWERTZ,
+    /// Belgian AZERTY...): table built from the installed layout, as for French AZERTY.
+    OtherFromWindows,
 }
 
 impl LatinKind {
@@ -28,6 +31,7 @@ impl LatinKind {
         match self {
             Self::Us => "anglais (États-Unis)",
             Self::FrenchAzerty => "français (AZERTY)",
+            Self::OtherFromWindows => "autre clavier latin (table de Windows)",
         }
     }
 }
@@ -176,6 +180,16 @@ pub fn same_hebrew_letters(table: &[KeyChar]) -> bool {
     ('\u{05D0}'..='\u{05EA}').all(|h| {
         let want = reference.iter().find(|k| k.ch == h).map(|k| k.sc);
         want.is_some() && table.iter().find(|k| k.ch == h).map(|k| k.sc) == want
+    })
+}
+
+/// 1.8.2: the 26 letters a-z are on the same keys as US English (UK, US-International, Dutch...):
+/// the fixed US table is right for it, as before. Otherwise (QWERTZ, AZERTY) it is not.
+pub fn qwerty_letters(table: &[KeyChar]) -> bool {
+    let us = reference::us();
+    ('a'..='z').all(|c| {
+        let want = us.iter().find(|k| k.ch == c).map(|k| k.sc);
+        want.is_some() && table.iter().find(|k| k.ch == c).map(|k| k.sc) == want
     })
 }
 
@@ -340,4 +354,31 @@ mod tests {
         let russian: Vec<KeyChar> = reference::us().iter().map(|k| KeyChar { sc: k.sc, ch: if k.ch.is_ascii_alphabetic() { 'ж' } else { k.ch } }).collect();
         assert!(!is_latin_table(&russian));
     }
+
+    #[test]
+    fn qwertz_gets_its_own_table() {
+        assert!(qwerty_letters(&reference::us()));
+        let mut de = reference::us();
+        for k in de.iter_mut() {
+            k.ch = match k.ch { 'y' => 'z', 'z' => 'y', c => c };
+        }
+        assert!(!qwerty_letters(&de));
+        assert!(!qwerty_letters(&reference::french_azerty()));
+        let m = build_keymap(LatinKind::OtherFromWindows, &de, &reference::hebrew()).unwrap();
+        // a fuller German table (kbdgr, unshifted): ß ü + ö ä # - and the dead keys ^ ´ left out
+        let mut gr: Vec<KeyChar> = reference::us().into_iter().filter(|k| k.sc != 0x29 && k.sc != 0x0D).collect();
+        for k in gr.iter_mut() {
+            k.ch = match k.sc { 0x15 => 'z', 0x2C => 'y', 0x0C => 'ß', 0x1A => 'ü', 0x1B => '+', 0x27 => 'ö', 0x28 => 'ä', 0x2B => '#', 0x35 => '-', _ => k.ch };
+        }
+        let g = build_keymap(LatinKind::OtherFromWindows, &gr, &reference::hebrew()).unwrap();
+        assert_eq!(g.latin_to_he('z'), Some('ט'));
+        assert_eq!(g.latin_to_he('m'), Some('צ'));
+        // digits never paired (the Hebrew layout has digits there too)
+        assert!(g.pairs().iter().all(|(l, h)| !l.is_ascii_digit() && !h.is_ascii_digit()));
+        // the key of US "y" (Hebrew ט) gives "z" on QWERTZ
+        assert_eq!(m.latin_to_he('z'), Some('ט'));
+        assert_eq!(m.latin_to_he('y'), Some('ז'));
+        assert_eq!(m.he_to_latin('ש'), Some('a'));
+    }
+
 }

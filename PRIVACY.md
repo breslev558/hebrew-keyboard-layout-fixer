@@ -32,9 +32,19 @@ presentations, code editors (by default) or programs you turned the fixer off fo
 
 Words you teach it (F10 on a single word, or Backspace to undo a fix) are written to
 `%APPDATA%\KeyboardLayoutFixer\my-words.txt`, a plain text file you can read, edit or delete.
+Words that are in no list are judged by letter models computed on your PC from the downloaded
+lists: nothing extra is downloaded or sent.
+
+## Text replacements (off and empty by default)
+Same watching rules as *fix while typing*, only while this option is on: what was typed since the
+last space is kept in memory, and when it is one of YOUR shortcuts it is replaced after the space.
+The list is yours alone (`%APPDATA%\KeyboardLayoutFixer\replacements.txt`, empty until you write
+it); it is never sent anywhere. Never in password fields, consoles, administrator windows or
+programs you turned the fixer off for.
 
 ## Files on your PC
 `%APPDATA%\KeyboardLayoutFixer`: `settings.json` (your settings), `debug.log` (technical steps and
-program names, never your text), `my-words.txt` and the word lists if you use *fix while typing*.
+program names, never your text), `my-words.txt` and the word lists if you use *fix while typing*,
+`replacements.txt` if you use *text replacements*.
 
 Questions or problems: see [SECURITY.md](SECURITY.md) and the [issues](https://github.com/breslev558/hebrew-keyboard-layout-fixer/issues).

@@ -16,3 +16,10 @@ keep	en	hello	a real English word
 keep	he	שלום	a real Hebrew word
 keep	en	getElementById	code
 keep	en	iPhone	brand with an inner capital
+fix	en	ac,	שבת
+fix	en	tr.	ארץ
+keep	en	hello,	a word and a comma
+keep	he	שלום,	a word and a comma
+keep	en	NASA	capitals: an acronym
+keep	en	AKUO	capitals (Caps Lock): F10 only
+fix	en	ufavkf,h	וכשהלכתי

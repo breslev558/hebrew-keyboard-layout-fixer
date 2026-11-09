@@ -56,9 +56,12 @@ To update by hand, run the new installer over the existing installation: the run
 - **Settings window** (click the icon), in English, Hebrew or French: change the keys, conversion direction, careful mode (selection only), Caps Lock behaviour, confirmation bubble (top, bottom or near the cursor), per-program rules, diagnostic and export/import of your settings.
 
 ### Fix while typing (optional, off by default)
-Tray menu › **Suggest fixes while typing (Tab)**. While you type, when the keys of the last words spell a real word on the *other* layout (and not on the current one), a small bubble shows the fix: **Tab** fixes the whole run of wrong words and switches the keyboard; any other key ignores it. Names, brands and typos are left alone, because their other reading is not a word. It learns from you: a single word you fix with **F10** is fixed at once next time, and **Backspace** right after a fix undoes it and that word is never fixed again (your list: tray menu › **My words…**). Never in password fields, consoles, administrator windows, full-screen games or presentations, code editors (VS Code, Visual Studio, JetBrains…, by default), or programs you turned the fixer off for. Wrong or missing fix? Use the [wrong fix form](https://github.com/breslev558/hebrew-keyboard-layout-fixer/issues/new?template=wrong-fix.yml): real cases go into `tests/typing-cases.tsv`, checked by the tests.
+Tray menu › **Suggest fixes while typing (Tab)**. While you type, when the keys of the last words spell a real word on the *other* layout (and not on the current one), a small bubble shows the fix: **Tab** fixes the whole run of wrong words and switches the keyboard; any other key ignores it. Names, brands, typos and words in CAPITALS are left alone, because their other reading is not a word. Words that are in no list (rare words, Hebrew words with prefixes such as וכשהלכתי) are recognised by letter models built on your PC from the same lists; short words such as `kt` (לא) are fixed together with the wrong word that follows them. The keys `, . ; / '` count as letters inside a word (`ac,` = שבת). Optional short Windows sound after a fix (tray menu, off by default). While the option sleeps in the current window (code editor, excluded program, full screen), the tray icon turns grey and its tooltip says why. It learns from you: a single word you fix with **F10** is fixed at once next time, and **Backspace** right after a fix undoes it and that word is never fixed again (your list: tray menu › **My words…**). Never in password fields, consoles, administrator windows, full-screen games or presentations, code editors (VS Code, Visual Studio, JetBrains…, by default), or programs you turned the fixer off for. Wrong or missing fix? Use the [wrong fix form](https://github.com/breslev558/hebrew-keyboard-layout-fixer/issues/new?template=wrong-fix.yml): real cases go into `tests/typing-cases.tsv`, checked by the tests.
 
 To do this the program watches the keys typed (a low-level keyboard hook), **only while this option is on**. It keeps only the last few words, in memory, and forgets them on a click, arrow keys, Enter, a shortcut, another window or a pause. Nothing is written to disk or sent. The word lists (Hebrew and English, 40,000 words each) are downloaded once from this repository when you switch the option on, signed and checked before use (see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)). Not available when an administrator manages the PC.
+
+### Text replacements (optional, off and empty by default)
+Tray menu › **Text replacements**, then **My replacements…** opens your list in Notepad: one `shortcut = text` per line, for example `@@ = name@example.com`. Type the shortcut then Space and it is replaced; **Backspace** right after undoes it. Nothing is built in: the list is empty until you write it, and it stays in `%APPDATA%\KeyboardLayoutFixer\replacements.txt`. Same rules as *fix while typing*: keys watched only while the option is on, never in password fields, consoles, administrator windows or programs you turned off.
 
 ### Double-tap Shift (optional)
 Tray menu › **Double-tap Shift to convert**: two quick taps on Shift convert like F10, handy on laptops where F10 needs the Fn key. Off by default; never with Ctrl, Alt or Win held, in full-screen games, or in JetBrains IDEs (where double Shift opens their search).
@@ -93,9 +96,11 @@ All of these are disabled when settings are enforced by an administrator. The di
 
 **F10 does nothing in one program.** Some programs (administrator windows, games, some remote desktops) do not accept simulated keys. Use the tray menu to see whether the fixer is paused or turned off for that program, and Settings › Diagnostic to see what happened.
 
+**I play online games with anti-cheat.** Anti-cheat systems may dislike programs that watch the keyboard. F10 alone uses no keyboard hook, but *fix while typing*, *text replacements* and *double-tap Shift* do while they are on. Before playing such a game, quit the fixer (tray menu › **Exit**, not just pause) and start it again afterwards.
+
 **Can I use another key than F10?** Yes: Settings › Simple › Layout key (and Caps Lock key for F9).
 
-**Does it work with other languages?** Hebrew ⇄ English (US and most Latin layouts) and French AZERTY. Other layouts (Russian, Arabic…) are refused rather than guessed.
+**Does it work with other languages?** Hebrew ⇄ English (US, UK and other Latin layouts; QWERTZ and Belgian AZERTY with their own table from Windows) and French AZERTY. Other layouts (Russian, Arabic…) are refused rather than guessed.
 
 ### For administrators
 Settings can be enforced on every account of a PC under `HKLM\SOFTWARE\Policies\NOAM\KeyboardLayoutFixer`, which standard users cannot change. They use the same names as `settings.json`:
@@ -128,6 +133,8 @@ The script runs the tests, checks the dependency licences and builds `target/x86
 - **Mises à jour** : une fois par jour, une bulle signale une nouvelle version ; un clic dans le menu de l'icône l'installe, après vérification de l'intégrité et de la signature. Vous pouvez les désactiver dans ce menu.
 - **Désinstallation** : Paramètres › Applications › Applications installées › Keyboard Layout Fixer Vos réglages sont conservés.
 - **Correction pendant la frappe** (option, désactivée par défaut) : menu de l'icône › Proposer la correction pendant la frappe. Une bulle propose la correction, Tab l'accepte.
+- **Remplacements de texte** (option, désactivée et vide par défaut) : menu de l'icône › Remplacements de texte › Mes remplacements… Une ligne `abréviation = texte`, par exemple `@@ = nom@exemple.com`.
+- **Jeux avec anti-triche** : avant de jouer, quittez le programme (menu de l'icône › Quitter), car les options de frappe surveillent le clavier.
 - **Vie privée** : rien de ce que vous tapez n'est envoyé ni enregistré. Après une vraie erreur, une notification propose d'envoyer un rapport anonyme (version, étape en échec, nom du programme ; jamais votre texte) : rien ne part sans votre clic. Menu de l'icône › Rapports de problèmes.
 
 ## עברית
@@ -138,6 +145,8 @@ The script runs the tests, checks the dependency licences and builds `target/x86
 - **הגדרות**: לחיצה על הסמל ליד השעון; לחיצה ימנית להשהיה ולאפשרויות נוספות.
 - **עדכונים**: פעם ביום מופיעה הודעה כשיש גרסה חדשה; לחיצה אחת בתפריט הסמל מתקינה אותה, אחרי אימות התקינות והחתימה. אפשר לכבות את העדכונים באותו תפריט.
 - **הסרה**: הגדרות › אפליקציות › אפליקציות מותקנות › Keyboard Layout Fixer. ההגדרות שלכם נשמרות.
+- **החלפות טקסט** (אפשרות, כבויה וריקה כברירת מחדל): תפריט הסמל › החלפות טקסט › ההחלפות שלי… שורה אחת לכל החלפה, למשל `@@ = name@example.com`.
+- **משחקים עם מערכת נגד רמאות**: לפני המשחק צאו מהתוכנה (תפריט הסמל › יציאה), כי אפשרויות ההקלדה עוקבות אחרי המקלדת.
 - **תיקון בזמן ההקלדה** (אפשרות, כבויה כברירת מחדל): תפריט הסמל › הצע תיקון בזמן ההקלדה. הודעה קטנה מציעה את התיקון, ו-Tab מאשר.
 - **פרטיות**: שום דבר ממה שמקלידים לא נשלח ולא נשמר. אחרי תקלה אמיתית מופיעה הצעה לשלוח דיווח אנונימי (גרסה, השלב שנכשל, שם התוכנה; אף פעם לא הטקסט שלכם): שום דבר לא נשלח בלי לחיצה שלכם. תפריט הסמל › דיווח על בעיות.
 

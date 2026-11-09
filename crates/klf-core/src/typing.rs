@@ -24,7 +24,25 @@ pub struct Dict {
     never: HashSet<String>,
     /// words the user fixed with F10 ("+word"): fixed at once next time
     learned: HashSet<String>,
+    /// 1.8.2, letter models built from the lists, for words in no list
+    he_model: crate::ngram::Model,
+    en_model: crate::ngram::Model,
+    /// (gap, min), NGRAM_GAP and NGRAM_MIN; changed only by the measurement
+    ngram: (f64, f64),
 }
+
+/// 1.8.2, a word in no list: proposed only when the reading looks much more like its language
+/// than what was typed looks like its own (average log-probability per letter), 5 letters or more.
+pub const NGRAM_GAP: f64 = 1.5;
+pub const NGRAM_MIN: f64 = -3.0;
+pub const NGRAM_MIN_CHARS: usize = 5;
+/// ...and what was typed must look bad in its own language (typos of real words do not).
+pub const NGRAM_OWN_MAX: f64 = -3.6;
+/// 1.8.2, short words fixed with the next one: rare on this layout, among the most common on the other.
+pub const SHORT_OWN_RANK: u32 = 3_000;
+pub const SHORT_OTHER_RANK: u32 = 300;
+/// A Hebrew word with prefixes ("וכשהלכתי"): what was typed must also look less like English.
+pub const PREFIX_GAP: f64 = 1.0;
 
 /// The personal file: one word per line; "-word" = never fix this word as typed; "+word" = a word
 /// fixed with F10, fixed at once next time. "#" comments.
@@ -71,7 +89,8 @@ impl Dict {
             }
             m
         };
-        Dict { he: take(he, false), en: take(en, true), personal: HashSet::new(), never: HashSet::new(), learned: HashSet::new() }
+        let model = |t: &str| crate::ngram::Model::train(t.lines().filter_map(|l| l.split_whitespace().next()).filter(|w| w.chars().count() <= MAX_WORD_CHARS).take(max));
+        Dict { he: take(he, false), en: take(en, true), personal: HashSet::new(), never: HashSet::new(), learned: HashSet::new(), he_model: model(he), en_model: model(en), ngram: (NGRAM_GAP, NGRAM_MIN) }
     }
     /// The personal dictionary (replaces the previous one).
     pub fn set_personal(&mut self, text: &str) {
@@ -97,6 +116,10 @@ impl Dict {
     pub fn is_he_exact(&self, w: &str) -> bool {
         self.he.contains_key(w)
     }
+    /// Rank in the list of that language (0 = most frequent).
+    pub fn rank(&self, w: &str, hebrew: bool) -> Option<u32> {
+        if hebrew { self.he.get(w).copied() } else { self.en.get(&w.to_lowercase()).copied() }
+    }
     pub fn is_en(&self, w: &str) -> bool {
         self.en.contains_key(&w.to_lowercase())
     }
@@ -110,6 +133,34 @@ impl Dict {
             4 => r < 20_000,
             _ => true,
         }
+    }
+    /// 1.8.2, a Hebrew reading made of one or two prefixes and a common word ("וכשהלכתי" is not
+    /// in the list but "הלכתי" is): 3 letters or more left, and that word common enough.
+    pub fn is_he_prefixed(&self, w: &str) -> bool {
+        let mut s = w;
+        for _ in 0..2 {
+            let mut it = s.chars();
+            match it.next() {
+                Some(c) if HE_PREFIXES.contains(&c) && it.as_str().chars().count() >= 3 => {
+                    s = it.as_str();
+                    if self.he.get(s).is_some_and(|&r| r < 20_000) {
+                        return true;
+                    }
+                }
+                _ => break,
+            }
+        }
+        false
+    }
+    /// 1.8.2, both words in no list: does the reading look like a word of its language and what
+    /// was typed like nothing of its own?
+    pub fn looks_swapped(&self, typed: &str, read: &str, hebrew_typed: bool, gap: f64, min: f64) -> bool {
+        if read.chars().count() < NGRAM_MIN_CHARS || self.he_model.is_empty() || self.en_model.is_empty() {
+            return false;
+        }
+        let (own, other) = if hebrew_typed { (&self.he_model, &self.en_model) } else { (&self.en_model, &self.he_model) };
+        let (r, t) = (other.score(read), own.score(typed));
+        r >= min && r - t >= gap && t <= NGRAM_OWN_MAX
     }
     pub fn is_he(&self, w: &str) -> bool {
         if self.he.contains_key(w) {
@@ -188,6 +239,22 @@ pub fn f10_lesson_checked(before: &str, after: &str, dict: Option<&Dict>) -> Opt
     learned_line(b)
 }
 
+/// Keys that are Hebrew letters on one layout and signs on the other: kept inside a word.
+pub const WORD_SIGNS: &[char] = &[',', '.', ';', '/', '\''];
+
+/// Inside a word typed on the Latin layout only "," (ת) and "'" may appear (ץ and ף, from "." and
+/// ";", are final letters); on the Hebrew layout only "/" (q) and "'" (w).
+fn interior_signs_ok(core: &str, hebrew_typed: bool) -> bool {
+    let allowed: &[char] = if hebrew_typed { &['/', '\''] } else { &[',', '\''] };
+    core.chars().all(|c| !WORD_SIGNS.contains(&c) || allowed.contains(&c))
+}
+
+/// "NASA", "AKUO": capitals only (an acronym, or Caps Lock): never fixed while typing.
+fn all_caps(w: &str) -> bool {
+    let letters: Vec<char> = w.chars().filter(|c| c.is_alphabetic()).collect();
+    letters.len() >= 2 && letters.iter().all(|c| c.is_uppercase())
+}
+
 /// Looks like code or a name made of parts: "getElementById", "iPhone", "McDonald".
 fn code_like(w: &str) -> bool {
     let letters: Vec<char> = w.chars().filter(|c| c.is_alphabetic()).collect();
@@ -208,7 +275,20 @@ pub fn suggest(words: &[(String, String)], hebrew_active: bool, dict: &Dict) -> 
     let wrong = |typed: &str, read: &str| -> bool {
         // personal dictionary first: a word of the user, or a word never to fix, is never wrong;
         // a reading that is a word of the user counts as a real word
-        if dict.never(typed) || dict.personal(typed) || (!hebrew_active && code_like(typed)) {
+        if dict.never(typed) || dict.personal(typed) || (!hebrew_active && (code_like(typed) || all_caps(typed))) {
+            return false;
+        }
+        // 1.8.2: a word followed by a sign ("hello," "שלום."): the word itself decides; the keys
+        // , . ; / ' are Hebrew letters on the other layout ("ac," = שבת), so they stay in the word
+        let core = typed.trim_end_matches(WORD_SIGNS);
+        let signs_after = core != typed;
+        if signs_after && dict.personal(core) {
+            return false;
+        }
+        // (an English word of the list stays, unless the reading is a word at least 4 times more
+        // frequent: "ac," = שבת, rank 2 634, rather than "ac", rank 11 948)
+        let read_rank = dict.rank(read, !hebrew_active).filter(|_| dict.common_enough(read, !hebrew_active));
+        if signs_after && (if hebrew_active { dict.is_he(core) } else { dict.rank(core, false).is_some_and(|k| read_rank.is_none_or(|r| r.saturating_mul(4) >= k)) }) {
             return false;
         }
         // taught with F10: wrong whatever the lists say
@@ -219,11 +299,30 @@ pub fn suggest(words: &[(String, String)], hebrew_active: bool, dict: &Dict) -> 
         if dict.personal(read) && letters_only(read, !hebrew_active) && !typed_is_word {
             return true;
         }
-        if hebrew_active {
-            letters_only(read, false) && !dict.is_he(typed) && dict.common_enough(read, false)
-        } else {
-            letters_only(read, true) && !dict.is_en(typed) && dict.common_enough(read, true)
+        if typed_is_word || !letters_only(read, !hebrew_active) {
+            return false;
         }
+        if dict.common_enough(read, !hebrew_active) {
+            return true;
+        }
+        // 1.8.2: the reading is in no list (a rare word, a Hebrew word with prefixes)
+        let read_listed = if hebrew_active { dict.is_en(read) } else { dict.is_he_exact(read) };
+        if read_listed {
+            return false; // a rare short word of the list: left alone, as before
+        }
+        // "hello,world", "yes,no": words of the list joined by a comma
+        if !hebrew_active && core.contains(',') && core.split(',').all(|p| p.is_empty() || dict.is_en(p)) {
+            return false;
+        }
+        // a sign INSIDE what was typed that is no letter on the other layout ("file.txt",
+        // "google.com"): the letter models would be fooled, so no proposal without the lists
+        if !interior_signs_ok(core, hebrew_active) {
+            return false;
+        }
+        // what was typed is judged without the signs after it ("kauai," as "kauai"): a word and
+        // a comma is never less English than the word; the reading keeps them (ת ץ ף...)
+        (!hebrew_active && dict.ngram.0.is_finite() && dict.is_he_prefixed(read) && dict.looks_swapped(core, read, false, PREFIX_GAP, f64::NEG_INFINITY))
+            || (!core.is_empty() && dict.looks_swapped(core, read, hebrew_active, dict.ngram.0, dict.ngram.1))
     };
     let len = |s: &str| s.chars().count();
     let n = words.len();
@@ -234,7 +333,13 @@ pub fn suggest(words: &[(String, String)], hebrew_active: bool, dict: &Dict) -> 
         return None;
     }
     let mut start = n - 1;
-    while start > 0 && flags[start - 1] {
+    // 1.8.2: a short word that happens to be a rare word here ("ak", "gk") but a very common one
+    // on the other layout (של, על) joins the run when the word after it is wrong
+    let soft = |(t, r): &(String, String)| -> bool {
+        let n = len(t);
+        (2..=3).contains(&n) && !dict.never(t) && !dict.personal(t) && !(!hebrew_active && (all_caps(t) || code_like(t))) && letters_only(t, hebrew_active) && dict.rank(t, hebrew_active).is_none_or(|k| k >= SHORT_OWN_RANK) && dict.rank(r, !hebrew_active).is_some_and(|k| k < SHORT_OTHER_RANK)
+    };
+    while start > 0 && (flags[start - 1] || soft(&words[start - 1])) {
         start -= 1;
     }
     let run = &words[start..];
@@ -283,6 +388,9 @@ pub struct Buffer {
     current: String,
     words: Vec<String>,
     hebrew: Option<bool>,
+    /// 1.8.2: something not tracked was typed in this word (Caps Lock or Shift on the Hebrew
+    /// layout): this word is not judged, and the run starts again after the next space
+    broken: bool,
 }
 
 impl Buffer {
@@ -290,9 +398,18 @@ impl Buffer {
         self.current.clear();
         self.words.clear();
         self.hebrew = None;
+        self.broken = false;
+    }
+    /// Text that is not tracked was typed: nothing is judged until the next space.
+    pub fn invalidate(&mut self) {
+        self.clear();
+        self.broken = true;
     }
     /// A character typed with the Hebrew (`hebrew`) or the Latin layout.
     pub fn push(&mut self, c: char, hebrew: bool) {
+        if self.broken {
+            return;
+        }
         if self.hebrew.is_some_and(|h| h != hebrew) {
             self.clear(); // the layout changed: a new run starts
         }
@@ -304,6 +421,9 @@ impl Buffer {
         self.current.push(c);
     }
     pub fn backspace(&mut self) {
+        if self.broken {
+            return;
+        }
         if self.current.pop().is_none() {
             // back into the previous word: simpler and safer to start again
             self.clear();
@@ -315,6 +435,10 @@ impl Buffer {
     }
     /// Space typed: the current word ends. Some(words, hebrew) when there is something to check.
     pub fn space(&mut self) -> Option<(Vec<String>, bool)> {
+        if self.broken {
+            self.clear();
+            return None;
+        }
         if self.current.is_empty() {
             self.clear(); // two spaces: start again
             return None;
@@ -617,23 +741,119 @@ mod measure {
             }
             rows.push(format!("{name} : {n} mots (3 lettres et plus) ; corrigés si tapés sur le mauvais clavier : {:.1} % ; fausses alertes si tapés correctement : {:.2} %", 100.0 * fix as f64 / n as f64, 100.0 * fp as f64 / n as f64));
         }
-        // rarer words, NOT in the lists (ranks 40 001 to 50 000 of the source files), if present
-        if let Ok(dir) = std::env::var("KLF_WORDS_50K") {
-            for (name, file, hebrew_word) in [("hébreu rare", "he_50k.txt", true), ("anglais rare", "en_50k.txt", false)] {
-                let Some(t) = read(&format!("{dir}/{file}")) else { continue };
-                let words: Vec<String> = t.lines().skip(40_000).filter_map(|l| l.split_whitespace().next()).filter(|w| w.chars().count() >= 3 && w.chars().all(|c| c.is_alphabetic())).map(String::from).collect();
-                let (mut fp, mut fix) = (0, 0);
-                for w in &words {
-                    let other = conv(w);
-                    if suggest(&[(w.clone(), other.clone())], hebrew_word, &d).is_some() {
+        // 1.8.2, short words that join a run: how many words of each list can do it
+        for (name, list, hebrew_word) in [("hébreu", &he, true), ("anglais", &en, false)] {
+            let soft: Vec<String> = list.lines().filter(|w| (2..=3).contains(&w.chars().count())).filter(|w| d.rank(w, hebrew_word).is_none_or(|k| k >= SHORT_OWN_RANK) && d.rank(&conv(w), !hebrew_word).is_some_and(|k| k < SHORT_OTHER_RANK)).map(String::from).collect();
+            rows.push(format!("{name} : {} mots courts rares qui peuvent suivre un mot corrigé : {}", soft.len(), soft.iter().take(30).cloned().collect::<Vec<_>>().join(" ")));
+        }
+        // 1.8.2, words followed by a sign (, . ;) typed on the RIGHT keyboard: nothing to propose
+        for (name, list, hebrew_word) in [("hébreu", &he, true), ("anglais", &en, false)] {
+            let mut words: Vec<String> = list.lines().filter(|w| w.chars().count() >= 2).map(String::from).collect();
+            if let Ok(dir) = std::env::var("KLF_WORDS_50K") {
+                if let Some(t) = read(&format!("{dir}/{}", if hebrew_word { "he_50k.txt" } else { "en_50k.txt" })) {
+                    words.extend(t.lines().skip(40_000).filter_map(|l| l.split_whitespace().next()).filter(|w| w.chars().count() >= 2 && w.chars().all(|c| c.is_alphabetic())).map(String::from));
+                }
+            }
+            let (mut fp, mut n) = (0, 0);
+            for w in words.iter().step_by(3) {
+                for sign in [",", ".", ";"] {
+                    let t = format!("{w}{sign}");
+                    n += 1;
+                    if suggest(&[(t.clone(), conv(&t))], hebrew_word, &d).is_some() {
                         fp += 1;
-                    }
-                    if suggest(&[(other.clone(), w.clone())], !hebrew_word, &d).is_some() {
-                        fix += 1;
+                        if std::env::var("KLF_SHOW").is_ok() {
+                            println!("  mot + signe pris pour une erreur : {t} -> {}", conv(&t));
+                        }
                     }
                 }
-                let n = words.len().max(1);
-                rows.push(format!("{name} : {n} mots absents des listes ; corrigés : {:.1} % ; fausses alertes : {:.2} %", 100.0 * fix as f64 / n as f64, 100.0 * fp as f64 / n as f64));
+            }
+            rows.push(format!("{name} : {n} mots suivis de , . ; ; fausses alertes : {:.2} %", 100.0 * fp as f64 / n.max(1) as f64));
+        }
+        // typos (a letter dropped, two letters swapped) typed on the RIGHT keyboard: nothing to propose
+        for (name, list, hebrew_word) in [("hébreu", &he, true), ("anglais", &en, false)] {
+            let (mut fp, mut n) = (0, 0);
+            for w in list.lines().filter(|w| w.chars().count() >= 5).step_by(4) {
+                let c: Vec<char> = w.chars().collect();
+                let k = c.len() / 2;
+                let mut dropped = c.clone();
+                dropped.remove(k);
+                let mut swapped = c.clone();
+                swapped.swap(k - 1, k);
+                for t in [dropped, swapped] {
+                    let t: String = t.into_iter().collect();
+                    if t == w || (if hebrew_word { d.is_he(&t) } else { d.is_en(&t) }) {
+                        continue;
+                    }
+                    n += 1;
+                    if suggest(&[(t.clone(), conv(&t))], hebrew_word, &d).is_some() {
+                        fp += 1;
+                        if std::env::var("KLF_SHOW").is_ok() {
+                            println!("  faute de frappe prise pour une erreur de clavier : {t} -> {}", conv(&t));
+                        }
+                    }
+                }
+            }
+            let mut d0 = Dict::from_lists(&he, &en, DICT_SIZE);
+            d0.ngram = (f64::INFINITY, 0.0);
+            let mut fp0 = 0;
+            for w in list.lines().filter(|w| w.chars().count() >= 5).step_by(4) {
+                let c: Vec<char> = w.chars().collect();
+                let k = c.len() / 2;
+                let mut dropped = c.clone();
+                dropped.remove(k);
+                let mut swapped = c.clone();
+                swapped.swap(k - 1, k);
+                for t in [dropped, swapped] {
+                    let t: String = t.into_iter().collect();
+                    if t != w && !(if hebrew_word { d.is_he(&t) } else { d.is_en(&t) }) && suggest(&[(t.clone(), conv(&t))], hebrew_word, &d0).is_some() {
+                        fp0 += 1;
+                    }
+                }
+            }
+            rows.push(format!("{name} : (sans modèle de lettres ni préfixes : {:.2} %)", 100.0 * fp0 as f64 / n.max(1) as f64));
+            rows.push(format!("{name} : {n} fautes de frappe (lettre oubliée, lettres inversées) ; fausses alertes : {:.2} %", 100.0 * fp as f64 / n.max(1) as f64));
+        }
+        // rarer words, NOT in the lists (ranks 40 001 to 50 000 of the source files), if present:
+        // 40 001-45 000 to choose the thresholds, 45 001-50 000 to measure (never seen before)
+        if let Ok(dir) = std::env::var("KLF_WORDS_50K") {
+            let mut d = d;
+            let sweep = std::env::var("KLF_SWEEP").is_ok();
+            for (name, file, hebrew_word) in [("hébreu rare", "he_50k.txt", true), ("anglais rare", "en_50k.txt", false)] {
+                let Some(t) = read(&format!("{dir}/{file}")) else { continue };
+                let all: Vec<String> = t.lines().skip(40_000).filter_map(|l| l.split_whitespace().next()).filter(|w| w.chars().count() >= 3 && w.chars().all(|c| c.is_alphabetic())).map(String::from).collect();
+                let half = all.len() / 2;
+                let rate = |d: &Dict, words: &[String]| {
+                    let (mut fp, mut fix) = (0, 0);
+                    for w in words {
+                        let other = conv(w);
+                        if suggest(&[(w.clone(), other.clone())], hebrew_word, d).is_some() {
+                            fp += 1;
+                            if std::env::var("KLF_SHOW").is_ok() {
+                                println!("  fausse alerte : {w} -> {other}");
+                            }
+                        }
+                        if suggest(&[(other.clone(), w.clone())], !hebrew_word, d).is_some_and(|s| s.text.trim() == w) {
+                            fix += 1;
+                        }
+                    }
+                    let n = words.len().max(1) as f64;
+                    (100.0 * fix as f64 / n, 100.0 * fp as f64 / n)
+                };
+                if sweep {
+                    for gap in [1.0, 1.5, 2.0, 2.5, 3.0] {
+                        for min in [-2.2, -2.4, -2.6, -2.8, -3.0, -9.0] {
+                            d.ngram = (gap, min);
+                            let (f, p) = rate(&d, &all[..half]);
+                            println!("{name} choix gap {gap} min {min} : corrigés {f:.1} % fausses {p:.2} %");
+                        }
+                    }
+                    d.ngram = (NGRAM_GAP, NGRAM_MIN);
+                }
+                d.ngram = (f64::INFINITY, 0.0);
+                let (f0, p0) = rate(&d, &all[half..]);
+                d.ngram = (NGRAM_GAP, NGRAM_MIN);
+                let (f, p) = rate(&d, &all[half..]);
+                rows.push(format!("{name} : {} mots absents des listes (rangs 45 001-50 000) ; corrigés : {f:.1} % (sans modèle de lettres {f0:.1} %) ; fausses alertes : {p:.2} % (sans {p0:.2} %)", all.len() - half));
             }
         }
         for r in rows {
@@ -648,6 +868,23 @@ mod cases {
     use super::*;
     use crate::convert::{convert_with, us_map};
     use crate::settings::MixedTextMode;
+
+    #[test]
+    fn short_words_fixed_with_the_next_one() {
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../");
+        let read = |p: &str| std::fs::read_to_string(format!("{root}{p}")).ok();
+        let (Some(he), Some(en)) = (read("data/words/KeyboardLayoutFixer-words-he.txt"), read("data/words/KeyboardLayoutFixer-words-en.txt")) else { return };
+        let d = Dict::from_lists(&he, &en, DICT_SIZE);
+        let m = us_map();
+        let pairs = |s: &str| s.split(' ').map(|w| (w.to_string(), convert_with(&m, w, MixedTextMode::ToggleAll, true))).collect::<Vec<_>>();
+        // "kt" (לא) alone is never fixed; with a wrong word after it, the whole run is
+        assert!(suggest(&pairs("kt"), false, &d).is_none());
+        assert_eq!(suggest(&pairs("kt hsg,h"), false, &d).map(|s| s.text), Some("לא ידעתי ".to_string()));
+        let s = suggest(&pairs("ak gk akuo"), false, &d).expect("run fixed");
+        assert_eq!(s.text, "של על שלום ");
+        // an English word before stays: "is akuo" fixes only akuo
+        assert_eq!(suggest(&pairs("is akuo"), false, &d).map(|s| s.text), Some("שלום ".to_string()));
+    }
 
     #[test]
     fn typing_cases() {

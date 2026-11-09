@@ -74,6 +74,9 @@ const MENU_REPORTS: usize = 199;
 const CMD_TYPING: usize = 117;
 const CMD_TYPING_WORDS: usize = 118;
 const CMD_DOUBLE_SHIFT: usize = 119;
+const CMD_TYPING_SOUND: usize = 120;
+const CMD_REPLACEMENTS: usize = 121;
+const CMD_REPLACEMENTS_FILE: usize = 122;
 /// End of a timed pause (10 minutes).
 const TIMER_PAUSE_END: usize = 3;
 const TIMED_PAUSE_MS: u32 = 10 * 60 * 1000;
@@ -108,6 +111,26 @@ thread_local! {
     static LAST_APP: RefCell<String> = const { RefCell::new(String::new()) };
     /// "hh:mm" end of the timed pause (empty: no timed pause)
     static PAUSE_UNTIL: RefCell<String> = const { RefCell::new(String::new()) };
+    /// 1.8.2: why the typing help is asleep in the foreground window
+    static DORMANT: Cell<Option<Msg>> = const { Cell::new(None) };
+    /// the last foreground window of a real program
+    static LAST_FG: Cell<usize> = const { Cell::new(0) };
+}
+
+fn s_text_replacements_on() -> bool {
+    user_settings().text_replacements
+}
+
+/// 1.8.2: grey tray icon while the typing help sleeps in the foreground window. `None`: the
+/// last real program window (never the taskbar, the tray menu or our own windows).
+pub fn refresh_dormant(hwnd: Option<HWND>) {
+    let hwnd = hwnd.unwrap_or_else(|| LAST_FG.with(|w| w.get()) as HWND);
+    // SAFETY: IsWindow has no pointers. A window closed since (or none yet): no reason shown
+    let hwnd = if !hwnd.is_null() && unsafe { IsWindow(hwnd) } != 0 { hwnd } else { null_mut() };
+    let r = crate::typing::dormant_reason(hwnd);
+    if DORMANT.with(|d| d.replace(r)) != r {
+        update_tray();
+    }
 }
 
 /// Windows of the shell that take the foreground when the tray icon is clicked.
@@ -140,6 +163,9 @@ fn note_foreground(hwnd: HWND) {
         return;
     }
     LAST_APP.with(|a| *a.borrow_mut() = exe);
+    LAST_FG.with(|w| w.set(hwnd as usize));
+    crate::typing::on_foreground();
+    refresh_dormant(Some(hwnd));
 }
 
 /// Follows the foreground window (out of context: no DLL is injected anywhere).
@@ -564,7 +590,12 @@ fn tray_data() -> NOTIFYICONDATAW {
     let l = lang();
     let key = key_name();
     let (tip, icon_id) = match hotkey_state() {
-        HotkeyState::Ready => (text_with_key(l, Msg::TipReady, &key), 1),
+        // 1.8.2: the typing help asleep in this window (grey icon, the reason in the tip)
+        HotkeyState::Ready => match DORMANT.with(|d| d.get()) {
+            // the reason first: the tip is cut at 127 characters
+            Some(m) => (format!("{}\n{}", text(l, m), text_with_key(l, Msg::TipReady, &key)), 2),
+            None => (text_with_key(l, Msg::TipReady, &key), 1),
+        },
         HotkeyState::Paused => (text_with_key(l, Msg::TipPaused, &key), 2),
         HotkeyState::Unavailable => (text_with_key(l, Msg::TipUnavailable, &key), 2),
     };
@@ -749,6 +780,11 @@ fn show_menu(hwnd: HWND) {
         items.push((CMD_TYPING, text(l, Msg::MenuTyping).to_string(), s.typing_suggestions));
         if s.typing_suggestions {
             items.push((CMD_TYPING_WORDS, text(l, Msg::MenuTypingWords).to_string(), false));
+            items.push((CMD_TYPING_SOUND, text(l, Msg::MenuTypingSound).to_string(), s.typing_sound));
+        }
+        items.push((CMD_REPLACEMENTS, text(l, Msg::MenuReplacements).to_string(), s.text_replacements));
+        if s.text_replacements {
+            items.push((CMD_REPLACEMENTS_FILE, text(l, Msg::MenuReplacementsFile).to_string(), false));
         }
         items.push((CMD_DOUBLE_SHIFT, text(l, Msg::MenuDoubleShift).to_string(), s.double_shift_convert));
     }
@@ -1123,6 +1159,24 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 CMD_PAUSE10 => pause_for_a_while(),
                 CMD_REPORT_SEND => crate::report::send_pending(hwnd),
                 CMD_TYPING_WORDS if crate::typing::allowed() => crate::typing::open_personal(),
+                CMD_REPLACEMENTS_FILE if crate::typing::allowed() => crate::typing::open_replacements(),
+                CMD_TYPING_SOUND if crate::typing::allowed() => {
+                    let mut s = user_settings();
+                    s.typing_sound = !s.typing_sound;
+                    if save_settings(&s) {
+                        apply_settings(s);
+                    }
+                }
+                CMD_REPLACEMENTS if crate::typing::allowed() => {
+                    let mut s = user_settings();
+                    s.text_replacements = !s.text_replacements;
+                    if save_settings(&s) {
+                        apply_settings(s);
+                        if s_text_replacements_on() {
+                            crate::typing::open_replacements(); // empty at first: shows how to write one
+                        }
+                    }
+                }
                 CMD_DOUBLE_SHIFT if crate::typing::allowed() => {
                     let mut s = user_settings();
                     s.double_shift_convert = !s.double_shift_convert;
@@ -1200,6 +1254,8 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
         WM_TIMER if wparam == TIMER_POLICY => {
             reload_policy();
             crate::host::parked_available(); // a kept clipboard is forgotten after 10 minutes, even unseen
+            crate::typing::periodic(); // replacements file changed? full screen started or ended?
+            refresh_dormant(None);
             0
         }
         WM_TIMER if wparam == TIMER_UPDATE => {

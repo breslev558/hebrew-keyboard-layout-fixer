@@ -126,6 +126,31 @@ pub fn beep() {
     }
 }
 
+/// 1.8.2: the short sound after a fix while typing: a standard Windows sound ("Notification"
+/// event of the user's sound scheme), as a system sound: silent when Windows sounds are off or
+/// muted, nothing when no sound is set. Played on a thread of its own, so that neither loading
+/// the sound nor the audio service can ever slow down typing (the keyboard hook runs on the UI
+/// thread); a sound already playing is not doubled.
+pub fn fix_sound() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static PLAYING: AtomicBool = AtomicBool::new(false);
+    if PLAYING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let spawned = std::thread::Builder::new().name("klf-sound".into()).spawn(|| {
+        use windows_sys::Win32::Media::Audio::{PlaySoundW, SND_ALIAS, SND_NODEFAULT, SND_SYSTEM};
+        let alias = wide("SystemNotification");
+        // SAFETY: NUL-terminated alias that lives for the (synchronous) call.
+        unsafe {
+            PlaySoundW(alias.as_ptr(), null_mut(), SND_ALIAS | SND_NODEFAULT | SND_SYSTEM);
+        }
+        PLAYING.store(false, Ordering::SeqCst);
+    });
+    if spawned.is_err() {
+        PLAYING.store(false, Ordering::SeqCst);
+    }
+}
+
 /// Full path of the process exe (None if access is refused).
 pub fn process_path(pid: u32) -> Option<String> {
     // SAFETY: handle checked and closed; buffer size passed.

@@ -393,6 +393,9 @@ fn latin_name(l: Lang, k: LatinKind) -> &'static str {
         (Lang::Fr, LatinKind::FrenchAzerty) => "français (AZERTY)",
         (Lang::En, LatinKind::Us) => "English",
         (Lang::En, LatinKind::FrenchAzerty) => "French (AZERTY)",
+        (Lang::He, LatinKind::OtherFromWindows) => "מקלדת לטינית אחרת",
+        (Lang::Fr, LatinKind::OtherFromWindows) => "autre clavier latin",
+        (Lang::En, LatinKind::OtherFromWindows) => "other Latin layout",
     }
 }
 
@@ -855,6 +858,8 @@ fn on_import() {
     new.report_mode = old.report_mode;
     new.typing_suggestions = old.typing_suggestions; // watching the keys is the user's own choice
     new.double_shift_convert = old.double_shift_convert;
+    new.typing_sound = old.typing_sound;
+    new.text_replacements = old.text_replacements; // also watches the keys: the user's own choice
     new.typing_skip_code_editors = old.typing_skip_code_editors;
     let diff = klf_core::profile::differences(&old, &new, &app::locked());
     if diff.is_empty() {

@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.8.2 (November 2026)
+- Fix while typing (option) now recognises **words that are in no list**: letter models (character trigrams) built on your PC from the same word lists, and **Hebrew prefixes** before a common word (וכשהלכתי). Measured on 4,874 Hebrew and 4,466 English rare words never seen by the program (ranks 45,001–50,000): 65 % and 69 % fixed when typed on the wrong layout (before: none), false proposals unchanged at 0.06 % and 0.40 %. On typos of real words (a letter dropped, two letters swapped): 0.06 % (Hebrew) and 0.26 % (English) false proposals.
+- The keys `, . ; / '` count as letters inside a word (`ac,` = שבת, `tr.` = ארץ); a known word followed by a sign (`hello,`) is left alone. Words in CAPITALS (acronyms, Caps Lock) are never fixed while typing. Short words such as `kt` (לא) or `ak` (של) are fixed together with the wrong word that follows them.
+- New options, off by default: a **short Windows sound** after a fix (standard system sound, silent when Windows sounds are off) and **text replacements** (your own list, `@@ = name@example.com`; empty until you write it; Backspace right after undoes).
+- The tray icon turns grey, with the reason in its tooltip, while fixing while typing sleeps in the current window (code editor, excluded program, full screen).
+- Latin layouts whose letters are not on the US keys (German or Swiss QWERTZ, Belgian AZERTY) now convert with their own table read from Windows (before: the US table, so y/z or a/q/m were wrong). US, UK, US-International and French AZERTY are unchanged.
+- With only the "Hebrew (Standard)" SI-1452 layout installed, the keyboard now switches to Hebrew after a fix (it stayed on English).
+- FAQ: quit the program before playing games with anti-cheat.
+
 ## 1.8.1 (November 2026)
 - Fix while typing (option): **learns from F10** (a single word you fix with F10 is fixed at once next time) and from **Backspace** (pressed right after a fix, it undoes it and the word is never fixed again). A personal list (tray menu › My words…) has priority over the word lists.
 - Never in **code editors** (VS Code, Visual Studio, JetBrains IDEs, Sublime Text, Notepad++…) by default, never on code-like words (camelCase), and the words kept are forgotten on sleep or lock.

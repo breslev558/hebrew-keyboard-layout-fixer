@@ -168,6 +168,12 @@ pub struct AppSettings {
     /// 1.8.1: two quick taps on Shift convert like F10 (public install only, off by default)
     #[serde(rename = "DoubleShiftConvert", deserialize_with = "de_bool_false")]
     pub double_shift_convert: bool,
+    /// 1.8.2: a short Windows sound when a word is fixed while typing (off by default)
+    #[serde(rename = "TypingSound", deserialize_with = "de_bool_false")]
+    pub typing_sound: bool,
+    /// 1.8.2: the user's text replacements ("@@" -> an email), off and empty by default
+    #[serde(rename = "TextReplacements", deserialize_with = "de_bool_false")]
+    pub text_replacements: bool,
     // --- new in 1.5.5 : update in one click (public per-user install only) ---
     #[serde(rename = "CheckUpdates", deserialize_with = "de_bool_true")]
     pub check_updates: bool,
@@ -289,6 +295,8 @@ impl Default for AppSettings {
             typing_suggestions: false,
             typing_skip_code_editors: true,
             double_shift_convert: false,
+            typing_sound: false,
+            text_replacements: false,
             update_skip_tag: String::new(),
             update_skip_at: 0,
             ui_language: UiLanguage::Auto,

@@ -78,7 +78,7 @@ bash tools/construire.sh
 The script runs the tests, checks the dependency licences and builds `target/x86_64-pc-windows-gnu/release/KeyboardLayoutFixer.exe` with a `BUILD-INFO.txt`. The installer is built with NSIS: `makensis -DVERSION=x.y.z -DEXE=… -DICON=crates/klf-win/res/klf.ico installer/KeyboardLayoutFixer.nsi`. The same checks run on GitHub for every change. Releases are built by `.github/workflows/release.yml`, with a build provenance attestation. Manual checks on Windows are listed in `TESTS.md`.
 
 ### Project files
-[CHANGELOG.md](CHANGELOG.md) · [SECURITY.md](SECURITY.md) (report problems privately) · [CODE_SIGNING_POLICY.md](CODE_SIGNING_POLICY.md) · [audits/](audits)
+[CHANGELOG.md](CHANGELOG.md) · [CONTRIBUTING.md](CONTRIBUTING.md) (issues and pull requests) · [SECURITY.md](SECURITY.md) (report security problems privately) · [CODE_SIGNING_POLICY.md](CODE_SIGNING_POLICY.md) · [audits/](audits)
 
 ## Français
 

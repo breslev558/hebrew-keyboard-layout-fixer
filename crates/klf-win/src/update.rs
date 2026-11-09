@@ -81,7 +81,7 @@ impl Drop for H {
 }
 
 /// GET over HTTPS, at most `max` bytes, only from allowed hosts (also after redirects), status 200.
-fn get(url: &str, max: usize) -> Option<Vec<u8>> {
+pub(crate) fn get(url: &str, max: usize) -> Option<Vec<u8>> {
     if !u::host_allowed(url) {
         return None;
     }
@@ -187,7 +187,7 @@ fn request(url: &str, body: Option<&str>, max: usize, final_ok: &dyn Fn(&str) ->
     }
 }
 
-fn sha256(data: &[u8]) -> Option<[u8; 32]> {
+pub(crate) fn sha256(data: &[u8]) -> Option<[u8; 32]> {
     let alg = wide("SHA256");
     // SAFETY: CNG calls with sized buffers; provider closed.
     unsafe {
@@ -202,12 +202,12 @@ fn sha256(data: &[u8]) -> Option<[u8; 32]> {
     }
 }
 
-fn hex(b: &[u8]) -> String {
+pub(crate) fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
 }
 
 /// ECDSA P-256 signature (r||s) of SHA-256(`msg`) by the update key.
-fn signature_ok(msg: &[u8], sig: &[u8; 64]) -> bool {
+pub(crate) fn signature_ok(msg: &[u8], sig: &[u8; 64]) -> bool {
     let Some(hash) = sha256(msg) else { return false };
     let alg = wide("ECDSA_P256");
     let blob_type = wide("ECCPUBLICBLOB");

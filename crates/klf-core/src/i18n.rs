@@ -162,6 +162,9 @@ pub enum Msg {
     ReportPreviewLabel,
     ReportSend,
     ReportCancel,
+    MenuTyping,
+    TypingReady,
+    TypingFailed,
 }
 
 pub const ALL_MSGS: &[Msg] = &[
@@ -174,7 +177,7 @@ pub const ALL_MSGS: &[Msg] = &[
     Msg::ButtonResume, Msg::LabelHotkey, Msg::LabelDirection, Msg::DirectionAuto, Msg::DirectionToHebrew,
     Msg::DirectionToEnglish, Msg::LabelTry, Msg::LabelResult, Msg::CheckSwitchLanguage, Msg::CheckBubble, Msg::BubbleTop, Msg::BubbleBottom, Msg::BubbleCaret,
     Msg::CheckSound, Msg::CheckConsole, Msg::CheckAutostart, Msg::AutostartManaged, Msg::LabelLanguage,
-    Msg::LanguageAuto, Msg::ButtonSave, Msg::ButtonClose, Msg::ButtonAbout, Msg::HotkeyInvalid, Msg::SaveFailed, Msg::AutostartFailed, Msg::AboutText, Msg::IndicatorCapsOn, Msg::IndicatorCapsOff, Msg::CheckIndicator, Msg::SchoolManaged, Msg::ButtonExport, Msg::ButtonImport, Msg::ButtonUndoImport, Msg::ImportConfirm, Msg::ImportNothing, Msg::ImportFailed, Msg::ImportTooBig, Msg::ImportNotJson, Msg::ImportUnknownFormat, Msg::ImportNewerFormat, Msg::ImportUnreadable, Msg::MenuRestoreClipboard, Msg::MenuCheckUpdates, Msg::MenuPreview, Msg::WelcomeTitle, Msg::WelcomeText, Msg::WelcomeTry, Msg::WelcomeClose, Msg::WelcomeNoMore, Msg::MenuInstallUpdate, Msg::UpdateAvailable, Msg::UpdateInstalling, Msg::UpdateFailed, Msg::ClipboardRestoredLater, Msg::ClipboardNotRestoredNewCopy, Msg::ImportDone, Msg::ExportDone, Msg::UndoConfirm, Msg::UndoNone, Msg::CheckLastWord, Msg::TabSimple, Msg::TabAdvanced, Msg::TabDiagnostic, Msg::LabelHotkeyLayout, Msg::LabelHotkeyCase, Msg::LabelWorkshop, Msg::WorkFollow, Msg::WorkToLatin, Msg::WorkToHebrew, Msg::WorkCase, Msg::ButtonCopyResult, Msg::LabelText, Msg::CheckCareful, Msg::CheckCapsOff, Msg::LabelLimit, Msg::LabelDelay, Msg::LabelExcluded, Msg::NumberInvalid, Msg::DiagNone, Msg::DiagLast, Msg::ButtonCopyDiag, Msg::ButtonRefresh, Msg::DiagCopied, Msg::CopyFailed, Msg::LayoutsLine, Msg::MenuReports, Msg::MenuReportProblem, Msg::MenuSendReport, Msg::MenuReportAlways, Msg::MenuReportNever, Msg::ReportAskTitle, Msg::ReportAskText, Msg::ReportSent, Msg::ReportFailed, Msg::ReportDialogText, Msg::ReportPreviewLabel, Msg::ReportSend, Msg::ReportCancel,
+    Msg::LanguageAuto, Msg::ButtonSave, Msg::ButtonClose, Msg::ButtonAbout, Msg::HotkeyInvalid, Msg::SaveFailed, Msg::AutostartFailed, Msg::AboutText, Msg::IndicatorCapsOn, Msg::IndicatorCapsOff, Msg::CheckIndicator, Msg::SchoolManaged, Msg::ButtonExport, Msg::ButtonImport, Msg::ButtonUndoImport, Msg::ImportConfirm, Msg::ImportNothing, Msg::ImportFailed, Msg::ImportTooBig, Msg::ImportNotJson, Msg::ImportUnknownFormat, Msg::ImportNewerFormat, Msg::ImportUnreadable, Msg::MenuRestoreClipboard, Msg::MenuCheckUpdates, Msg::MenuPreview, Msg::WelcomeTitle, Msg::WelcomeText, Msg::WelcomeTry, Msg::WelcomeClose, Msg::WelcomeNoMore, Msg::MenuInstallUpdate, Msg::UpdateAvailable, Msg::UpdateInstalling, Msg::UpdateFailed, Msg::ClipboardRestoredLater, Msg::ClipboardNotRestoredNewCopy, Msg::ImportDone, Msg::ExportDone, Msg::UndoConfirm, Msg::UndoNone, Msg::CheckLastWord, Msg::TabSimple, Msg::TabAdvanced, Msg::TabDiagnostic, Msg::LabelHotkeyLayout, Msg::LabelHotkeyCase, Msg::LabelWorkshop, Msg::WorkFollow, Msg::WorkToLatin, Msg::WorkToHebrew, Msg::WorkCase, Msg::ButtonCopyResult, Msg::LabelText, Msg::CheckCareful, Msg::CheckCapsOff, Msg::LabelLimit, Msg::LabelDelay, Msg::LabelExcluded, Msg::NumberInvalid, Msg::DiagNone, Msg::DiagLast, Msg::ButtonCopyDiag, Msg::ButtonRefresh, Msg::DiagCopied, Msg::CopyFailed, Msg::LayoutsLine, Msg::MenuReports, Msg::MenuReportProblem, Msg::MenuSendReport, Msg::MenuReportAlways, Msg::MenuReportNever, Msg::ReportAskTitle, Msg::ReportAskText, Msg::ReportSent, Msg::ReportFailed, Msg::ReportDialogText, Msg::ReportPreviewLabel, Msg::ReportSend, Msg::ReportCancel, Msg::MenuTyping, Msg::TypingReady, Msg::TypingFailed,
 ];
 
 /// `{key}` in a text is replaced by the hotkey name (e.g. F10).
@@ -587,6 +590,15 @@ pub fn text(lang: Lang, m: Msg) -> &'static str {
         (ReportCancel, He) => "ביטול",
         (ReportCancel, Fr) => "Annuler",
         (ReportCancel, En) => "Cancel",
+        (MenuTyping, He) => "הצע תיקון בזמן ההקלדה (Tab)",
+        (MenuTyping, Fr) => "Proposer la correction pendant la frappe (Tab)",
+        (MenuTyping, En) => "Suggest fixes while typing (Tab)",
+        (TypingReady, He) => "תיקון בזמן ההקלדה פעיל: כשמופיעה הצעה, לחצו Tab כדי לתקן.",
+        (TypingReady, Fr) => "Correction pendant la frappe activée : quand une bulle la propose, appuyez sur Tab.",
+        (TypingReady, En) => "Fixing while typing is on: when a bubble suggests a fix, press Tab.",
+        (TypingFailed, He) => "לא ניתן היה להוריד את רשימות המילים (אין אינטרנט?).",
+        (TypingFailed, Fr) => "Les listes de mots n'ont pas pu être téléchargées (pas d'internet ?).",
+        (TypingFailed, En) => "The word lists could not be downloaded (no internet?).",
         (AboutText, He) => "מתקן שפת מקלדת – גרסה {version}\n\nמתקן טקסט שהוקלד בשפת מקלדת שגויה (עברית ⇄ אנגלית) בלחיצה על {key}.\nמקש נוסף (F9 כברירת מחדל) מתקן טקסט שהוקלד כש-Caps Lock היה דולק.\nשום דבר ממה שמקלידים לא נשלח ולא נשמר.\n\nמבוסס על Keyboard Layout Fixer מאת Ravid Saadia (רישיון MIT).\nגרסת NOAM.",
         (AboutText, Fr) => "Correcteur de clavier – version {version}\n\nCorrige un texte tapé avec le mauvais clavier (hébreu ⇄ anglais) avec {key}.\nUne 2e touche (F9 par défaut) corrige un texte tapé avec Verr. Maj allumé.\nRien de ce que vous tapez n'est envoyé ni enregistré.\n\nD'après Keyboard Layout Fixer de Ravid Saadia (licence MIT).\nVersion NOAM.",
         (AboutText, En) => "Keyboard Layout Fixer – version {version}\n\nFixes text typed with the wrong keyboard layout (Hebrew ⇄ English) with {key}.\nA second key (F9 by default) fixes text typed with Caps Lock on.\nNothing you type is sent or recorded.\n\nBased on Keyboard Layout Fixer by Ravid Saadia (MIT license).\nNOAM version.",

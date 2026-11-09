@@ -159,6 +159,9 @@ pub struct AppSettings {
     /// 0 = ask after a real error (default), 1 = always send without asking, 2 = never ask
     #[serde(rename = "ReportMode", default)]
     pub report_mode: u32,
+    // --- new in 1.8.0 : correction while typing (public install only, off by default) ---
+    #[serde(rename = "TypingSuggestions", deserialize_with = "de_bool_false")]
+    pub typing_suggestions: bool,
     // --- new in 1.5.5 : update in one click (public per-user install only) ---
     #[serde(rename = "CheckUpdates", deserialize_with = "de_bool_true")]
     pub check_updates: bool,
@@ -277,6 +280,7 @@ impl Default for AppSettings {
             show_preview: true,
             welcome_done: false,
             report_mode: 0,
+            typing_suggestions: false,
             update_skip_tag: String::new(),
             update_skip_at: 0,
             ui_language: UiLanguage::Auto,

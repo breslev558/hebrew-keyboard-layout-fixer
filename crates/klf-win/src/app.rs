@@ -70,6 +70,8 @@ const CMD_REPORT_ALWAYS: usize = 115;
 const CMD_REPORT_NEVER: usize = 116;
 /// not a command: place of the "Problem reports" submenu
 const MENU_REPORTS: usize = 199;
+// 1.8.0: correction while typing (public install only)
+const CMD_TYPING: usize = 117;
 /// End of a timed pause (10 minutes).
 const TIMER_PAUSE_END: usize = 3;
 const TIMED_PAUSE_MS: u32 = 10 * 60 * 1000;
@@ -125,6 +127,7 @@ fn note_foreground(hwnd: HWND) {
     if hwnd.is_null() || unsafe { IsWindowVisible(hwnd) } == 0 {
         return;
     }
+    crate::typing::reset(); // another window: the words kept are forgotten
     let class = sys::class_name(hwnd);
     if SHELL_CLASSES.contains(&class.as_str()) {
         return;
@@ -341,6 +344,7 @@ pub fn apply_settings(new: AppSettings) {
     }
     crate::indicator::configure();
     update_tray();
+    crate::typing::apply();
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -739,6 +743,9 @@ fn show_menu(hwnd: HWND) {
     if crate::host::parked_available() {
         items.push((CMD_RESTORE_CLIP, text(l, Msg::MenuRestoreClipboard).to_string(), false));
     }
+    if crate::typing::allowed() {
+        items.push((CMD_TYPING, text(l, Msg::MenuTyping).to_string(), s.typing_suggestions));
+    }
     let reports = crate::report::enabled();
     if reports {
         if crate::report::pending() {
@@ -1097,6 +1104,13 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 }
                 CMD_PAUSE10 => pause_for_a_while(),
                 CMD_REPORT_SEND => crate::report::send_pending(hwnd),
+                CMD_TYPING if crate::typing::allowed() => {
+                    let mut s = user_settings();
+                    s.typing_suggestions = !s.typing_suggestions;
+                    if save_settings(&s) {
+                        apply_settings(s);
+                    }
+                }
                 CMD_REPORT_PROBLEM => crate::report::open(),
                 CMD_REPORT_ALWAYS => crate::report::set_mode(klf_core::report::ALWAYS),
                 CMD_REPORT_NEVER => crate::report::set_mode(klf_core::report::NEVER),
@@ -1172,6 +1186,10 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
         }
         WM_APP_UPDATE => {
             on_update_message(hwnd, wparam);
+            0
+        }
+        crate::typing::WM_APP_TYPING => {
+            crate::typing::on_message(wparam);
             0
         }
         crate::report::WM_APP_REPORT => {

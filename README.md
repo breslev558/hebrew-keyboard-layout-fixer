@@ -1,9 +1,7 @@
-<h1 align="center">Keyboard Layout Fixer for Windows</h1>
+<p align="center"><img src="docs/cover.png" alt="Keyboard Layout Fixer: typed akuo? Press F10. Hebrew and English layout mistakes, fixed with one key." width="820"></p>
 
-<p align="center"><img src="docs/logo.png" alt="Keyboard Layout Fixer icon: white A and turquoise Aleph on a blue square" width="112"></p>
-
-<p align="center"><b>Typed <code>akuo</code> instead of <code>שלום</code>? Press F10.</b><br>
-Fixes text typed with the wrong keyboard layout (Hebrew ⇄ English, also French AZERTY) and text typed with Caps Lock on.</p>
+<p align="center"><b>Typed a word with the wrong keyboard layout? Press F10.</b><br>
+A tiny Windows 10/11 app that fixes Hebrew ⇄ English layout mistakes (also French AZERTY) and text typed with Caps Lock on.</p>
 
 <p align="center">
 <a href="https://github.com/breslev558/hebrew-keyboard-layout-fixer/releases/latest/download/KeyboardLayoutFixer-Setup.exe"><b>⬇ Download for Windows 10 / 11</b></a><br>
@@ -18,6 +16,22 @@ Fixes text typed with the wrong keyboard layout (Hebrew ⇄ English, also French
 <a href="https://www.bestpractices.dev/projects/16504"><img alt="OpenSSF Best Practices" src="https://www.bestpractices.dev/projects/16504/badge"></a>
 <a href="https://scorecard.dev/viewer/?uri=github.com/breslev558/hebrew-keyboard-layout-fixer"><img alt="OpenSSF Scorecard" src="https://api.scorecard.dev/projects/github.com/breslev558/hebrew-keyboard-layout-fixer/badge"></a>
 </p>
+
+<p align="center"><img src="docs/demo.gif" alt="Demo: akuo is typed in Notepad, F10 is pressed, the text becomes שלום and the keyboard switches to Hebrew." width="640"></p>
+
+You meant to write:
+
+```
+שלום
+```
+
+but the keyboard was still on English, so you got:
+
+```
+akuo
+```
+
+Select it (or just leave the cursor at the end of the line) and press **F10**: it becomes `שלום` and the keyboard switches to Hebrew. It works the other way too: `גםןמע` → `hello`.
 
 <p align="center"><a href="#english">English</a> · <a href="#français">Français</a> · <a href="#עברית">עברית</a></p>
 
@@ -41,6 +55,11 @@ To update by hand, run the new installer over the existing installation: the run
 - **Right-click the icon**: pause (10 minutes or until resumed), turn the program off for the current application, show or hide the corrected text in the bubble, settings, updates, problem reports, about, exit.
 - **Settings window** (click the icon), in English, Hebrew or French: change the keys, conversion direction, careful mode (selection only), Caps Lock behaviour, confirmation bubble (top, bottom or near the cursor), per-program rules, diagnostic and export/import of your settings.
 
+### Fix while typing (optional, off by default)
+Tray menu › **Suggest fixes while typing (Tab)**. While you type, when the keys of the last words spell a real word on the *other* layout (and not on the current one), a small bubble shows the fix: **Tab** fixes the whole run of wrong words and switches the keyboard; any other key ignores it. Names, brands and typos are left alone, because their other reading is not a word. Never in password fields, consoles, administrator windows, full-screen games or presentations, or programs you turned the fixer off for.
+
+To do this the program watches the keys typed (a low-level keyboard hook), **only while this option is on**. It keeps only the last few words, in memory, and forgets them on a click, arrow keys, Enter, a shortcut, another window or a pause. Nothing is written to disk or sent. The word lists (Hebrew and English, 40,000 words each) are downloaded once from this repository when you switch the option on, signed and checked before use (see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)). Not available when an administrator manages the PC.
+
 ### Updates
 Once a day the program asks GitHub whether a newer version exists. If one does, a bubble tells you and the tray menu offers **Install version X**. Nothing is installed without your click. Before the new version replaces the old one, the program checks its SHA-256 and a digital signature made with a key kept outside GitHub (using Windows cryptography). The old version stays in place if anything fails. You can switch updates off with **Check for updates** in the tray menu. Updates are disabled when settings are enforced by an administrator (see *For administrators*).
 
@@ -48,17 +67,32 @@ Once a day the program asks GitHub whether a newer version exists. If one does, 
 **Settings › Apps › Installed apps › Keyboard Layout Fixer › Uninstall**. The program, its startup entry and its shortcut are removed; your settings in `%APPDATA%\KeyboardLayoutFixer` are kept.
 
 ### Privacy
-The program never sends what you type anywhere and never writes it to disk. No telemetry. It uses the network in only two optional cases:
+The program never sends what you type anywhere and never writes it to disk. No telemetry. It uses the network in only three optional cases:
 - **Updates**: once a day it asks this repository for the latest release (and downloads the new version if you choose to install it). No identifier is sent; as with any download, GitHub sees your IP address.
 - **Problem reports** (anonymous, only with your consent): after a real error, a Windows notification asks *“Send an anonymous report to help fix it?”*. Nothing is sent unless you click it. A report contains only: report type, program version, Windows build, the result, the action (F10 or F9), the step that failed and step timings, the program name and window classes (e.g. `winword.exe`, `OpusApp`), the kind of selection, the number of characters, and the comment you may write in **Report a problem…** (you see the exact content before sending). Never your text or clipboard, no file path, no identifier. The receiver (a small Cloudflare Worker) does not store IP addresses and deletes reports after 90 days. Tray menu › **Problem reports**: report a problem, send without asking (off by default), or never offer a report.
 
-Both are disabled when settings are enforced by an administrator. The diagnostic (Settings › Diagnostic) contains program names, window classes, text sizes, settings and steps, but never your text; it stays on your PC unless you copy it.
+- **Word lists** for the optional *fix while typing*: downloaded once from this repository, only when you switch that option on.
+
+All of these are disabled when settings are enforced by an administrator. The diagnostic (Settings › Diagnostic) contains program names, window classes, text sizes, settings and steps, but never your text; it stays on your PC unless you copy it.
 
 ### Limitations
 - Password fields are detected beforehand only in standard Windows controls (`ES_PASSWORD`). Elsewhere, protection relies on the application blocking copying.
 - Most clipboard formats (text, images, files) are restored. Some embedded Office object formats (OLE) are not: an Office object copied before a fix may come back as text or a picture.
 - If the clipboard could not be put back (another program kept it busy), it is kept **in memory only** for 10 minutes. Use **Put back the previous clipboard** in the tray menu.
 - F10 converts key positions; it does not guess the intended language, and punctuation alone is not always reversible.
+
+### FAQ
+**Windows or my antivirus warns about the program.** Until the program is signed by a public certificate (a free SignPath signature has been requested), SmartScreen shows *Windows protected your PC*, and a few antivirus programs based on machine learning may flag the unsigned installer. Check the SHA-256 against the release page, or build it yourself from source. The optional *fix while typing* uses a keyboard hook, which some antivirus programs dislike: it is installed only while that option is on.
+
+**F10 converted the wrong thing.** Press Ctrl+Z in the program you were typing in, select exactly the text to fix and press F10 again. With nothing selected, F10 converts from the cursor back to the start of the line; turn on *careful mode* (Settings) to convert only a selection.
+
+**A proposal appeared but I wanted the word as typed.** Just keep typing: the proposal disappears and nothing is changed. You can switch the option off at any time in the tray menu.
+
+**F10 does nothing in one program.** Some programs (administrator windows, games, some remote desktops) do not accept simulated keys. Use the tray menu to see whether the fixer is paused or turned off for that program, and Settings › Diagnostic to see what happened.
+
+**Can I use another key than F10?** Yes: Settings › Simple › Layout key (and Caps Lock key for F9).
+
+**Does it work with other languages?** Hebrew ⇄ English (US and most Latin layouts) and French AZERTY. Other layouts (Russian, Arabic…) are refused rather than guessed.
 
 ### For administrators
 Settings can be enforced on every account of a PC under `HKLM\SOFTWARE\Policies\NOAM\KeyboardLayoutFixer`, which standard users cannot change. They use the same names as `settings.json`:
@@ -90,6 +124,7 @@ The script runs the tests, checks the dependency licences and builds `target/x86
 - **Paramètres** : cliquez sur l'icône près de l'horloge ; clic droit pour la pause et les autres options.
 - **Mises à jour** : une fois par jour, une bulle signale une nouvelle version ; un clic dans le menu de l'icône l'installe, après vérification de l'intégrité et de la signature. Vous pouvez les désactiver dans ce menu.
 - **Désinstallation** : Paramètres › Applications › Applications installées › Keyboard Layout Fixer Vos réglages sont conservés.
+- **Correction pendant la frappe** (option, désactivée par défaut) : menu de l'icône › Proposer la correction pendant la frappe. Une bulle propose la correction, Tab l'accepte.
 - **Vie privée** : rien de ce que vous tapez n'est envoyé ni enregistré. Après une vraie erreur, une notification propose d'envoyer un rapport anonyme (version, étape en échec, nom du programme ; jamais votre texte) : rien ne part sans votre clic. Menu de l'icône › Rapports de problèmes.
 
 ## עברית
@@ -100,6 +135,7 @@ The script runs the tests, checks the dependency licences and builds `target/x86
 - **הגדרות**: לחיצה על הסמל ליד השעון; לחיצה ימנית להשהיה ולאפשרויות נוספות.
 - **עדכונים**: פעם ביום מופיעה הודעה כשיש גרסה חדשה; לחיצה אחת בתפריט הסמל מתקינה אותה, אחרי אימות התקינות והחתימה. אפשר לכבות את העדכונים באותו תפריט.
 - **הסרה**: הגדרות › אפליקציות › אפליקציות מותקנות › Keyboard Layout Fixer. ההגדרות שלכם נשמרות.
+- **תיקון בזמן ההקלדה** (אפשרות, כבויה כברירת מחדל): תפריט הסמל › הצע תיקון בזמן ההקלדה. הודעה קטנה מציעה את התיקון, ו-Tab מאשר.
 - **פרטיות**: שום דבר ממה שמקלידים לא נשלח ולא נשמר. אחרי תקלה אמיתית מופיעה הצעה לשלוח דיווח אנונימי (גרסה, השלב שנכשל, שם התוכנה; אף פעם לא הטקסט שלכם): שום דבר לא נשלח בלי לחיצה שלכם. תפריט הסמל › דיווח על בעיות.
 
 ## Credits and licence

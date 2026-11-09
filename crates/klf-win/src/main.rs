@@ -1,4 +1,4 @@
-//! Keyboard Layout Fixer (NOAM) — Rust 1.7.1. Fixes text typed with the wrong keyboard layout
+//! Keyboard Layout Fixer (NOAM) — Rust 1.8.0. Fixes text typed with the wrong keyboard layout
 //! (Hebrew <-> English) with one key (F10). Based on RavidSaadia/Keyboard_Layout_Fixer (MIT).
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
@@ -18,6 +18,8 @@ mod platform;
 mod report;
 #[cfg(windows)]
 mod settings_ui;
+#[cfg(windows)]
+mod typing;
 #[cfg(windows)]
 mod update;
 #[cfg(windows)]
@@ -80,6 +82,7 @@ fn main() {
     indicator::configure();
     app::post_welcome();
     report::at_start(hwnd);
+    typing::apply();
     if arg("--settings") {
         settings_ui::open();
     }

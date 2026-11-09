@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.8.0 (November 2026)
+- New option, off by default: **suggest fixes while typing**. When the keys of the last words spell a real word on the other layout (and not on the current one), a small bubble shows the fix; Tab fixes the whole run of wrong words and switches the keyboard, any other key ignores it. Also fixes a "TWo capitals" slip (SHalom → Shalom). Never in password fields, consoles, administrator windows, full-screen games or presentations, programs the fixer is off for, or when a third keyboard layout is active. Measured on the word lists: 99 % of words typed on the wrong layout are fixed, no false proposal on correctly typed words.
+- Privacy: the keys are watched (low-level keyboard hook) only while this option is on; only the last few words are kept, in memory, and forgotten on a click, arrows, Enter, a shortcut, another window or a pause. The Hebrew and English word lists (FrequencyWords, CC BY-SA 4.0, separate files) are downloaded once from this repository when the option is switched on, signed with the update key and checked each time they are read. Not available when an administrator manages the PC; importing a settings file never switches it on.
+- New presentation: cover image, animated demo and FAQ in the README.
+
 ## 1.7.1 (November 2026)
 - After F10, the keyboard now switches to the language of the fixed text by default, so you can keep typing straight away. It can be switched off in the settings ("Switch the keyboard language after the fix"). Settings files from earlier versions get the new default once; a choice made from 1.7.1 on is kept.
 

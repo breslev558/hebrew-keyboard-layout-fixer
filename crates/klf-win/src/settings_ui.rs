@@ -853,6 +853,7 @@ fn on_import() {
     // a file never turns on "send reports without asking": that choice stays the user's
     let mut new = new;
     new.report_mode = old.report_mode;
+    new.typing_suggestions = old.typing_suggestions; // watching the keys is the user's own choice
     let diff = klf_core::profile::differences(&old, &new, &app::locked());
     if diff.is_empty() {
         message(text(l, Msg::ImportNothing), MB_ICONINFORMATION);

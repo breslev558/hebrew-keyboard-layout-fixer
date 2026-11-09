@@ -1,62 +1,99 @@
-# Keyboard Layout Fixer (NOAM version)
+<h1 align="center">Keyboard Layout Fixer for Windows</h1>
 
-<p align="center"><img src="docs/logo.png" alt="Keyboard Layout Fixer logo: keys A and aleph linked by arrows" width="160"></p>
+<p align="center"><img src="docs/logo.png" alt="Keyboard Layout Fixer icon: white A and turquoise Aleph on a blue square" width="112"></p>
 
-<p align="center"><a href="https://github.com/breslev558/hebrew-keyboard-layout-fixer/releases/latest/download/KeyboardLayoutFixer.zip"><b>⬇ Download for Windows (zip)</b></a> · <a href="https://github.com/breslev558/hebrew-keyboard-layout-fixer/releases/latest">all versions and SHA256</a></p>
+<p align="center"><b>Typed <code>akuo</code> instead of <code>שלום</code>? Press F10.</b><br>
+Fixes text typed with the wrong keyboard layout (Hebrew ⇄ English, also French AZERTY) and text typed with Caps Lock on.</p>
 
-[English](#english) · [Français](#français) · [עברית](#עברית)
+<p align="center">
+<a href="https://github.com/breslev558/hebrew-keyboard-layout-fixer/releases/latest/download/KeyboardLayoutFixer.zip"><b>⬇ Download for Windows 10 / 11</b></a>
+</p>
+
+<p align="center">
+<a href="https://github.com/breslev558/hebrew-keyboard-layout-fixer/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/breslev558/hebrew-keyboard-layout-fixer"></a>
+<a href="https://github.com/breslev558/hebrew-keyboard-layout-fixer/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/breslev558/hebrew-keyboard-layout-fixer/actions/workflows/ci.yml/badge.svg"></a>
+<img alt="Windows 10 and 11, 64-bit" src="https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4">
+<a href="LICENSE"><img alt="MIT licence" src="https://img.shields.io/badge/licence-MIT-green"></a>
+</p>
+
+<p align="center"><a href="#english">English</a> · <a href="#français">Français</a> · <a href="#עברית">עברית</a></p>
 
 ## English
 
-Typed `akuo` instead of `שלום` (or the other way round)? Select the text and press **F10**: it is fixed.
-**F9** fixes text typed with Caps Lock on (`hELLO` → `Hello`). Works with Hebrew ⇄ English, also French AZERTY.
-Small Windows 10/11 tray app written in Rust: one `.exe` of about 600 KB, nothing else to install, no internet
-connection, nothing you type is recorded (only a small technical `debug.log` in `%APPDATA%`, without the text).
+### What it does
+- **F10** – converts the selected text to the other keyboard layout (`akuo` → `שלום`, `גםןמע` → `hello`). With nothing selected, it converts from the cursor back to the start of the line.
+- **F9** – fixes text typed with Caps Lock on (`hELLO wORLD` → `Hello World`) and switches Caps Lock off.
+- Your clipboard is saved beforehand and restored afterwards; password fields, administrator windows and consoles are left alone.
+- A small tray app (icon near the clock): one 650 KB executable written in Rust, no runtime to install, a few MB of memory.
 
-**Install (no administrator rights needed)**
-1. Download the zip above, right click it > **Extract All**.
-2. Double-click **Installer.cmd**. The program is copied to your user folder, starts with Windows and appears near the clock.
-3. When you open Installer.cmd, Windows may show “Windows protected your PC” (SmartScreen), because the program is new and not signed by a
-   paid certificate: click **More info**, then **Run anyway**. You can check the file with the SHA256 given on the
-   release page (`Get-FileHash KeyboardLayoutFixer.zip` in PowerShell).
+### Install (no administrator rights needed)
+1. [Download the zip](https://github.com/breslev558/hebrew-keyboard-layout-fixer/releases/latest/download/KeyboardLayoutFixer.zip), right-click it, **Extract All**.
+2. Double-click **Installer.cmd**. The program is installed for your account only (in `%LOCALAPPDATA%\Programs\KeyboardLayoutFixer`), starts with Windows and appears near the clock.
+3. On first run, SmartScreen may show *“Windows protected your PC”* because the program is not yet signed by a public certificate (a free [SignPath](https://signpath.org) signature has been requested). To check the download, compare its SHA-256 with the one on the [release page](https://github.com/breslev558/hebrew-keyboard-layout-fixer/releases/latest) (`Get-FileHash KeyboardLayoutFixer.zip` in PowerShell), then click **More info › Run anyway**.
 
-**Updates**: once a day the program asks GitHub whether a newer version exists. If so, a bubble tells you and the tray menu offers “Install version X”: the new exe is downloaded, its SHA-256 and digital signature are checked, then it replaces the old one (nothing is installed without your click). Switch it off with “Check for updates” in the tray menu. No other network access, no telemetry.
+Do not use “Run as administrator”: the installer refuses it, to avoid installing into the wrong account. To update by hand, run Installer.cmd again over the existing installation; your settings are kept.
 
-To remove it: Windows **Settings > Apps > Installed apps > Keyboard Layout Fixer > Uninstall** (or Uninstall.cmd from the zip); your settings are kept. Settings: click the A/א icon near the clock.
+### Use and settings
+- **Right-click the icon**: pause (10 minutes or until resumed), turn the program off for the current application, settings, updates, about, exit.
+- **Settings window** (click the icon), in English, Hebrew or French: change the keys, conversion direction, careful mode (selection only), Caps Lock behaviour, confirmation bubble (top, bottom or near the cursor), per-program rules, diagnostic and export/import of your settings.
 
-Other features: the clipboard is saved and put back; password fields, administrator windows and consoles are
-protected; settings window in Hebrew / French / English (keys, direction, careful mode, per-program rules, bubble
-position, diagnostic, export/import). An administrator can impose settings on a whole PC in
-`HKLM\SOFTWARE\Policies\NOAM\KeyboardLayoutFixer` (same names as `settings.json`).
+### Updates
+Once a day the program asks GitHub whether a newer version exists. If one does, a bubble tells you and the tray menu offers **Install version X**. Nothing is installed without your click. Before the new version replaces the old one, the program checks its SHA-256 and a digital signature made with a key kept outside GitHub (using Windows cryptography). The old version stays in place if anything fails. You can switch updates off with **Check for updates** in the tray menu. Updates are disabled when settings are enforced by an administrator (see *For administrators*).
 
-**Guarantees and limits**
-- Passwords: classic Windows password fields (Edit/RichEdit with `ES_PASSWORD`) are recognised in advance; elsewhere the protection relies on the application refusing to copy. Administrator windows are left alone, unless the program itself runs as administrator.
-- Clipboard: text, images, files and most formats are saved and put back. Some embedded Office object formats (OLE: Embed Source, Object Descriptor…) are not: an Office object copied before a fix may come back as text or picture. A new copy made in the same window during the one-second restore may not be told apart from the application's copy if it is identical.
-- If the clipboard could not be put back, it is kept **in memory only** for 10 minutes: tray menu “Put back the previous clipboard”.
-- F10 fixes the keys' layout, it does not guess the intended language; punctuation alone is not always reversible.
-- The diagnostic never contains your text: program names, window classes, sizes, settings and steps only.
+### Uninstall
+**Settings › Apps › Installed apps › Keyboard Layout Fixer › Uninstall** (or `Uninstall.cmd` from the zip). The program, its startup entry and its shortcut are removed; your settings in `%APPDATA%\KeyboardLayoutFixer` are kept.
 
-**Build**: `bash tools/construire.sh` (Rust toolchain from `rust-toolchain.toml`, MinGW target `x86_64-pc-windows-gnu`):
-tests, licence check, `KeyboardLayoutFixer.exe` and `BUILD-INFO.txt`. The same checks run on GitHub for every change (`.github/workflows/ci.yml`). Manual tests on Windows: `TESTS.md`. Changes: `CHANGELOG.md`. Security reports: `SECURITY.md`.
+### Privacy
+The program never sends what you type anywhere and never writes it to disk. Its only network access is the optional daily update check against this repository: it downloads only the release information (and the new version if you choose to install it), sends no identifier and no telemetry. As with any download, GitHub sees your IP address. The diagnostic (Settings › Diagnostic) contains program names, window classes, text sizes, settings and steps, but never your text.
+
+### Limitations
+- Password fields are detected beforehand only in standard Windows controls (`ES_PASSWORD`). Elsewhere, protection relies on the application blocking copying.
+- Most clipboard formats (text, images, files) are restored. Some embedded Office object formats (OLE) are not: an Office object copied before a fix may come back as text or a picture.
+- If the clipboard could not be put back (another program kept it busy), it is kept **in memory only** for 10 minutes. Use **Put back the previous clipboard** in the tray menu.
+- F10 converts key positions; it does not guess the intended language, and punctuation alone is not always reversible.
+
+### For administrators
+Settings can be enforced on every account of a PC under `HKLM\SOFTWARE\Policies\NOAM\KeyboardLayoutFixer`, which standard users cannot change. They use the same names as `settings.json`:
+- `REG_DWORD` 0/1: `RequireSelection`, `TurnOffCapsLock`, `ConsoleSupport`, `LastWordOnly`, `Indicator`, `ShowBubble`, `PlaySound`, `SwitchLanguageAfterConvert`, `CheckUpdates`.
+- `REG_DWORD` values: `MaxCharacterLimit`, `PasteDelayMs` (100–10000), `MixedTextMode` (0–2), `BubblePosition` (0 top, 1 bottom, 2 cursor), `HotkeyModifiers` and `HotkeyKey`, `CaseHotkeyModifiers` and `CaseHotkeyKey`.
+- `REG_SZ`: `UiLanguage` (auto, he, fr, en).
+- Subkeys: `AppRules` (one value per program: `Disabled` or `SelectionOnly`) and `ExcludedProcesses`.
+
+Enforced settings are greyed out in the window and never written to the user's file.
+
+### Build from source
+Requirements: Rust (the version is pinned in `rust-toolchain.toml`), the MinGW-w64 linker (`x86_64-w64-mingw32-gcc`), Bash and Python 3. Then run:
+
+```
+rustup target add x86_64-pc-windows-gnu
+bash tools/construire.sh
+```
+
+The script runs the tests, checks the dependency licences and builds `target/x86_64-pc-windows-gnu/release/KeyboardLayoutFixer.exe` with a `BUILD-INFO.txt`. The same checks run on GitHub for every change. Releases are built by `.github/workflows/release.yml`, with a build provenance attestation. Manual checks on Windows are listed in `TESTS.md`.
+
+### Project files
+[CHANGELOG.md](CHANGELOG.md) · [SECURITY.md](SECURITY.md) (report problems privately) · [CODE_SIGNING_POLICY.md](CODE_SIGNING_POLICY.md) · [audits/](audits)
 
 ## Français
 
-Vous avez tapé `akuo` au lieu de `שלום` ? Sélectionnez le texte et appuyez sur **F10** : il est corrigé.
-**F9** corrige un texte tapé avec Verr. Maj allumé. Hébreu ⇄ anglais, et clavier français AZERTY.
+**Vous avez tapé `akuo` au lieu de `שלום` ?** Sélectionnez le texte et appuyez sur **F10**. Sans sélection, la ligne est corrigée du curseur jusqu'à son début. **F9** corrige un texte tapé avec Verr. Maj allumé. Hébreu ⇄ anglais, avec prise en charge du clavier français AZERTY. Pour Windows 10 et 11.
 
-**Installation (sans droits administrateur)** : téléchargez le zip (lien en haut), clic droit > **Extraire tout**,
-double-clic sur **Installer.cmd**. Si Windows affiche « Windows a protégé votre ordinateur » : **Informations
-complémentaires**, puis **Exécuter quand même** (programme récent, sans certificat payant ; l'empreinte SHA256 est
-sur la page de la version). Pour le retirer : **Uninstall.cmd** (vos réglages sont gardés).
+- **Installation (sans droits administrateur)** : [téléchargez le zip](https://github.com/breslev558/hebrew-keyboard-layout-fixer/releases/latest/download/KeyboardLayoutFixer.zip), clic droit › **Extraire tout**, puis double-clic sur **Installer.cmd**. Si Windows affiche « Windows a protégé votre ordinateur » (programme non encore signé) : **Informations complémentaires › Exécuter quand même**.
+- **Réglages** : cliquez sur l'icône près de l'horloge ; clic droit pour la pause et les autres options.
+- **Mises à jour** : une fois par jour, une bulle signale une nouvelle version ; un clic dans le menu de l'icône l'installe, après vérification de l'intégrité et de la signature. Vous pouvez les désactiver dans ce menu.
+- **Désinstallation** : Paramètres › Applications › Applications installées › Keyboard Layout Fixer (ou `Uninstall.cmd` du zip). Vos réglages sont conservés.
+- **Vie privée** : rien de ce que vous tapez n'est envoyé ni enregistré.
 
 ## עברית
 
-הקלדתם `akuo` במקום `שלום`? סמנו את הטקסט ולחצו **F10** והוא יתוקן. **F9** מתקן טקסט שהוקלד כש-Caps Lock היה דולק.
-התקנה ללא הרשאות מנהל: הורידו את קובץ ה-zip (הקישור למעלה), לחצו עליו קליק ימני ובחרו **חלץ הכל**, ואז לחצו פעמיים על **Installer.cmd**.
-אם מופיעה ההודעה "Windows הגן על המחשב שלך": לחצו **מידע נוסף** ואז **הפעל בכל זאת**. להסרה: **Uninstall.cmd**.
+**הקלדתם `akuo` במקום `שלום`?** סמנו את הטקסט ולחצו **F10**. בלי סימון, השורה מתוקנת מהסמן ועד תחילתה. **F9** מתקן טקסט שהוקלד כש-Caps Lock היה דולק. עברית ⇄ אנגלית, ותמיכה במקלדת צרפתית AZERTY. ל-Windows 10 ו-11.
+
+- **התקנה** (ללא הרשאות מנהל): [הורידו את קובץ ה-zip](https://github.com/breslev558/hebrew-keyboard-layout-fixer/releases/latest/download/KeyboardLayoutFixer.zip), לחצו לחיצה ימנית ובחרו **חלץ הכל**, ואז לחצו פעמיים על **Installer.cmd**. אם מופיעה ההודעה "Windows הגן על המחשב שלך": **מידע נוסף** ואז **הפעל בכל זאת**.
+- **הגדרות**: לחיצה על הסמל ליד השעון; לחיצה ימנית להשהיה ולאפשרויות נוספות.
+- **עדכונים**: פעם ביום מופיעה הודעה כשיש גרסה חדשה; לחיצה אחת בתפריט הסמל מתקינה אותה, אחרי אימות התקינות והחתימה. אפשר לכבות את העדכונים באותו תפריט.
+- **הסרה**: הגדרות › אפליקציות › אפליקציות מותקנות › Keyboard Layout Fixer. ההגדרות שלכם נשמרות.
+- **פרטיות**: שום דבר ממה שמקלידים לא נשלח ולא נשמר.
 
 ## Credits and licence
 
-Based on [Keyboard Layout Fixer](https://github.com/RavidSaadia/Keyboard_Layout_Fixer) by Ravid Saadia
-(MIT licence; original documentation in `README-original.md` and `USAGE-original.md`).
-NOAM version (Rust rewrite and changes) by breslev558, also under the MIT licence: see `LICENSE`.
+Based on [Keyboard Layout Fixer](https://github.com/RavidSaadia/Keyboard_Layout_Fixer) by Ravid Saadia (MIT licence; his original documentation is kept in `README-original.md` and `USAGE-original.md`). NOAM version (Rust rewrite and changes) by breslev558, also under the MIT licence: see [LICENSE](LICENSE).

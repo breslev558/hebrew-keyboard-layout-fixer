@@ -1,4 +1,6 @@
-# Essais Windows à faire à chaque version (NOAM)
+# Essais Windows à faire à chaque version
+
+*Manual test checklist for each release (in French).*
 
 Les tests automatiques (`cargo test -p klf-core`, `tests-ps/*.ps1`, lancés aussi par la CI GitHub à chaque envoi) simulent
 Windows. Cette liste se fait à la main sur un PC d'essai, avec la version

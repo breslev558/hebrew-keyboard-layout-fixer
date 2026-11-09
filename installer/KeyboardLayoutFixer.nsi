@@ -1,4 +1,4 @@
-; Keyboard Layout Fixer — installeur unique pour la version PUBLIQUE (1.6.0).
+; Keyboard Layout Fixer — installeur unique pour la version PUBLIQUE (1.6.x).
 ; Par utilisateur, sans droits administrateur : %LOCALAPPDATA%\Programs\KeyboardLayoutFixer,
 ; démarrage avec Windows (HKCU Run, valeur posée seulement, jamais la clé recréée), raccourci du
 ; menu Démarrer, entrée « Applications installées » et désinstalleur. Ferme proprement une ancienne
@@ -76,7 +76,7 @@ Function ${UN}FermerCopie
   Abort
   libere:
   ; la fenêtre est fermée mais le processus peut tenir encore le fichier un instant : on attend
-  ; qu'il soit libre (10 s au plus) avant de l'écrire ou de l'effacer (avis Fable)
+  ; qu'il soit libre (10 s au plus) avant de l'écrire ou de l'effacer
   StrCpy $1 0
   ${If} ${FileExists} "$INSTDIR\KeyboardLayoutFixer.exe"
     attente:

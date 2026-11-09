@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.6.1 (November 2026)
+- Optional, consent-based anonymous problem reports (per-user install only). After a real error (clipboard not put back, paste failed) or a crash (offered at most once a day), a Windows notification asks "Send an anonymous report to help fix it?"; nothing is sent without that click. Tray menu › Problem reports: "Report a problem…" (optional comment, the exact content shown before sending), "Send reports without asking" (off by default) and "Never offer a report".
+- A report contains only technical fields: report type, program version, Windows build, result, action, failed step, step timings, program name and window classes, kind of selection, number of characters, and the optional comment (shown before sending). Importing a settings file never turns on "Send reports without asking". Never the text you type or the clipboard, no identifier, no file path. The receiver (a small Cloudflare Worker) does not store IP addresses and keeps reports 90 days.
+- Never active when an administrator manages the PC (same rule as updates).
+- "About" no longer says "no internet connection" (updates and reports are optional network uses).
+
 ## 1.6.0 (November 2026)
 - Single installer: download **KeyboardLayoutFixer-Setup.exe** and double-click it (per-user, no administrator rights). It closes a running copy cleanly, adds the program to the Start menu, to the startup programs and to Windows "Installed apps"; the zip stays available.
 - Welcome window on first start: F10, F9, where the icon is, and "Try it now" (opens the test box); "Do not show again".

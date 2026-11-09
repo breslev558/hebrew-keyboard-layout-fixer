@@ -31,6 +31,12 @@ pub fn record(action: Action, outcome: &Outcome, mut trace: Trace, now_ms: u64, 
     g.get_or_insert_with(Ring::default).push(a);
 }
 
+/// A copy of the last attempt (for an anonymous report: klf-core/report.rs keeps only fixed fields).
+pub fn last_attempt() -> Option<Attempt> {
+    let g = RING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    g.as_ref().and_then(|r| r.last()).cloned()
+}
+
 /// The last attempt: time, bubble message, plain explanation (None: none since the start).
 pub fn last() -> Option<(String, Option<klf_core::i18n::Msg>, String)> {
     let g = RING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);

@@ -850,6 +850,9 @@ fn on_import() {
         }
     };
     let old = app::user_settings();
+    // a file never turns on "send reports without asking": that choice stays the user's
+    let mut new = new;
+    new.report_mode = old.report_mode;
     let diff = klf_core::profile::differences(&old, &new, &app::locked());
     if diff.is_empty() {
         message(text(l, Msg::ImportNothing), MB_ICONINFORMATION);

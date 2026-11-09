@@ -36,7 +36,7 @@ Fixes text typed with the wrong keyboard layout (Hebrew ⇄ English, also French
 To update by hand, run the new installer over the existing installation: the running copy is closed cleanly and your settings are kept.
 
 ### Use and settings
-- **Right-click the icon**: pause (10 minutes or until resumed), turn the program off for the current application, show or hide the corrected text in the bubble, settings, updates, about, exit.
+- **Right-click the icon**: pause (10 minutes or until resumed), turn the program off for the current application, show or hide the corrected text in the bubble, settings, updates, problem reports, about, exit.
 - **Settings window** (click the icon), in English, Hebrew or French: change the keys, conversion direction, careful mode (selection only), Caps Lock behaviour, confirmation bubble (top, bottom or near the cursor), per-program rules, diagnostic and export/import of your settings.
 
 ### Updates
@@ -46,7 +46,11 @@ Once a day the program asks GitHub whether a newer version exists. If one does, 
 **Settings › Apps › Installed apps › Keyboard Layout Fixer › Uninstall**. The program, its startup entry and its shortcut are removed; your settings in `%APPDATA%\KeyboardLayoutFixer` are kept.
 
 ### Privacy
-The program never sends what you type anywhere and never writes it to disk. Its only network access is the optional daily update check against this repository: it downloads only the release information (and the new version if you choose to install it), sends no identifier and no telemetry. As with any download, GitHub sees your IP address. The diagnostic (Settings › Diagnostic) contains program names, window classes, text sizes, settings and steps, but never your text.
+The program never sends what you type anywhere and never writes it to disk. No telemetry. It uses the network in only two optional cases:
+- **Updates**: once a day it asks this repository for the latest release (and downloads the new version if you choose to install it). No identifier is sent; as with any download, GitHub sees your IP address.
+- **Problem reports** (anonymous, only with your consent): after a real error, a Windows notification asks *“Send an anonymous report to help fix it?”*. Nothing is sent unless you click it. A report contains only: report type, program version, Windows build, the result, the action (F10 or F9), the step that failed and step timings, the program name and window classes (e.g. `winword.exe`, `OpusApp`), the kind of selection, the number of characters, and the comment you may write in **Report a problem…** (you see the exact content before sending). Never your text or clipboard, no file path, no identifier. The receiver (a small Cloudflare Worker) does not store IP addresses and deletes reports after 90 days. Tray menu › **Problem reports**: report a problem, send without asking (off by default), or never offer a report.
+
+Both are disabled when settings are enforced by an administrator. The diagnostic (Settings › Diagnostic) contains program names, window classes, text sizes, settings and steps, but never your text; it stays on your PC unless you copy it.
 
 ### Limitations
 - Password fields are detected beforehand only in standard Windows controls (`ES_PASSWORD`). Elsewhere, protection relies on the application blocking copying.
@@ -84,7 +88,7 @@ The script runs the tests, checks the dependency licences and builds `target/x86
 - **Réglages** : cliquez sur l'icône près de l'horloge ; clic droit pour la pause et les autres options.
 - **Mises à jour** : une fois par jour, une bulle signale une nouvelle version ; un clic dans le menu de l'icône l'installe, après vérification de l'intégrité et de la signature. Vous pouvez les désactiver dans ce menu.
 - **Désinstallation** : Paramètres › Applications › Applications installées › Keyboard Layout Fixer Vos réglages sont conservés.
-- **Vie privée** : rien de ce que vous tapez n'est envoyé ni enregistré.
+- **Vie privée** : rien de ce que vous tapez n'est envoyé ni enregistré. Après une vraie erreur, une notification propose d'envoyer un rapport anonyme (version, étape en échec, nom du programme ; jamais votre texte) : rien ne part sans votre clic. Menu de l'icône › Rapports de problèmes.
 
 ## עברית
 
@@ -94,7 +98,7 @@ The script runs the tests, checks the dependency licences and builds `target/x86
 - **הגדרות**: לחיצה על הסמל ליד השעון; לחיצה ימנית להשהיה ולאפשרויות נוספות.
 - **עדכונים**: פעם ביום מופיעה הודעה כשיש גרסה חדשה; לחיצה אחת בתפריט הסמל מתקינה אותה, אחרי אימות התקינות והחתימה. אפשר לכבות את העדכונים באותו תפריט.
 - **הסרה**: הגדרות › אפליקציות › אפליקציות מותקנות › Keyboard Layout Fixer. ההגדרות שלכם נשמרות.
-- **פרטיות**: שום דבר ממה שמקלידים לא נשלח ולא נשמר.
+- **פרטיות**: שום דבר ממה שמקלידים לא נשלח ולא נשמר. אחרי תקלה אמיתית מופיעה הצעה לשלוח דיווח אנונימי (גרסה, השלב שנכשל, שם התוכנה; אף פעם לא הטקסט שלכם): שום דבר לא נשלח בלי לחיצה שלכם. תפריט הסמל › דיווח על בעיות.
 
 ## Credits and licence
 

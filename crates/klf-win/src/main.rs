@@ -1,4 +1,4 @@
-//! Keyboard Layout Fixer (NOAM) — Rust 1.6.0. Fixes text typed with the wrong keyboard layout
+//! Keyboard Layout Fixer (NOAM) — Rust 1.6.1. Fixes text typed with the wrong keyboard layout
 //! (Hebrew <-> English) with one key (F10). Based on RavidSaadia/Keyboard_Layout_Fixer (MIT).
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
@@ -15,6 +15,8 @@ mod indicator;
 #[cfg(windows)]
 mod platform;
 #[cfg(windows)]
+mod report;
+#[cfg(windows)]
 mod settings_ui;
 #[cfg(windows)]
 mod update;
@@ -28,7 +30,11 @@ fn main() {
     use windows_sys::Win32::UI::Controls::{InitCommonControlsEx, ICC_HOTKEY_CLASS, ICC_STANDARD_CLASSES, ICC_WIN95_CLASSES, INITCOMMONCONTROLSEX};
 
     // panic = "abort": write the reason in debug.log before the program stops
-    std::panic::set_hook(Box::new(|info| util::log(&format!("PANIC: {info}"))));
+    std::panic::set_hook(Box::new(|info| {
+        util::log(&format!("PANIC: {info}"));
+        // 1.6.1: where it stopped, for a report offered at the next start (public install)
+        report::note_crash(info.location());
+    }));
 
     let arg = |name: &str| std::env::args_os().any(|a| a == name);
     // one copy per session; "--restart" waits up to 10 s for the old copy to quit
@@ -57,7 +63,7 @@ fn main() {
     // what the administrator imposes (registry), before the keys are registered
     app::reload_policy();
 
-    let Some(_hwnd) = app::create_main_window() else {
+    let Some(hwnd) = app::create_main_window() else {
         util::log("Main window could not be created, exit");
         return;
     };
@@ -68,6 +74,7 @@ fn main() {
     app::ensure_tray();
     indicator::configure();
     app::post_welcome();
+    report::at_start(hwnd);
     if arg("--settings") {
         settings_ui::open();
     }

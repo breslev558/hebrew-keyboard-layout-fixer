@@ -63,6 +63,13 @@ const CMD_RESTORE_CLIP: usize = 109;
 const CMD_CHECK_UPDATES: usize = 110;
 const CMD_INSTALL_UPDATE: usize = 111;
 const CMD_PREVIEW: usize = 112;
+// 1.6.1: anonymous problem reports (public install only)
+const CMD_REPORT_SEND: usize = 113;
+const CMD_REPORT_PROBLEM: usize = 114;
+const CMD_REPORT_ALWAYS: usize = 115;
+const CMD_REPORT_NEVER: usize = 116;
+/// not a command: place of the "Problem reports" submenu
+const MENU_REPORTS: usize = 199;
 /// End of a timed pause (10 minutes).
 const TIMER_PAUSE_END: usize = 3;
 const TIMED_PAUSE_MS: u32 = 10 * 60 * 1000;
@@ -656,6 +663,30 @@ pub fn update_tray() {
     }
 }
 
+pub fn main_window() -> HWND {
+    STATE.with(|s| s.hwnd.get())
+}
+
+/// Windows notification next to the icon: "Send an anonymous report? Click here." (1.6.1)
+pub fn show_report_notification() -> bool {
+    if !STATE.with(|s| s.tray_added.get()) {
+        return false; // no icon yet: the report stays offered in the menu
+    }
+    let l = lang();
+    // SAFETY: zeroed is a valid NOTIFYICONDATAW; only the notification fields are changed.
+    unsafe {
+        let mut nid: NOTIFYICONDATAW = std::mem::zeroed();
+        nid.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as u32;
+        nid.hWnd = main_window();
+        nid.uID = TRAY_ID;
+        nid.uFlags = NIF_INFO;
+        nid.dwInfoFlags = NIIF_INFO | NIIF_RESPECT_QUIET_TIME;
+        copy_wide(&mut nid.szInfoTitle, text(l, Msg::ReportAskTitle));
+        copy_wide(&mut nid.szInfo, text(l, Msg::ReportAskText));
+        Shell_NotifyIconW(NIM_MODIFY, &nid) != 0
+    }
+}
+
 fn remove_tray() {
     let nid = tray_data();
     // SAFETY: valid structure.
@@ -708,6 +739,13 @@ fn show_menu(hwnd: HWND) {
     if crate::host::parked_available() {
         items.push((CMD_RESTORE_CLIP, text(l, Msg::MenuRestoreClipboard).to_string(), false));
     }
+    let reports = crate::report::enabled();
+    if reports {
+        if crate::report::pending() {
+            items.push((CMD_REPORT_SEND, text(l, Msg::MenuSendReport).to_string(), false));
+        }
+        items.push((MENU_REPORTS, text(l, Msg::MenuReports).to_string(), false));
+    }
     items.push((CMD_ABOUT, text(l, Msg::MenuAbout).to_string(), false));
     items.push((0, String::new(), false));
     items.push((CMD_EXIT, text(l, Msg::MenuExit).to_string(), false));
@@ -722,6 +760,21 @@ fn show_menu(hwnd: HWND) {
         for (id, w, check) in &strings {
             if *id == 0 {
                 AppendMenuW(menu, MF_SEPARATOR, 0, null());
+            } else if *id == MENU_REPORTS {
+                let sub = CreatePopupMenu();
+                if !sub.is_null() {
+                    let mode = s.report_mode;
+                    let subs = [
+                        (CMD_REPORT_PROBLEM, wide(text(l, Msg::MenuReportProblem)), false),
+                        (CMD_REPORT_ALWAYS, wide(text(l, Msg::MenuReportAlways)), mode == klf_core::report::ALWAYS),
+                        (CMD_REPORT_NEVER, wide(text(l, Msg::MenuReportNever)), mode == klf_core::report::NEVER),
+                    ];
+                    for (sid, sw, sc) in &subs {
+                        AppendMenuW(sub, MF_STRING | if *sc { MF_CHECKED } else { 0 }, *sid, sw.as_ptr());
+                    }
+                    // the submenu is destroyed with the menu
+                    AppendMenuW(menu, MF_STRING | MF_POPUP, sub as usize, w.as_ptr());
+                }
             } else {
                 // a rule of the administrator is shown, ticked, but cannot be changed here
                 let grey = (school && matches!(*id, CMD_RULE_DISABLE | CMD_RULE_SELECTION)) || (*id == CMD_PREVIEW && locked().show_preview);
@@ -966,6 +1019,7 @@ fn on_done(hwnd: HWND) {
         unsafe { PostMessageW(hwnd, WM_APP_PENDING, 0, 0) };
     }
     log(&done.outcome.log);
+    crate::report::after_conversion(hwnd, done.outcome.msg);
     let s = settings();
     if let Some(msg) = done.outcome.msg {
         if s.show_bubble {
@@ -1024,6 +1078,8 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 // version 4 also sends WM_RBUTTONUP / WM_LBUTTONUP: reacting to both would open twice
                 WM_CONTEXTMENU => show_menu(hwnd),
                 NIN_SELECT | NIN_KEYSELECT => settings_ui::open(),
+                // the only notification we show: "Send an anonymous report?" (1.6.1)
+                NIN_BALLOONUSERCLICK => crate::report::send_pending(hwnd),
                 _ => {}
             }
             0
@@ -1040,6 +1096,10 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     toggle_pause()
                 }
                 CMD_PAUSE10 => pause_for_a_while(),
+                CMD_REPORT_SEND => crate::report::send_pending(hwnd),
+                CMD_REPORT_PROBLEM => crate::report::open(),
+                CMD_REPORT_ALWAYS => crate::report::set_mode(klf_core::report::ALWAYS),
+                CMD_REPORT_NEVER => crate::report::set_mode(klf_core::report::NEVER),
                 CMD_CHECK_UPDATES => {
                     let mut s = user_settings();
                     s.check_updates = !s.check_updates;
@@ -1111,6 +1171,10 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
         }
         WM_APP_UPDATE => {
             on_update_message(hwnd, wparam);
+            0
+        }
+        crate::report::WM_APP_REPORT => {
+            crate::report::on_result(wparam);
             0
         }
         WM_APP_WELCOME => {
@@ -1214,6 +1278,10 @@ pub fn run_message_loop() {
                 continue;
             }
             if !dlg.is_null() && IsDialogMessageW(dlg, &msg) != 0 {
+                continue;
+            }
+            let rep = crate::report::window();
+            if !rep.is_null() && IsDialogMessageW(rep, &msg) != 0 {
                 continue;
             }
             TranslateMessage(&msg);

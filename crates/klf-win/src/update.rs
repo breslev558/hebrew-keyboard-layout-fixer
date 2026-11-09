@@ -75,13 +75,25 @@ fn get(url: &str, max: usize) -> Option<Vec<u8>> {
     if !u::host_allowed(url) {
         return None;
     }
+    request(url, None, max, &|fin| u::host_allowed(fin)).map(|(_, b)| b)
+}
+
+/// POST of a small JSON report to the reports receiver (1.6.1): no redirect followed. HTTP status,
+/// None on a network problem.
+pub fn post_json(url: &str, body: &str) -> Option<u32> {
+    request(url, Some(body), 4096, &|_| true).map(|(st, _)| st)
+}
+
+/// HTTPS request (GET, or POST with a JSON body): Windows proxy settings, TLS 1.2/1.3, the final
+/// address checked by `final_ok` after any redirect. (status, body).
+fn request(url: &str, body: Option<&str>, max: usize, final_ok: &dyn Fn(&str) -> bool) -> Option<(u32, Vec<u8>)> {
     let rest = url.strip_prefix("https://")?;
     let (host, path) = match rest.find('/') {
         Some(i) => (&rest[..i], &rest[i..]),
         None => (rest, "/"),
     };
-    let agent = wide("KeyboardLayoutFixer-update");
-    let (h, p, get_) = (wide(host), wide(path), wide("GET"));
+    let agent = wide(if body.is_some() { "KeyboardLayoutFixer-report" } else { "KeyboardLayoutFixer-update" });
+    let (h, p, get_) = (wide(host), wide(path), wide(if body.is_some() { "POST" } else { "GET" }));
     // SAFETY: WinHTTP calls with valid strings; handles closed by H; buffers sized.
     unsafe {
         let s = H(WinHttpOpen(agent.as_ptr(), WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, null(), null(), 0));
@@ -105,17 +117,30 @@ fn get(url: &str, max: usize) -> Option<Vec<u8>> {
         if r.0.is_null() {
             return None;
         }
-        if host == "api.github.com" {
+        if host == "api.github.com" || body.is_some() {
             // the API answer never needs a redirect: none is followed
             let never: u32 = WINHTTP_OPTION_REDIRECT_POLICY_NEVER;
             WinHttpSetOption(r.0, WINHTTP_OPTION_REDIRECT_POLICY, &never as *const u32 as *const _, 4);
         }
-        if WinHttpSendRequest(r.0, null(), 0, null(), 0, 0, 0) == 0 || WinHttpReceiveResponse(r.0, null_mut()) == 0 {
+        let sent = match body {
+            Some(b) => {
+                let hdr = wide("Content-Type: application/json");
+                WinHttpSendRequest(r.0, hdr.as_ptr(), u32::MAX, b.as_ptr() as *const _, b.len() as u32, b.len() as u32, 0)
+            }
+            None => WinHttpSendRequest(r.0, null(), 0, null(), 0, 0, 0),
+        };
+        if sent == 0 || WinHttpReceiveResponse(r.0, null_mut()) == 0 {
             return None;
         }
         let mut status: u32 = 0;
         let mut len: u32 = 4;
-        if WinHttpQueryHeaders(r.0, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, null(), &mut status as *mut u32 as *mut _, &mut len, null_mut()) == 0 || status != 200 {
+        if WinHttpQueryHeaders(r.0, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, null(), &mut status as *mut u32 as *mut _, &mut len, null_mut()) == 0 {
+            return None;
+        }
+        if body.is_some() {
+            return Some((status, Vec::new())); // a report: only the status matters
+        }
+        if status != 200 {
             return None;
         }
         // final address after GitHub's redirects
@@ -125,7 +150,7 @@ fn get(url: &str, max: usize) -> Option<Vec<u8>> {
             return None;
         }
         let fin = String::from_utf16_lossy(&buf[..(blen as usize / 2)]);
-        if !u::host_allowed(fin.trim_end_matches('\0')) {
+        if !final_ok(fin.trim_end_matches('\0')) {
             log(&format!("Update: download refused from {}", fin.split('/').nth(2).unwrap_or("?")));
             return None;
         }
@@ -148,7 +173,7 @@ fn get(url: &str, max: usize) -> Option<Vec<u8>> {
                 return None;
             }
         }
-        Some(out)
+        Some((status, out))
     }
 }
 

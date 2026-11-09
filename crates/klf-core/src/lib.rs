@@ -10,6 +10,7 @@ pub mod policy;
 pub mod profile;
 pub mod school;
 pub mod settings;
+pub mod report;
 pub mod update;
 pub mod words;
 

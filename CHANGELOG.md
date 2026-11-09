@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.7.1 (November 2026)
+- After F10, the keyboard now switches to the language of the fixed text by default, so you can keep typing straight away. It can be switched off in the settings ("Switch the keyboard language after the fix"). Settings files from earlier versions get the new default once; a choice made from 1.7.1 on is kept.
+
 ## 1.7.0 (November 2026)
 - Native build for Windows on ARM (Snapdragon / Copilot+ PCs): KeyboardLayoutFixer-Setup-arm64.exe. It is built and tested on an ARM64 machine by GitHub Actions, and updates itself with its own ARM64 files. The x64 version runs as before.
 - Presentation page: https://breslev558.github.io/hebrew-keyboard-layout-fixer/ (short animation of F10).

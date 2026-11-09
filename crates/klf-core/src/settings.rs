@@ -137,7 +137,8 @@ pub struct AppSettings {
     pub mixed_text_mode: MixedTextMode,
     #[serde(rename = "ReplaceCaps", deserialize_with = "de_bool_true")]
     pub replace_caps: bool,
-    #[serde(rename = "SwitchLanguageAfterConvert", deserialize_with = "de_bool_false")]
+    /// 1.7.1: on by default (after F10 the keyboard follows the language of the fixed text)
+    #[serde(rename = "SwitchLanguageAfterConvert", deserialize_with = "de_bool_true")]
     pub switch_language_after_convert: bool,
     /// Kept for compatibility with the .NET file; the Rust version uses HKCU/HKLM Run instead.
     #[serde(rename = "RunAtStartup", deserialize_with = "de_bool_false")]
@@ -218,7 +219,7 @@ pub struct AppSettings {
     pub migrated: bool,
 }
 
-pub const SETTINGS_VERSION: u32 = 3;
+pub const SETTINGS_VERSION: u32 = 4;
 /// Bubble position (1.5.2): centre top of the work area of the target's screen,
 /// centre bottom, or near the text caret (falls back to the centre top when it is unknown).
 pub const BUBBLE_TOP: u32 = 0;
@@ -267,7 +268,7 @@ impl Default for AppSettings {
             max_character_limit: 0,
             mixed_text_mode: MixedTextMode::ToggleAll,
             replace_caps: true,
-            switch_language_after_convert: false,
+            switch_language_after_convert: true,
             run_at_startup: false,
             show_bubble: true,
             play_sound: false,
@@ -314,6 +315,13 @@ impl AppSettings {
                     }
                 }
                 // 2 -> 3: nothing to change (AppRules is new and empty)
+                // 3 -> 4 (1.7.1): "switch the keyboard language after the fix" becomes the default.
+                // Older files always wrote the old default (off), so an unchanged file cannot be
+                // told from a deliberate choice: it is switched on once; a choice made from 1.7.1
+                // on (version 4) is never changed again.
+                if s.settings_version < 4 || s.settings_version == u32::MAX {
+                    s.switch_language_after_convert = true;
+                }
                 if s.settings_version != SETTINGS_VERSION {
                     s.settings_version = SETTINGS_VERSION;
                     s.migrated = true;
@@ -749,5 +757,19 @@ mod tests {
         let (s, _) = AppSettings::from_json(r#"{"ConsoleSupport":true,"HotkeyModifiers":2,"HotkeyKey":60}"#);
         assert!(!s.console_support);
         assert_eq!(s.hotkey_key, KEY_F10);
+    }
+
+    #[test]
+    fn keyboard_follows_the_fixed_text_by_default_from_1_7_1() {
+        assert!(AppSettings::default().switch_language_after_convert, "new install: on");
+        let (s, _) = AppSettings::from_json(r#"{"SwitchLanguageAfterConvert":false,"SettingsVersion":3}"#);
+        assert!(s.switch_language_after_convert, "file of 1.6.x/1.7.0: switched on once");
+        assert_eq!(s.settings_version, SETTINGS_VERSION);
+        let (s, _) = AppSettings::from_json(r#"{"SwitchLanguageAfterConvert":false,"SettingsVersion":4}"#);
+        assert!(!s.switch_language_after_convert, "a choice made with 1.7.1 or later is kept");
+        let (again, _) = AppSettings::from_json(&s.to_json());
+        assert!(!again.switch_language_after_convert, "and stays off after saving");
+        let (s, _) = AppSettings::from_json(r#"{"SettingsVersion":4}"#);
+        assert!(s.switch_language_after_convert, "missing value: the default");
     }
 }

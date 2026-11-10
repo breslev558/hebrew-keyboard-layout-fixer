@@ -135,7 +135,7 @@ function Bloc-notes($texte) {
   $n = Start-Process notepad -PassThru
   $h = Attendre { $n.Refresh(); $n.MainWindowHandle } 10000
   if ($h -eq [IntPtr]::Zero) { return $null }
-  [void][A]::Front($h); Start-Sleep -Milliseconds 500
+  [void][A]::Front($h); Start-Sleep -Milliseconds 1500   # 1.9.1: the first letter was lost at 500 ms (« kuo » instead of « akuo »)
   [Windows.Forms.SendKeys]::SendWait($texte); Start-Sleep -Milliseconds 400
   return $n
 }

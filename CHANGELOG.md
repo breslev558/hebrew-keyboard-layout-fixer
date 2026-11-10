@@ -1,7 +1,7 @@
 # Changelog
 
 ## 1.9.1 (November 2026)
-- The F10 bubble showed the preview cut at both ends ("kuo → לום" for "akuo → שלום"), seen in the visual test: it is now measured in the same reading order as it is drawn, with a margin.
+- F10 bubble: the "before → after" preview is drawn without its invisible direction marks, measured on the bubble itself, and ends with "…" if it is ever too wide (never cut at both ends).
 - Settings, Diagnostics page: the explanation of the last attempt is in the language of the interface (it was always French), and the copied information is in English for the Hebrew and English interfaces (French for French).
 - Download page: the program alone (KeyboardLayoutFixer.exe) is offered next to the installer, for antivirus programs that wrongly flag the small installer.
 

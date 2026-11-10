@@ -170,11 +170,31 @@ unsafe extern "system" fn on_foreground(_hook: windows_sys::Win32::UI::Accessibi
 
 /// Remembers the program of a foreground window, unless it is the shell, ours, invisible, or a
 /// suspended Store app (then the previous program is kept).
+/// 1.9.0: a remote desktop in front gets F10 / F9 itself (the copy on the other PC answers); any
+/// other window in front (desktop, taskbar, our own windows included) takes them back. Called at
+/// every change of window and every 5 s (our own windows are not reported, unlocking either).
+pub fn sync_passthrough(hwnd: HWND) {
+    let remote = !hwnd.is_null() && klf_core::policy::is_remote_screen(&target::exe_of(hwnd));
+    if remote == PASSTHROUGH.with(|p| p.get()) {
+        return;
+    }
+    PASSTHROUGH.with(|p| p.set(remote));
+    if remote {
+        unregister_hotkey(); // F10 and F9, whatever their state
+        log("Remote desktop in front: F10 and F9 given to it");
+    } else if STATE.with(|s| s.enabled.get()) {
+        register_hotkey();
+        log("Remote desktop left: F10 and F9 taken again");
+    }
+    update_tray();
+}
+
 fn note_foreground(hwnd: HWND) {
     // SAFETY: IsWindowVisible has no pointers.
     if hwnd.is_null() || unsafe { IsWindowVisible(hwnd) } == 0 {
         return;
     }
+    sync_passthrough(hwnd);
     crate::typing::reset(); // another window: the words kept are forgotten
     let class = sys::class_name(hwnd);
     crate::typing::run_dialog(hwnd, &class); // 1.8.6: Win+R in English (one-language option)
@@ -186,21 +206,6 @@ fn note_foreground(hwnd: HWND) {
     let exe = target::exe_of(hwnd);
     if exe.is_empty() || SHELL_EXES.contains(&exe.as_str()) || exe == "keyboardlayoutfixer.exe" {
         return;
-    }
-    // 1.9.0: a remote desktop in front gets F10 / F9 itself (the copy on the other PC answers)
-    let remote = klf_core::policy::is_remote_screen(&exe);
-    if remote != PASSTHROUGH.with(|p| p.get()) {
-        PASSTHROUGH.with(|p| p.set(remote));
-        if remote {
-            if STATE.with(|s| s.registered.get()) {
-                unregister_hotkey();
-                log("Remote desktop in front: F10 and F9 given to it");
-            }
-        } else if STATE.with(|s| s.enabled.get()) {
-            register_hotkey();
-            log("Remote desktop left: F10 and F9 taken again");
-        }
-        update_tray();
     }
     LAST_APP.with(|a| *a.borrow_mut() = exe);
     LAST_FG.with(|w| w.set(hwnd as usize));
@@ -1657,6 +1662,8 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             0
         }
         WM_TIMER if wparam == TIMER_HOOKS => {
+            // SAFETY: no pointers.
+            sync_passthrough(unsafe { GetForegroundWindow() });
             // 1.8.5: hooks removed by Windows are put back; an alert on the icon if they cannot be
             forget_quick_if_old();
             let ok = crate::platform::input::check_hooks() & crate::typing::check_hooks();

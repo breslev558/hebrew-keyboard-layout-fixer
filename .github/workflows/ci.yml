@@ -165,7 +165,8 @@ jobs:
           powershell -NoProfile -ExecutionPolicy Bypass -File tests-e2e\captures-et-paragraphe.ps1
           exit $LASTEXITCODE
       - name: Audit visuel (toutes les fenêtres, 3 langues, 150 % et 200 %, contraste élevé, désinstallation)
-        if: always()
+        if: success() || failure()
+        timeout-minutes: 15
         shell: powershell
         run: |
           powershell -NoProfile -ExecutionPolicy Bypass -File tests-e2e\audit-visuel.ps1

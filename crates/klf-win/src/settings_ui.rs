@@ -1064,17 +1064,21 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             BRUSH.with(|b| b.get()) as LRESULT
         }
         WM_DPICHANGED => {
-            let dpi = ((wparam >> 16) & 0xFFFF) as u32;
-            DPI.with(|d| d.set(dpi));
+            let dpi = (((wparam >> 16) & 0xFFFF) as u32).clamp(96, 480);
+            let old = DPI.with(|d| d.replace(dpi)).max(96);
             make_fonts(dpi);
-            // SAFETY: lparam points to the suggested rectangle (documented); never NULL from Windows,
-            // checked anyway (a message posted by another program)
-            if lparam != 0 {
-                unsafe {
-                    let r = &*(lparam as *const RECT);
-                    SetWindowPos(hwnd, null_mut(), r.left, r.top, r.right - r.left, r.bottom - r.top, SWP_NOZORDER | SWP_NOACTIVATE);
+            // 1.9.0: the new size is worked out here from the current one (the rectangle passed in
+            // lparam is never read: a message posted by another program could carry anything)
+            // SAFETY: our window; the RECT is ours.
+            unsafe {
+                let mut r: RECT = std::mem::zeroed();
+                if GetWindowRect(hwnd, &mut r) != 0 {
+                    let w = (r.right - r.left) * dpi as i32 / old as i32;
+                    let h = (r.bottom - r.top) * dpi as i32 / old as i32;
+                    SetWindowPos(hwnd, null_mut(), r.left, r.top, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
                 }
             }
+            let _ = lparam;
             apply_layout();
             0
         }

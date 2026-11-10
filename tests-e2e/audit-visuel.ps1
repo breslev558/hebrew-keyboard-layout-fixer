@@ -28,6 +28,8 @@ public static class A {
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr SendMessage(IntPtr h, uint m, IntPtr w, string l);
   [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
   [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
+  [DllImport("user32.dll")] public static extern IntPtr SendMessageTimeout(IntPtr h, uint m, IntPtr w, IntPtr l, uint f, uint t, out IntPtr r);
+  public static void Ask(IntPtr h, uint m, IntPtr w, IntPtr l) { IntPtr r; SendMessageTimeout(h, m, w, l, 2, 3000, out r); }   // SMTO_ABORTIFHUNG, 3 s
   [DllImport("user32.dll")] public static extern IntPtr GetDlgItem(IntPtr h, int id);
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
@@ -44,10 +46,15 @@ public static class A {
   }
   [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)] public struct HIGHCONTRAST { public uint cbSize; public uint dwFlags; public string lpszDefaultScheme; }
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern bool SystemParametersInfo(uint a, uint b, ref HIGHCONTRAST c, uint f);
+  [StructLayout(LayoutKind.Sequential)] public struct HIGHCONTRASTR { public uint cbSize; public uint dwFlags; public IntPtr lpszDefaultScheme; }
+  [DllImport("user32.dll")] public static extern bool SystemParametersInfo(uint a, uint b, ref HIGHCONTRASTR c, uint f);
+  // current flags (to put back exactly what was there)
+  public static uint HighContrastFlags() { var hc = new HIGHCONTRASTR(); hc.cbSize = (uint)Marshal.SizeOf(typeof(HIGHCONTRASTR)); SystemParametersInfo(0x0042, hc.cbSize, ref hc, 0); return hc.dwFlags; }
   public static bool HighContrast(bool on) {
     var hc = new HIGHCONTRAST(); hc.cbSize = (uint)Marshal.SizeOf(typeof(HIGHCONTRAST)); hc.dwFlags = on ? 1u : 0u; hc.lpszDefaultScheme = on ? "High Contrast Black" : null;
-    return SystemParametersInfo(0x0043, hc.cbSize, ref hc, 3);   // SPI_SETHIGHCONTRAST, update + broadcast
+    return SystemParametersInfo(0x0043, hc.cbSize, ref hc, 2);   // SPI_SETHIGHCONTRAST, told to the windows, NOT written to the profile
   }
+  [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint f);
 }
 '@
 $out = Join-Path (Get-Location) 'captures\audit'; New-Item -ItemType Directory -Force -Path $out | Out-Null
@@ -56,12 +63,18 @@ $exe = Join-Path $env:LOCALAPPDATA 'Programs\KeyboardLayoutFixer\KeyboardLayoutF
 $manques = New-Object System.Collections.ArrayList
 function Manque($m) { Write-Host "MANQUE : $m"; [void]$manques.Add($m) }
 function Photo($hw, $nom) {
-  $r = New-Object A+RECT; [void][A]::GetWindowRect($hw, [ref]$r)
-  if (($r.R - $r.L) -le 0 -or ($r.B - $r.T) -le 0) { Manque "taille nulle pour $nom"; return }
-  $bmp = New-Object Drawing.Bitmap ($r.R - $r.L), ($r.B - $r.T)
-  $g = [Drawing.Graphics]::FromImage($bmp); $g.CopyFromScreen($r.L, $r.T, 0, 0, $bmp.Size); $g.Dispose()
-  $bmp.Save((Join-Path $out $nom), [Drawing.Imaging.ImageFormat]::Png); $bmp.Dispose()
-  Write-Host "OK    $nom"
+  try {
+    $r = New-Object A+RECT; [void][A]::GetWindowRect($hw, [ref]$r)
+    if (($r.R - $r.L) -le 0 -or ($r.B - $r.T) -le 0) { Manque "taille nulle pour $nom"; return }
+    $bmp = New-Object Drawing.Bitmap ($r.R - $r.L), ($r.B - $r.T)
+    $g = [Drawing.Graphics]::FromImage($bmp)
+    # PrintWindow draws the whole window even if it goes past the screen (200 %); screen copy otherwise
+    $dc = $g.GetHdc(); $ok = [A]::PrintWindow($hw, $dc, 2); $g.ReleaseHdc($dc)
+    if (-not $ok) { $g.CopyFromScreen($r.L, $r.T, 0, 0, $bmp.Size) }
+    $g.Dispose()
+    $bmp.Save((Join-Path $out $nom), [Drawing.Imaging.ImageFormat]::Png); $bmp.Dispose()
+    Write-Host "OK    $nom"
+  } catch { Manque "capture $nom : $($_.Exception.Message)" }
 }
 function Attendre([scriptblock]$cond, $ms) {
   $sw = [Diagnostics.Stopwatch]::StartNew()
@@ -86,7 +99,7 @@ function Reglages($lg, $suffixe, $pages) {
   [void][A]::Front($w); Start-Sleep -Milliseconds 700
   $tc = [A]::GetDlgItem($w, 240)
   foreach ($tab in $pages) {
-    [void][A]::SendMessage($tc, 0x1330, [IntPtr]($tab - 1), [IntPtr]::Zero)   # TCM_SETCURFOCUS
+    [A]::Ask($tc, 0x1330, [IntPtr]($tab - 1), [IntPtr]::Zero)   # TCM_SETCURFOCUS (3 s at most)
     Start-Sleep -Milliseconds 600
     Photo $w "reglages-$lg-$suffixe-onglet$tab.png"
   }
@@ -113,7 +126,7 @@ foreach ($lg in 'he', 'fr', 'en') {
   [void][A]::Front($m)
   [void][A]::PostMessage($m, 0x8001, [IntPtr]::Zero, [IntPtr]0x007B)   # WM_APP_TRAY, WM_CONTEXTMENU
   $menu = Attendre { [A]::Visible('#32768', 0) } 5000
-  if ($menu -ne [IntPtr]::Zero) { Start-Sleep -Milliseconds 400; Photo $menu "menu-icone-$lg.png"; [A]::Key(0x1B); Start-Sleep -Milliseconds 300; [A]::Key(0x1B) } else { Manque "menu de l'icône ($lg)" }
+  if ($menu -ne [IntPtr]::Zero) { Start-Sleep -Milliseconds 400; Photo $menu "menu-icone-$lg.png"; [void][A]::PostMessage($m, 0x001F, [IntPtr]::Zero, [IntPtr]::Zero) } else { Manque "menu de l'icône ($lg)" }   # WM_CANCELMODE closes the menu
   Start-Sleep 1
 
   # --- bulle F10, en haut puis en bas
@@ -147,16 +160,22 @@ foreach ($lg in 'he', 'fr', 'en') {
   Remove-Item Env:\KLF_TEST_DPI -ErrorAction SilentlyContinue
 }
 
-# --- contraste élevé (hébreu et français, tous les onglets)
-if ([A]::HighContrast($true)) {
-  Start-Sleep 3
-  foreach ($lg in 'he', 'fr') {
-    $p = Demarrer ('{ "WelcomeDone": true, "ShowBubble": false, "UiLanguage": "' + $lg + '" }') $null
-    $w = Reglages $lg 'contraste' @(1, 2, 3)
-    if ($w -ne [IntPtr]::Zero) { [void][A]::PostMessage($w, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) }
-  }
-  [void][A]::HighContrast($false); Start-Sleep 2
-} else { Manque "contraste élevé (non activable sur cette machine)" }
+# --- contraste élevé (hébreu et français, tous les onglets) ; l'état d'avant est TOUJOURS remis
+$avant = [A]::HighContrastFlags()
+try {
+  if ([A]::HighContrast($true)) {
+    Start-Sleep 3
+    if (([A]::HighContrastFlags() -band 1) -eq 0) { Manque "contraste élevé demandé mais pas appliqué" }
+    foreach ($lg in 'he', 'fr') {
+      $p = Demarrer ('{ "WelcomeDone": true, "ShowBubble": false, "UiLanguage": "' + $lg + '" }') $null
+      $w = Reglages $lg 'contraste' @(1, 2, 3)
+      if ($w -ne [IntPtr]::Zero) { [void][A]::PostMessage($w, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) }
+    }
+  } else { Manque "contraste élevé (non activable sur cette machine)" }
+} finally {
+  if (($avant -band 1) -eq 0) { [void][A]::HighContrast($false) }
+  Start-Sleep 2
+}
 
 # --- désinstallation : la question « effacer aussi les réglages et les mots appris ? » (réponse Non)
 Get-Process KeyboardLayoutFixer -ErrorAction SilentlyContinue | Stop-Process -Force
@@ -167,13 +186,16 @@ if ($un) {
     $d = Attendre { $c = Get-CimInstance Win32_Process -Filter "ParentProcessId=$($pu.Id)" -ErrorAction SilentlyContinue; $ids = @($pu.Id) + @($c | ForEach-Object { $_.ProcessId }); foreach ($x in $ids) { $h = [A]::Visible('#32770', [uint32]$x); if ($h -ne [IntPtr]::Zero) { return $h } }; [IntPtr]::Zero } 8000
     if ($d -eq [IntPtr]::Zero) { break }
     Start-Sleep -Milliseconds 400; Photo $d "desinstallation-$i.png"
-    [void][A]::Front($d); [A]::Key(0x0D)   # Entrée : le bouton par défaut (Non pour l'effacement)
+    $non = [A]::GetDlgItem($d, 7)   # IDNO : the question « also delete your settings? » gets « No »
+    if ($non -ne [IntPtr]::Zero) { [void][A]::PostMessage($non, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero) }   # BM_CLICK
+    elseif ([A]::Front($d)) { [A]::Key(0x0D) }   # a wizard page: Enter = its default button
+    else { Manque "page de désinstallation pas au premier plan"; break }
     Start-Sleep 2
   }
   Start-Sleep 3
-  Get-Process | Where-Object { $_.Path -and $_.Path -match 'unins|Au_' } | Stop-Process -Force -ErrorAction SilentlyContinue
+  & taskkill.exe /T /F /PID $pu.Id 2>&1 | Out-Null   # the uninstaller and the copy it started, only them
 } else { Manque "désinstalleur introuvable" }
 
 "Captures de l'audit : $((Get-ChildItem $out -Filter *.png).Count) ; manques : $($manques.Count)"
-$manques | ForEach-Object { "  - $_" }
+$manques | ForEach-Object { "  - $_"; Write-Host "::warning::audit visuel : $_" }
 exit 0

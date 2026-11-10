@@ -7,7 +7,7 @@
 #  (« MANQUE ») pour être vu, l'essai ne s'arrête que si le programme ne démarre plus.
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
-Add-Type @'
+Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
 using System; using System.Runtime.InteropServices; using System.Text;
 public static class A {
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
@@ -55,6 +55,20 @@ public static class A {
     return SystemParametersInfo(0x0043, hc.cbSize, ref hc, 2);   // SPI_SETHIGHCONTRAST, told to the windows, NOT written to the profile
   }
   [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int w, int ht, uint f);
+  [DllImport("user32.dll")] public static extern IntPtr GetDC(IntPtr h);
+  [DllImport("user32.dll")] public static extern int ReleaseDC(IntPtr h, IntPtr dc);
+  [DllImport("gdi32.dll")] public static extern bool BitBlt(IntPtr d, int x, int y, int w, int h, IntPtr s, int sx, int sy, uint rop);
+  // what is on the screen, layered (transparent) windows included: SRCCOPY | CAPTUREBLT
+  // (.NET's CopyFromScreen refuses that combination in PowerShell 5.1, seen in the 2nd 1.9.0 trial)
+  public static System.Drawing.Bitmap Screen(int x, int y, int w, int h) {
+    var bmp = new System.Drawing.Bitmap(w, h);
+    using (var g = System.Drawing.Graphics.FromImage(bmp)) {
+      IntPtr dst = g.GetHdc(); IntPtr src = GetDC(IntPtr.Zero);
+      BitBlt(dst, 0, 0, w, h, src, x, y, 0x00CC0020 | 0x40000000);
+      ReleaseDC(IntPtr.Zero, src); g.ReleaseHdc(dst);
+    }
+    return bmp;
+  }
 }
 '@
 $out = Join-Path (Get-Location) 'captures\audit'; New-Item -ItemType Directory -Force -Path $out | Out-Null
@@ -69,12 +83,9 @@ function Photo($hw, $nom) {
   try {
     $r = New-Object A+RECT; [void][A]::GetWindowRect($hw, [ref]$r)
     if (($r.R - $r.L) -le 0 -or ($r.B - $r.T) -le 0) { Manque "taille nulle pour $nom"; return }
-    $bmp = New-Object Drawing.Bitmap ($r.R - $r.L), ($r.B - $r.T)
-    $g = [Drawing.Graphics]::FromImage($bmp)
-    # what is really on the screen (PrintWindow drew Hebrew windows mirrored, 1.9.0 trial); CaptureBlt
-    # includes the layered windows (the bubbles came out black without it)
-    $g.CopyFromScreen($r.L, $r.T, 0, 0, $bmp.Size, [Drawing.CopyPixelOperation]::SourceCopy -bor [Drawing.CopyPixelOperation]::CaptureBlt)
-    $g.Dispose()
+    # what is really on the screen (PrintWindow drew Hebrew windows mirrored, 1st 1.9.0 trial), layered
+    # windows included (the bubbles came out black without CAPTUREBLT)
+    $bmp = [A]::Screen($r.L, $r.T, ($r.R - $r.L), ($r.B - $r.T))
     $bmp.Save((Join-Path $out $nom), [Drawing.Imaging.ImageFormat]::Png); $bmp.Dispose()
     Write-Host "OK    $nom"
   } catch { Manque "capture $nom : $($_.Exception.Message)" }

@@ -14,7 +14,7 @@ jobs:
     if: github.repository == 'breslev558/hebrew-keyboard-layout-fixer'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Aucun nom interne dans les fichiers publics
         run: |
           if grep -rnIi 'n[o]am' --exclude-dir=.git --exclude-dir=words .; then echo "ECHEC : nom interne trouvé"; exit 1; fi
@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Outils (MinGW pour la cible Windows)
         run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64
       - name: Rust (version fixée par rust-toolchain.toml)
@@ -60,7 +60,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Outils (versions fixées)
         run: cargo install --locked cargo-audit@0.22.2 cargo-deny@0.20.2
       - name: Failles connues (RustSec)
@@ -71,7 +71,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Rust nightly et cargo-fuzz (version fixée)
         run: rustup toolchain install nightly --profile minimal && cargo install --locked cargo-fuzz@0.13.2
       - name: Fuzzing court du cœur (60 s par cible)
@@ -82,7 +82,7 @@ jobs:
     timeout-minutes: 15
     needs: coeur-et-compilation
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: KeyboardLayoutFixer-exe
@@ -112,7 +112,7 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Rust (version fixée) et cible ARM64
         shell: pwsh
         run: |
@@ -148,7 +148,7 @@ jobs:
     needs: coeur-et-compilation
     continue-on-error: true
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: KeyboardLayoutFixer-exe

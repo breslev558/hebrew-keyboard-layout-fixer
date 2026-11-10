@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.8.6 (November 2026)
+- Fix while typing and F10 "only the wrong words" recognise more: a final letter (ך ם ן ף ץ) inside a word means English typed on the Hebrew layout; English chat words without the apostrophe (dont, youre, thats…) are never converted. Measured on real English sentences typed on the wrong layout: 71.7 % of the words fixed (61.1 % in 1.8.5), with no more false proposals (Hebrew 0.01 %, English 0.002 % of correct sentences).
+- Learning is more careful: a word fixed with F10 is learned only the second time (noted `?word date` the first time, forgotten after 30 days); a round trip with F10 teaches nothing.
+- A text you selected is selected again after F10 when the result is Latin text (short, one line), so that F10 again converts it back.
+- Safety brakes: F10 pressed again more than 8 times in 10 s does nothing for 10 s; keyboard hooks removed by Windows 3 times in 5 minutes stop fixing while typing for 15 minutes, with a message.
+- Left/right Ctrl taps do nothing in full-screen games and videos. With the one-language option, the Run dialog (Win+R) also gets the English keyboard.
+- With three keyboards or more, Hebrew is converted to the last Latin layout you used (or to `PreferredLatinLayout` in settings.json).
+- Tests: a precision gate on every change (fix rate and false proposals on the word lists), and a Windows test proving that a witness text typed with every option on appears in none of the program's files.
+
 ## 1.8.5 (November 2026)
 - **F10 pressed again quickly** toggles at once: 1st press converted, 2nd the original text, 3rd converted again… each press is taken immediately, typed directly without the clipboard (within 5 s, same field, one line of 300 characters at most, nothing else pressed or clicked in between). Before, presses during the previous conversion were mostly lost. A round trip teaches nothing.
 - **F10 without a selection takes the whole paragraph** in fields that wrap long lines (chat boxes, Electron apps, browsers), not only the last displayed line; it stops at a real line break. Not in Excel or terminals.

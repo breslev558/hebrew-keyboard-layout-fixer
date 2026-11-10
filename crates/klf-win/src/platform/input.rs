@@ -99,6 +99,18 @@ pub fn select_up_to_line_start() -> bool {
     ])
 }
 
+/// 1.8.6: Shift+Left `n` times (the text just pasted selected again).
+pub fn select_back(n: usize) -> bool {
+    let mut v = Vec::with_capacity(2 + n * 2);
+    v.push(key(VK_SHIFT, false, false));
+    for _ in 0..n {
+        v.push(key(VK_LEFT, false, true));
+        v.push(key(VK_LEFT, true, true));
+    }
+    v.push(key(VK_SHIFT, true, false));
+    send(&v)
+}
+
 /// 1.8.5: Right arrow: the selection collapses to its end (where the caret was).
 pub fn collapse_right() -> bool {
     send(&[key(VK_RIGHT, false, true), key(VK_RIGHT, true, true)])
@@ -165,14 +177,28 @@ pub fn replace_paced_async(backspaces: usize, text: String) {
     replace_paced_then(backspaces, text, || {});
 }
 
+static TYPING: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// 1.8.6: text is being typed by a worker thread right now.
+pub fn typing_in_progress() -> bool {
+    TYPING.load(std::sync::atomic::Ordering::SeqCst) > 0
+}
+
 pub fn replace_paced_then(backspaces: usize, text: String, then: impl FnOnce() + Send + 'static) {
+    use std::sync::atomic::Ordering::SeqCst;
     static ONE: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let _ = std::thread::Builder::new().name("klf-type".into()).spawn(move || {
+    TYPING.fetch_add(1, SeqCst);
+    let started = std::thread::Builder::new().name("klf-type".into()).spawn(move || {
         let _g = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        if replace_paced(backspaces, &text) {
+        let ok = replace_paced(backspaces, &text);
+        TYPING.fetch_sub(1, SeqCst);
+        if ok {
             then();
         }
     });
+    if started.is_err() {
+        TYPING.fetch_sub(1, SeqCst);
+    }
 }
 
 /// 1.8.5: the counting hook may have missed input (removed by Windows and not yet put back).

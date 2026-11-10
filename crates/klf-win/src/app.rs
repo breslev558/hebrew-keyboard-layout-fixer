@@ -121,6 +121,8 @@ thread_local! {
     static DORMANT: Cell<Option<Msg>> = const { Cell::new(None) };
     /// the last foreground window of a real program
     static LAST_FG: Cell<usize> = const { Cell::new(0) };
+    /// 1.8.6: times of the last quick toggles (safety brake)
+    static TOGGLES: RefCell<Vec<u64>> = const { RefCell::new(Vec::new()) };
     /// 1.8.5: a keyboard hook removed by Windows could not be put back (alert on the icon)
     static HOOK_LOST: Cell<bool> = const { Cell::new(false) };
 }
@@ -162,6 +164,8 @@ fn note_foreground(hwnd: HWND) {
     }
     crate::typing::reset(); // another window: the words kept are forgotten
     let class = sys::class_name(hwnd);
+    crate::typing::run_dialog(hwnd, &class); // 1.8.6: Win+R in English (one-language option)
+    crate::typing::left_run_dialog(hwnd);
     if SHELL_CLASSES.contains(&class.as_str()) {
         return;
     }
@@ -946,12 +950,16 @@ struct Quick {
     other: String,
     /// the text before the first conversion (back to it: the quieter sound)
     original: String,
+    /// 1.8.6: the text shown is selected (a selection fixed with F10 is selected again)
+    selected: bool,
     at: u64,
     keys: u32,
     clicks: u32,
 }
 
 static QUICK: std::sync::Mutex<Option<Quick>> = std::sync::Mutex::new(None);
+/// 1.8.6: safety brake, F10 does nothing until this tick
+static BRAKE_UNTIL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// last quick toggle (tick)
 static LAST_TOGGLE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 const QUICK_MS: u64 = 5_000;
@@ -971,14 +979,14 @@ pub fn forget_quick_if_old() {
 }
 
 /// Called by the worker right after Ctrl+V (clipboard path of F10).
-pub fn remember_paste(hwnd: usize, focus: usize, before: &str, after: &str) {
+pub fn remember_paste(hwnd: usize, focus: usize, before: &str, after: &str, selected: bool) {
     let mut q = QUICK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     *q = None;
     if !quick_text_ok(before) || !quick_text_ok(after) || !crate::platform::input::activity_watched() {
         return;
     }
     let (keys, clicks) = crate::platform::input::user_activity();
-    *q = Some(Quick { hwnd, focus, shown: after.to_string(), other: before.to_string(), original: before.to_string(), at: sys_tick(), keys, clicks });
+    *q = Some(Quick { hwnd, focus, shown: after.to_string(), other: before.to_string(), original: before.to_string(), selected, at: sys_tick(), keys, clicks });
 }
 
 /// The quick toggle, if all its conditions hold. true = done (nothing else to do for this press).
@@ -994,12 +1002,40 @@ fn quick_toggle() -> bool {
         *g = None;
         return false;
     }
-    // where the text can be read back (Edit, RichEdit), it must be exactly what we put there
+    // 1.8.6, safety brake: more than 8 toggles in 10 s looks like a key stuck or a loop
+    let now_t = sys_tick();
+    let recent = TOGGLES.with(|t| {
+        let mut v = t.borrow_mut();
+        v.retain(|x| now_t.saturating_sub(*x) < 10_000);
+        v.push(now_t);
+        v.len()
+    });
+    if recent > 8 {
+        *g = None;
+        drop(g);
+        BRAKE_UNTIL.store(now_t + 10_000, Ordering::SeqCst);
+        let l = lang();
+        bubble::show(text(l, Msg::QuickBrake), l.is_rtl(), None, 0, false);
+        log("F10 pressed again too often: F10 paused 10 s (safety brake)");
+        return true;
+    }
+    // a selected text: the usual path converts the selection (checked by copying it); typing
+    // over a selection that may not be there could erase other text
+    if q.selected {
+        *g = None;
+        return false;
+    }
+    // retyping still going on: this press is ignored (never Backspaces in the middle of it)
+    if crate::platform::input::typing_in_progress() {
+        return true;
+    }
+    // where the text can be read back (Edit), it must be exactly what we put there
     if !crate::typing::text_before_caret_matches(&q.shown) {
         *g = None;
         return false;
     }
-    // sent from a worker thread (the hooks live on this one: never paused)
+    // sent from a worker thread (the hooks live on this one: never paused); a selected text is
+    // replaced by one Backspace, and the new one selected again
     crate::platform::input::replace_paced_async(q.shown.chars().count(), q.other.clone());
     std::mem::swap(&mut q.shown, &mut q.other);
     q.at = sys_tick();
@@ -1058,6 +1094,9 @@ fn start_hotkey(hwnd: HWND, action: Action, delayed: bool) {
     let (enabled, busy) = STATE.with(|s| (s.enabled.get(), s.busy.clone()));
     if !enabled {
         return;
+    }
+    if action == Action::Layout && sys_tick() < BRAKE_UNTIL.load(Ordering::SeqCst) {
+        return; // safety brake (a key stuck?): nothing for a few seconds
     }
     if action == Action::Layout && !delayed && quick_toggle() {
         return;

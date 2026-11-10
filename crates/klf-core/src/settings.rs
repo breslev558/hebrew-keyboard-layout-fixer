@@ -182,6 +182,9 @@ pub struct AppSettings {
     /// 1.8.5 (public, off by default): one-language programs (terminals) get their keyboard
     #[serde(rename = "OneLanguagePrograms", deserialize_with = "de_bool_false")]
     pub one_language_programs: bool,
+    /// 1.8.6: with 3 layouts or more, the Latin layout Hebrew is converted to (0 = the last used)
+    #[serde(rename = "PreferredLatinLayout", default, deserialize_with = "de_hkl")]
+    pub preferred_latin_layout: u32,
     /// 1.8.2: a short Windows sound when a word is fixed while typing (off by default)
     #[serde(rename = "TypingSound", deserialize_with = "de_bool_false")]
     pub typing_sound: bool,
@@ -313,6 +316,7 @@ impl Default for AppSettings {
             ctrl_tap_language: false,
             messenger_guard: false,
             one_language_programs: false,
+            preferred_latin_layout: 0,
             typing_sound: false,
             text_replacements: false,
             update_skip_tag: String::new(),
@@ -562,6 +566,17 @@ fn de_bool_true<'de, D: Deserializer<'de>>(d: D) -> Result<bool, D::Error> {
 
 fn de_bool_false<'de, D: Deserializer<'de>>(d: D) -> Result<bool, D::Error> {
     Ok(de_bool(de_value(d)?, false))
+}
+
+/// A layout handle: a number, or a text "0x00000409" / "00000409"; anything else = 0 (the other
+/// settings are never lost because of it).
+fn de_hkl<'de, D: Deserializer<'de>>(d: D) -> Result<u32, D::Error> {
+    let v = de_value(d)?;
+    Ok(match &v {
+        serde_json::Value::Number(n) => n.as_u64().and_then(|x| u32::try_from(x).ok()).unwrap_or(0),
+        serde_json::Value::String(s) => u32::from_str_radix(s.trim().trim_start_matches("0x").trim_start_matches("0X"), 16).unwrap_or(0),
+        _ => 0,
+    })
 }
 
 fn de_mode<'de, D: Deserializer<'de>>(d: D) -> Result<MixedTextMode, D::Error> {

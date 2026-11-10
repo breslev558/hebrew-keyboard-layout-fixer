@@ -33,6 +33,14 @@ pub struct Dict {
     tech: HashMap<String, String>,
 }
 
+/// 1.8.6: English of chat messages, without the apostrophe ("dont", "youre"): real words for
+/// the program (never converted). Words of 1-2 letters ("im") are left to the usual rules.
+pub const CHAT_EN: &[&str] = &[
+    "dont", "cant", "wont", "isnt", "arent", "wasnt", "werent", "didnt", "doesnt", "hasnt", "havent", "hadnt", "couldnt", "wouldnt",
+    "shouldnt", "youre", "theyre", "thats", "whats", "theres", "heres", "wheres", "ive", "youve", "weve", "theyve", "youll", "theyll",
+    "itll", "hes", "shes", "lets", "aint", "gonna", "wanna", "gotta", "yeah", "nope", "lol", "omg", "btw", "thx", "pls", "plz",
+];
+
 /// 1.8.5: technical words and brands often typed with the wrong layout, missing from the word
 /// lists or written with capitals inside: recognised, and written their usual way.
 pub const TECH_WORDS: &[&str] = &[
@@ -71,7 +79,8 @@ pub fn parse_personal(text: &str) -> (HashSet<String>, HashSet<String>) {
 
 pub fn parse_personal_full(text: &str) -> (HashSet<String>, HashSet<String>, HashSet<String>) {
     let (mut known, mut never, mut learned) = (HashSet::new(), HashSet::new(), HashSet::new());
-    for l in text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).take(10_000) {
+    // "?word date" (1.8.6): seen once, not yet learned: not used
+    for l in text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#') && !l.starts_with('?')).take(10_000) {
         let (set, w) = match (l.strip_prefix('-'), l.strip_prefix('+')) {
             (Some(w), _) => (&mut never, w.trim()),
             (_, Some(w)) => (&mut learned, w.trim()),
@@ -92,6 +101,66 @@ pub fn learned_line(typed: &str) -> Option<String> {
     (w.chars().count() >= 2 && w.chars().count() <= MAX_WORD_CHARS && w.chars().all(|c| c.is_alphabetic() || c == '\'')).then(|| format!("+{}", w.to_lowercase()))
 }
 
+/// 1.8.6, cautious learning: a word fixed with F10 is learned ("+word") only the SECOND time; the
+/// first time it is noted as "?word YYYY-MM-DD", forgotten after 30 days if not confirmed.
+/// Returns the new file text, or None when nothing changes. `today` = days since 1970.
+pub fn learn_step(text: &str, typed: &str, today: u32) -> Option<String> {
+    let line = learned_line(typed)?;
+    let word = &line[1..];
+    let lines: Vec<&str> = text.lines().collect();
+    if lines.iter().any(|l| l.trim().eq_ignore_ascii_case(&line)) {
+        return None; // already learned
+    }
+    let pending = |l: &str| l.trim().strip_prefix('?').and_then(|r| r.split_whitespace().next()).is_some_and(|w| w.eq_ignore_ascii_case(word));
+    let mut out: Vec<String> = lines.iter().filter(|l| !pending(l) && !pending_expired(l, today)).map(|l| l.to_string()).collect();
+    // the second time must be another day (three F10 in a row are not two lessons)
+    let seen_before_today = lines.iter().any(|l| pending(l) && l.split_whitespace().nth(1).and_then(day_number).is_some_and(|d| d < today));
+    if lines.iter().any(|l| pending(l)) && !seen_before_today {
+        return None; // already noted today
+    }
+    if seen_before_today {
+        out.push(line.clone()); // second time, another day: learned
+    } else {
+        out.push(format!("?{word} {}", day_text(today)));
+    }
+    Some(out.join("\r\n") + "\r\n")
+}
+
+/// A "?word date" line older than 30 days.
+fn pending_expired(l: &str, today: u32) -> bool {
+    let Some(rest) = l.trim().strip_prefix('?') else { return false };
+    rest.split_whitespace().nth(1).and_then(day_number).is_some_and(|d| today.saturating_sub(d) > 30)
+}
+
+/// Days since 1970-01-01 <-> "YYYY-MM-DD" (proleptic Gregorian; no time zone needed).
+pub fn day_text(days: u32) -> String {
+    let z = days as i64 + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    format!("{:04}-{:02}-{:02}", if m <= 2 { y + 1 } else { y }, m, d)
+}
+
+pub fn day_number(t: &str) -> Option<u32> {
+    let mut p = t.split('-');
+    let (y, m, d): (i64, i64, i64) = (p.next()?.parse().ok()?, p.next()?.parse().ok()?, p.next()?.parse().ok()?);
+    if !(1..=12).contains(&m) || !(1..=31).contains(&d) || p.next().is_some() {
+        return None;
+    }
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let mp = if m > 2 { m - 3 } else { m + 9 };
+    let doy = (153 * mp + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    u32::try_from(era * 146_097 + doe - 719_468).ok()
+}
+
 /// Line added to the personal file when a fix is undone.
 pub fn never_line(typed: &str) -> String {
     format!("-{}", typed.trim().to_lowercase())
@@ -109,12 +178,16 @@ impl Dict {
         };
         let model = |t: &str| crate::ngram::Model::train(t.lines().filter_map(|l| l.split_whitespace().next()).filter(|w| w.chars().count() <= MAX_WORD_CHARS).take(max));
         let mut en_map = take(en, true);
+        for w in CHAT_EN {
+            en_map.entry(w.to_string()).or_insert(9_000);
+        }
         let mut tech = HashMap::new();
         for w in TECH_WORDS {
             let l = w.to_lowercase();
             // only words that are not ordinary English words (bit, signal, teams, windows, zoom...
             // keep their place and their small letters: "a bit", "two teams")
-            if en_map.contains_key(&l) {
+            // ...and not the short ones (USB, PDF, Bit...): too close to typos and short words
+            if en_map.contains_key(&l) || l.chars().count() < 5 {
                 continue;
             }
             en_map.insert(l.clone(), 2_000);
@@ -312,6 +385,16 @@ pub fn f10_lesson_checked(before: &str, after: &str, dict: Option<&Dict>) -> Opt
     learned_line(b)
 }
 
+/// 1.8.6: a final form (ך ם ן ף ץ) followed by another Hebrew letter in the same word.
+pub fn has_inner_final(w: &str) -> bool {
+    let c: Vec<char> = w.chars().collect();
+    c.windows(2).any(|p| matches!(p[0], 'ך' | 'ם' | 'ן' | 'ף' | 'ץ') && crate::layouts::is_hebrew_letter(p[1]))
+}
+
+fn typed_is_word_he(dict: &Dict, w: &str) -> bool {
+    dict.is_he(w)
+}
+
 /// Keys that are Hebrew letters on one layout and signs on the other: kept inside a word.
 pub const WORD_SIGNS: &[char] = &[',', '.', ';', '/', '\''];
 
@@ -360,6 +443,16 @@ pub fn word_wrong(dict: &Dict, typed: &str, read: &str, hebrew_active: bool) -> 
     let read_rank = dict.rank(read, !hebrew_active).filter(|_| dict.common_enough(read, !hebrew_active));
     if signs_after && (if hebrew_active { dict.is_he(core) } else { dict.rank(core, false).is_some_and(|k| read_rank.is_none_or(|r| r.saturating_mul(4) >= k)) }) {
         return false;
+    }
+    // 1.8.6: a final letter (ך ם ן ף ץ) inside a word does not exist in Hebrew: Latin text typed
+    // on the Hebrew layout ("ןא" = "it", "ךםמע" = "long"), if the reading is Latin letters
+    // ...but only when the reading is a known English word (a typo such as "הןא" for "הוא" also
+    // has a final letter inside, and its reading is no word)
+    if hebrew_active && has_inner_final(core) && !typed_is_word_he(dict, core) {
+        let r = read.trim_end_matches(['.', ',', ';']);
+        if letters_only(r, false) && dict.common_enough(r, false) && !dict.personal(core) {
+            return true;
+        }
     }
     // taught with F10: wrong whatever the lists say
     if dict.learned(typed) && letters_only(read, !hebrew_active) {
@@ -1321,6 +1414,73 @@ mod cases {
         }
         assert_eq!(d.display("github,"), "GitHub,");
         assert_eq!(d.display("hello"), "hello");
+    }
+
+    #[test]
+    fn cautious_learning_and_dates() {
+        assert_eq!(day_text(0), "1970-01-01");
+        assert_eq!(day_number("2026-11-10"), Some(20_767));
+        assert_eq!(day_text(20_767), "2026-11-10");
+        let t1 = learn_step("", "akuo", 20_767).unwrap();
+        assert_eq!(t1, "?akuo 2026-11-10\r\n");
+        assert!(parse_personal_full(&t1).2.is_empty(), "seen once: not learned");
+        assert_eq!(learn_step(&t1, "akuo", 20_767), None, "same day: not a second lesson");
+        let t2 = learn_step(&t1, "akuo", 20_768).unwrap();
+        assert_eq!(t2, "+akuo\r\n");
+        assert_eq!(learn_step(&t2, "akuo", 20_769), None);
+        // forgotten after 30 days without a second time
+        let t3 = learn_step("?old 2026-09-01\r\nmine\r\n", "akuo", 20_767).unwrap();
+        assert_eq!(t3, "mine\r\n?akuo 2026-11-10\r\n");
+    }
+
+    #[test]
+    fn inner_final_letters_and_chat_english() {
+        assert!(has_inner_final("ןא") && has_inner_final("ךםמע") && !has_inner_final("שלום") && !has_inner_final("ים"));
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../");
+        let read = |p: &str| std::fs::read_to_string(format!("{root}{p}")).ok();
+        let (Some(he), Some(en)) = (read("data/words/KeyboardLayoutFixer-words-he.txt"), read("data/words/KeyboardLayoutFixer-words-en.txt")) else { return };
+        let d = Dict::from_lists(&he, &en, DICT_SIZE);
+        let m = us_map();
+        let conv = |s: &str| convert_with(&m, s, MixedTextMode::ToggleAll, true);
+        // "dont" typed in English is a word now: never converted
+        assert!(suggest(&[("dont".into(), conv("dont"))], false, &d).is_none());
+        // a final letter inside: Latin typed on the Hebrew layout
+        for w in ["long", "into", "lion"] {
+            let typed = conv(w);
+            if has_inner_final(&typed) {
+                assert!(word_wrong(&d, &typed, w, true), "{w} -> {typed}");
+            }
+        }
+    }
+
+    /// 1.8.6: precision gate run on every change (CI): the word lists of the repository, a sample.
+    #[test]
+    fn precision_gate() {
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../");
+        let read = |p: &str| std::fs::read_to_string(format!("{root}{p}")).ok();
+        let (Some(he), Some(en)) = (read("data/words/KeyboardLayoutFixer-words-he.txt"), read("data/words/KeyboardLayoutFixer-words-en.txt")) else {
+            assert!(std::env::var("CI").is_err(), "word lists missing: the precision gate must run in CI");
+            return;
+        };
+        let d = Dict::from_lists(&he, &en, DICT_SIZE);
+        let m = us_map();
+        let conv = |s: &str| convert_with(&m, s, MixedTextMode::ToggleAll, true);
+        for (name, list, hebrew_word, min_fix) in [("he", &he, true, 85.0), ("en", &en, false, 90.0)] {
+            let words: Vec<&str> = list.lines().take(DICT_SIZE).filter_map(|l| l.split_whitespace().next()).filter(|w| w.chars().count() >= 3).step_by(7).collect();
+            let (mut fp, mut fix) = (0, 0);
+            for w in &words {
+                let other = conv(w);
+                if suggest(&[(w.to_string(), other.clone())], hebrew_word, &d).is_some() {
+                    fp += 1;
+                }
+                if suggest(&[(other.clone(), w.to_string())], !hebrew_word, &d).is_some_and(|s| s.text.trim().eq_ignore_ascii_case(w)) {
+                    fix += 1;
+                }
+            }
+            let n = words.len() as f64;
+            assert!(100.0 * fix as f64 / n >= min_fix, "{name}: fixed {:.1} % < {min_fix} %", 100.0 * fix as f64 / n);
+            assert_eq!(fp, 0, "{name}: false proposals on words of the list");
+        }
     }
 
     #[test]

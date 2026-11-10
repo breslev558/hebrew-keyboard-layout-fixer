@@ -93,6 +93,26 @@ pub enum Choice {
     Unsupported(String),
 }
 
+/// 1.8.6: the last Latin layout seen active (with 3 layouts or more, Hebrew is converted to it).
+static LAST_LATIN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// Notes the active layout of a window (called when a program comes to the front).
+pub fn note_active(hkl: Option<u32>) {
+    use std::collections::HashMap;
+    static LATIN: std::sync::Mutex<Option<HashMap<u32, bool>>> = std::sync::Mutex::new(None);
+    let Some(h) = hkl.filter(|h| h & 0x3FF != 0x0D && *h != 0) else { return };
+    // only Latin layouts (not Russian, Arabic...): read once per layout
+    let latin = {
+        let mut g = LATIN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        *g.get_or_insert_with(HashMap::new).entry(h).or_insert_with(|| {
+            matches!(classify_hkl(h), LayoutKind::Latin(_)) || read_layout(h).is_some_and(|t| klf_core::layouts::is_latin_table(&t))
+        })
+    };
+    if latin {
+        LAST_LATIN.store(h, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
 pub fn choose(active: Option<u32>) -> Choice {
     use klf_core::layouts::{is_latin_table, same_hebrew_letters};
     let installed = installed();
@@ -108,11 +128,19 @@ pub fn choose(active: Option<u32>) -> Choice {
         }
     };
     let first_latin = || {
-        // a layout supported by name first, then any Latin layout (US table)
-        installed.iter().copied().find(|h| matches!(classify_hkl(*h), LayoutKind::Latin(_))).or_else(|| installed.iter().copied().find(|h| matches!(kind(*h), LayoutKind::Latin(_))))
+        // 1.8.6: the Latin layout chosen in the settings, else the last one used, else a layout
+        // supported by name first, then any Latin layout (US table)
+        let fixed = crate::app::settings().preferred_latin_layout;
+        let last = LAST_LATIN.load(std::sync::atomic::Ordering::Relaxed);
+        [fixed, last].into_iter().find(|h| *h != 0 && installed.contains(h) && matches!(kind(*h), LayoutKind::Latin(_)))
+            .or_else(|| installed.iter().copied().find(|h| matches!(classify_hkl(*h), LayoutKind::Latin(_))))
+            .or_else(|| installed.iter().copied().find(|h| matches!(kind(*h), LayoutKind::Latin(_))))
     };
     let latin_hkl = match active.map(kind) {
-        Some(LayoutKind::Latin(_)) => active,
+        Some(LayoutKind::Latin(_)) => {
+            LAST_LATIN.store(active.unwrap_or(0), std::sync::atomic::Ordering::Relaxed);
+            active
+        }
         Some(LayoutKind::HebrewStandard) | None => first_latin(),
         Some(LayoutKind::Unsupported) => {
             return Choice::Unsupported(klf_core::layouts::hkl_name(active.unwrap_or(0)));

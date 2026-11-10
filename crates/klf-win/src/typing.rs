@@ -135,6 +135,7 @@ fn decode_text(b: &[u8]) -> String {
 pub fn forget_learned(typed: &str) {
     let Some(line) = t::learned_line(typed) else { return };
     let Some(p) = personal_path() else { return };
+    let _w = PERSONAL_WRITE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let Ok(current) = std::fs::read(&p) else { return };
     if current.len() > 256 * 1024 {
         return;
@@ -152,6 +153,7 @@ pub fn forget_learned(typed: &str) {
 
 fn append_personal(lines: &[String]) {
     let Some(p) = personal_path() else { return };
+    let _w = PERSONAL_WRITE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let current = std::fs::read(&p).unwrap_or_default();
     if current.len() > 256 * 1024 || lines.is_empty() {
         return;
@@ -239,6 +241,8 @@ thread_local! {
     static CTRLTAP: RefCell<t::CtrlTap> = RefCell::new(t::CtrlTap::default());
     static WANT_GUARD: Cell<bool> = const { Cell::new(false) };
     static IS_MESSENGER: Cell<bool> = const { Cell::new(false) };
+    /// 1.8.6: (Run dialog, keyboard before, keyboard we chose)
+    static RUN_DIALOG: Cell<(usize, u32, u32)> = const { Cell::new((0, 0, 0)) };
     /// key maps of the installed layouts (prepared outside the hook, for the chat guard)
     static KEYMAPS: RefCell<HashMap<u32, klf_core::layouts::KeyMap>> = RefCell::new(HashMap::new());
     /// (window, time): the next Enter there is let through (the user was warned)
@@ -764,13 +768,14 @@ pub fn on_message(code: WPARAM) {
         REPLACE => replace_now(),
         REPL_REFRESH => refresh_replacements(false),
         VERIFY => verify_fix(),
-        CTRL_EN | CTRL_HE => {
+        CTRL_EN | CTRL_HE if !fullscreen_or_game() => {
             let fg = target::foreground();
             let hkl = if code == CTRL_HE { layouts::hebrew_layout() } else { latin_layout(fg) };
             if let Some(h) = hkl {
                 layouts::request(fg, h);
             }
         }
+        CTRL_EN | CTRL_HE => {} // full-screen game or video: nothing
         GUARD => guard_check(),
         TIMING => {
             let n = HOOK_KEYS.swap(0, Ordering::Relaxed);
@@ -977,8 +982,85 @@ pub fn learn_from_f10(before: &str, after: &str) {
         let Some(d) = guard.as_ref() else { return };
         t::f10_lesson_checked(before, after, Some(d))
     };
+    // 1.8.6: learned only the second time ("?word date" the first time, forgotten after 30 days)
     if let Some(line) = line {
-        append_personal(&[line]);
+        learn_twice(&line[1..]);
+    }
+}
+
+/// 1.8.6: one writer at a time for my-words.txt (learning, undo, round trip).
+static PERSONAL_WRITE: Mutex<()> = Mutex::new(());
+
+fn learn_twice(word: &str) {
+    let Some(p) = personal_path() else { return };
+    let _w = PERSONAL_WRITE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    // a file that exists but cannot be read (shared, antivirus, OneDrive) is never replaced
+    let current = match std::fs::read(&p) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(_) => return,
+    };
+    if current.len() > 256 * 1024 {
+        return;
+    }
+    let today = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| (d.as_secs() / 86_400) as u32).unwrap_or(0);
+    let Some(new) = t::learn_step(&decode_text(&current), word, today) else { return };
+    let tmp = p.with_extension("txt.learn.tmp");
+    let written = (|| -> std::io::Result<()> {
+        use std::io::Write;
+        let mut f = std::fs::File::create(&tmp)?;
+        // UTF-8 with its mark: Notepad and every version of the program read it right
+        f.write_all(b"\xEF\xBB\xBF")?;
+        f.write_all(new.as_bytes())?;
+        f.sync_all()?;
+        drop(f);
+        std::fs::rename(&tmp, &p)
+    })();
+    if written.is_ok() {
+        refresh_personal();
+    } else {
+        let _ = std::fs::remove_file(&tmp);
+        log("Typing correction: my-words.txt could not be written");
+    }
+}
+
+/// 1.8.6: the Run dialog (Win+R) gets the English keyboard, with the one-language option.
+pub fn run_dialog(hwnd: HWND, class: &str) {
+    if class != "#32770" || !app::settings().one_language_programs || !allowed() {
+        return;
+    }
+    if target::exe_of(hwnd) != "explorer.exe" {
+        return;
+    }
+    // the Run dialog: a dialog of the shell whose command line is the combo box 12298
+    // SAFETY: plain window handle.
+    if unsafe { GetDlgItem(hwnd, 12298) }.is_null() {
+        return;
+    }
+    // once per dialog (the user may switch back to Hebrew on purpose)
+    if RUN_DIALOG.with(|r| r.get().0) == hwnd as usize {
+        return;
+    }
+    let before = target::current_layout(hwnd).map(|c| c as u32);
+    if let Some(h) = latin_layout(hwnd) {
+        if before != Some(h) {
+            layouts::request(hwnd, h);
+            RUN_DIALOG.with(|r| r.set((hwnd as usize, before.unwrap_or(0), h)));
+            log("Run dialog: keyboard switched to English");
+        }
+    }
+}
+
+/// 1.8.6: leaving the Run dialog: the keyboard it had before comes back, if it is still the one
+/// we chose (the user did not change it).
+pub fn left_run_dialog(fg: HWND) {
+    let (dlg, before, ours) = RUN_DIALOG.with(|r| r.get());
+    if dlg == 0 || dlg == fg as usize {
+        return;
+    }
+    RUN_DIALOG.with(|r| r.set((0, 0, 0)));
+    if before != 0 && target::current_layout(fg).map(|c| c as u32) == Some(ours) {
+        layouts::request(fg, before);
     }
 }
 
@@ -1092,6 +1174,7 @@ pub fn on_foreground() {
     }
     let fg = target::foreground();
     let exe = target::exe_of(fg);
+    layouts::note_active(target::current_layout(fg).map(|h| h as u32)); // 1.8.6: last Latin layout
     IS_MESSENGER.with(|m| m.set(t::is_messenger(&exe)));
     GUARD_ARMED.with(|g| g.set(None));
     SWALLOW_ENTER_UP.with(|s| s.set(false));
@@ -1161,7 +1244,21 @@ fn guard_check() {
 
 /// 1.8.5: the typing hooks are put back if Windows removed them (silently, when a hook was too
 /// slow once). false = they should be there and could not be put back.
+/// 1.8.6: when the hook brake stopped fixing while typing (0 = not braked); it comes back by
+/// itself after 15 minutes.
+static BRAKED_AT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 pub fn check_hooks() -> bool {
+    let braked = BRAKED_AT.load(Ordering::SeqCst);
+    if braked != 0 {
+        if tick().saturating_sub(braked) < 15 * 60_000 {
+            return false; // still braked: the alert stays, no new bubble
+        }
+        BRAKED_AT.store(0, Ordering::SeqCst);
+        log("Safety brake over: fixing while typing comes back");
+        apply();
+        return true;
+    }
     if !active() || !input::hook_lost(LAST_EVENT.load(Ordering::SeqCst)) || input::foreground_hides_input() {
         return true;
     }
@@ -1173,6 +1270,24 @@ pub fn check_hooks() -> bool {
         return true;
     }
     LAST_FIX.store(now, Ordering::SeqCst);
+    // 1.8.6, safety brake: removed 3 times within 5 minutes = the hook is too slow on this PC;
+    // fixing while typing stops (with a warning) rather than coming back again and again
+    static REPAIRS: std::sync::Mutex<Vec<u64>> = std::sync::Mutex::new(Vec::new());
+    let many = {
+        let mut r = REPAIRS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        r.retain(|x| now.saturating_sub(*x) < 300_000);
+        r.push(now);
+        r.len() >= 3
+    };
+    if many {
+        log("Typing hooks removed by Windows 3 times in 5 minutes: fixing while typing stopped for 15 minutes (safety brake)");
+        stop();
+        BRAKED_AT.store(now, Ordering::SeqCst);
+        REPAIRS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clear();
+        let l = app::lang();
+        crate::bubble::show(text(l, Msg::HookBrake), l.is_rtl(), None, 0, false);
+        return false;
+    }
     log("Typing hooks removed by Windows: put back");
     stop();
     start();

@@ -1,4 +1,5 @@
-﻿# Essai Windows (CI) 1.8.5, après bout-en-bout.ps1 (programme installé, en marche) :
+﻿# (PowerShell : $null passé à un paramètre texte devient "" ; [NullString]::Value donne un vrai NULL)
+# Essai Windows (CI) 1.8.5, après bout-en-bout.ps1 (programme installé, en marche) :
 #  1) F10 sans sélection dans une zone multi-ligne ÉTROITE qui passe à la ligne toute seule : tout le
 #     paragraphe doit être corrigé, pas seulement la dernière ligne affichée ;
 #  2) captures de la fenêtre de réglages (3 onglets) en hébreu, français et anglais (artefact « captures »).
@@ -42,8 +43,8 @@ $f.Controls.Add($t); [void]$f.ShowDialog()
 '@
 $fp = Join-Path $env:TEMP 'klf-form.ps1'; Set-Content -Path $fp -Value $form -Encoding UTF8
 $pf = Start-Process powershell -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $fp -PassThru
-$h = [IntPtr]::Zero; $t = 0; while ($h -eq [IntPtr]::Zero) { Start-Sleep -Milliseconds 300; $h = [V]::FindWindow($null, 'KLF-paragraphe'); if (++$t -gt 60) { Fail 'fenêtre de test introuvable' } }
-$e = [V]::FindWindowEx($h, [IntPtr]::Zero, $null, $null)
+$h = [IntPtr]::Zero; $t = 0; while ($h -eq [IntPtr]::Zero) { Start-Sleep -Milliseconds 300; $h = [V]::FindWindow([NullString]::Value, 'KLF-paragraphe'); if (++$t -gt 60) { Fail 'fenêtre de test introuvable' } }
+$e = [V]::FindWindowEx($h, [IntPtr]::Zero, [NullString]::Value, [NullString]::Value)
 $gib = 'akuo kfuko nv akunfo vhuo tbh fu,c napy trul ntus fsh kcsue av,heui kuej t, fk vpxev ukt re t, vaurv vtjrubv'
 [void][V]::SendMessage($e, 0x000C, [IntPtr]::Zero, $gib)                       # WM_SETTEXT
 $t = 0; while (-not [V]::Front($h)) { Start-Sleep -Milliseconds 300; if (++$t -gt 20) { Fail 'fenêtre de test pas au premier plan' } }
@@ -66,7 +67,7 @@ Start-Sleep 1
 Start-Process -FilePath $exe | Out-Null
 Start-Sleep 4
 $pf = Start-Process powershell -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $fp -PassThru
-$h = [IntPtr]::Zero; $t = 0; while ($h -eq [IntPtr]::Zero) { Start-Sleep -Milliseconds 300; $h = [V]::FindWindow($null, 'KLF-paragraphe'); if (++$t -gt 60) { Fail 'fenêtre de test introuvable (2)' } }
+$h = [IntPtr]::Zero; $t = 0; while ($h -eq [IntPtr]::Zero) { Start-Sleep -Milliseconds 300; $h = [V]::FindWindow([NullString]::Value, 'KLF-paragraphe'); if (++$t -gt 60) { Fail 'fenêtre de test introuvable (2)' } }
 $t = 0; while (-not [V]::Front($h)) { Start-Sleep -Milliseconds 300; if (++$t -gt 20) { Fail 'fenêtre de test pas au premier plan (2)' } }
 for ($i = 0; $i -lt 130; $i++) { foreach ($vk in 0x48, 0x45, 0x4C, 0x4F, 0x20) { [V]::Key([byte]$vk); Start-Sleep -Milliseconds 15 } }   # « helo » x 130
 Start-Sleep 2
@@ -78,6 +79,18 @@ if (-not $tim) { Fail 'aucune mesure du temps du crochet dans debug.log' }
 if ($env:GITHUB_STEP_SUMMARY) { @("", "### Crochet clavier (correction pendant la frappe allumée)", "", "``$($tim.Line)``") | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY }
 if ($tim.Line -match 'max (\d+) us' -and [int]$Matches[1] -gt 100000) { Fail "le crochet a pris plus de 100 ms sur une touche" }
 
+# --- 1c) phrase témoin : rien de ce qui est tapé ne doit se retrouver dans les fichiers du programme
+$pf = Start-Process powershell -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $fp -PassThru
+$h = [IntPtr]::Zero; $t = 0; while ($h -eq [IntPtr]::Zero) { Start-Sleep -Milliseconds 300; $h = [V]::FindWindow([NullString]::Value, 'KLF-paragraphe'); if (++$t -gt 60) { Fail 'fenêtre de test introuvable (3)' } }
+$t = 0; while (-not [V]::Front($h)) { Start-Sleep -Milliseconds 300; if (++$t -gt 20) { Fail 'fenêtre de test pas au premier plan (3)' } }
+# « zqjxtemoin » tapé 3 fois, puis F10, puis F10 encore
+for ($i = 0; $i -lt 3; $i++) { foreach ($vk in 0x5A, 0x51, 0x4A, 0x58, 0x54, 0x45, 0x4D, 0x4F, 0x49, 0x4E, 0x20) { [V]::Key([byte]$vk); Start-Sleep -Milliseconds 20 } }
+Start-Sleep 1; [V]::Key(0x79); Start-Sleep 2; [V]::Key(0x79); Start-Sleep 2
+Stop-Process -Id $pf.Id -Force -ErrorAction SilentlyContinue
+$fuite = @(Get-ChildItem -Path $dir -File -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Length -lt 5MB } | Where-Object { (Get-Content -LiteralPath $_.FullName -Raw -ErrorAction SilentlyContinue) -match 'zqjxtemoin' })
+if ($fuite.Count -gt 0) { Fail "texte tapé retrouvé dans : $($fuite.Name -join ', ')" }
+"OK    phrase témoin : aucun texte tapé dans les fichiers du programme ($((Get-ChildItem $dir -File).Count) fichiers lus)"
+
 # --- 2) captures de la fenêtre de réglages dans les 3 langues
 foreach ($lg in 'he', 'fr', 'en') {
   Get-Process KeyboardLayoutFixer -ErrorAction SilentlyContinue | Stop-Process -Force
@@ -85,7 +98,7 @@ foreach ($lg in 'he', 'fr', 'en') {
   ('{ "WelcomeDone": true, "ShowBubble": false, "UiLanguage": "' + $lg + '" }') | Set-Content -Encoding UTF8 (Join-Path $dir 'settings.json')
   Start-Process -FilePath $exe -ArgumentList '--settings' | Out-Null
   $w = [IntPtr]::Zero; $t = 0
-  while ($w -eq [IntPtr]::Zero) { Start-Sleep -Milliseconds 400; $w = [V]::FindWindow('KBLayoutFixerSettings', $null); if (++$t -gt 40) { break } }
+  while ($w -eq [IntPtr]::Zero) { Start-Sleep -Milliseconds 400; $w = [V]::FindWindow('KBLayoutFixerSettings', [NullString]::Value); if (++$t -gt 40) { break } }
   if ($w -eq [IntPtr]::Zero) { $p = Get-Process KeyboardLayoutFixer -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1; if ($p) { $w = $p.MainWindowHandle } }
   if ($w -eq [IntPtr]::Zero) { Fail "fenêtre de réglages introuvable ($lg)" }
   [void][V]::Front($w); Start-Sleep 1

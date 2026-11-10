@@ -107,6 +107,8 @@ pub struct ClipState {
     /// sequence number when the application's copy was read (text or not)
     pub seq_cap: Option<u32>,
     pub captured: Option<String>,
+    /// 1.8.6: the text came from the user's own selection (not Shift+Home)
+    pub user_selected: bool,
     /// owner window of the application's copy (0 = none)
     pub owner_cap: Option<usize>,
     /// formats of the application's copy
@@ -177,7 +179,11 @@ pub trait Host {
     }
     /// 1.8.5: Ctrl+V was just sent with `after` replacing `before` (the clipboard path): a quick
     /// next F10 may toggle it back without the clipboard.
-    fn pasted(&self, _before: &str, _after: &str) {}
+    fn pasted(&self, _before: &str, _after: &str, _selected: bool) {}
+    /// 1.8.6: the text just pasted is selected again (Shift+Left `n` times).
+    fn send_select_back(&self, _n: usize) -> bool {
+        false
+    }
     /// 1.8.5: Shift+Up then Shift+Home (the selection grows by one DISPLAYED line, in a field that
     /// wraps a long line); false = not sent / not supported.
     fn send_extend_up(&self) -> bool {
@@ -565,6 +571,7 @@ fn convert_window(
             Copy::Text(t) => {
                 let suspect = policy::line_copy_suspect(&t, selection, &info.focus_class);
                 st.captured = Some(t);
+                st.user_selected = true;
                 if suspect {
                     // VS Code / Excel copied the whole line, cell or range: pasting would
                     // duplicate it, or replace Excel formulas by text
@@ -680,13 +687,20 @@ fn convert_window(
         return Outcome::say(Msg::KeysBlocked, "Ctrl+V not sent, NOT pasted");
     }
     if s.action == Action::Layout {
-        host.pasted(text, &out);
+        host.pasted(text, &out, false);
     }
+    // 1.8.6: a text the user had selected is selected again after the fix, once the paste is
+    // done (after the wait below): short, one line, left to right only (Shift+Left goes the other
+    // way in Hebrew text), same window and field
+    let reselect = st.user_selected && s.action == Action::Layout && out.chars().count() <= 100 && !out.chars().any(char::is_control) && crate::replace::simple_text(&out) && !contains_hebrew(&out) && !out.chars().any(|c| ('\u{0590}'..='\u{08FF}').contains(&c));
     if s.turn_off_caps_lock && (s.action == Action::Case || (s.action == Action::Layout && caps_fixed_to_hebrew(text, &out))) {
         host.caps_lock_off();
     }
     trace.mark(Step::WaitBeforeRestore, host.now_ms());
     host.pause(s.paste_delay_ms.max(0) as u64); // a slow PC must have read the clipboard before restore
+    if reselect && host.foreground() == target && host.focus_unchanged() && !host.user_moving() {
+        host.send_select_back(out.chars().count());
+    }
     Outcome { preview: Some((text.to_string(), out)), ..Outcome::say(Msg::Converted, format!("Ctrl+V sent with {n} converted characters")) }
 }
 
@@ -1227,6 +1241,10 @@ mod tests {
         }
         fn send_collapse(&self) -> bool {
             self.ev("collapse");
+            true
+        }
+        fn send_select_back(&self, n: usize) -> bool {
+            self.ev(&format!("select-back-{n}"));
             true
         }
         fn send_shrink_down(&self) -> bool {
@@ -2050,6 +2068,27 @@ mod tests {
         s.require_selection = true;
         let o = run(&mut m, &s);
         assert!(m.c_replaced.borrow().is_none(), "RequireSelection changed an unselected console command: {}", o.log);
+    }
+
+    // ---- 1.8.6 : the user's selection is selected again after the fix ----
+
+    #[test]
+    fn selection_kept_after_f10() {
+        let mut m = Mock::new();
+        *m.selected.borrow_mut() = Some("שלום".into());
+        run(&mut m, &settings());
+        assert!(m.happened("select-back-4"), "a selected word is selected again");
+        // a Hebrew result: Shift+Left would go the other way, never selected again
+        let mut m = Mock::new();
+        *m.selected.borrow_mut() = Some("akuo".into());
+        run(&mut m, &settings());
+        assert!(!m.events.borrow().iter().any(|e| e.starts_with("select-back")));
+        // without a selection (Shift+Home): nothing selected afterwards
+        let mut m = Mock::new();
+        *m.selected.borrow_mut() = None;
+        m.line = Some("akuo".into());
+        run(&mut m, &settings());
+        assert!(!m.events.borrow().iter().any(|e| e.starts_with("select-back")));
     }
 
     // ---- 1.8.5 : no selection = the whole paragraph, in a field that wraps ----

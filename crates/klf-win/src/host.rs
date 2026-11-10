@@ -201,8 +201,11 @@ impl Host for WinHost {
     fn wrong_words_only(&self, text: &str, map: &klf_core::layouts::KeyMap, replace_caps: bool) -> Option<String> {
         crate::typing::wrong_words_only(text, map, replace_caps)
     }
-    fn pasted(&self, before: &str, after: &str) {
-        crate::app::remember_paste(self.target.get() as usize, self.focus.get() as usize, before, after);
+    fn pasted(&self, before: &str, after: &str, selected: bool) {
+        crate::app::remember_paste(self.target.get() as usize, self.focus.get() as usize, before, after, selected);
+    }
+    fn send_select_back(&self, n: usize) -> bool {
+        input::select_back(n)
     }
     fn switch_language(&self, hwnd: usize, to_hebrew: bool) {
         self.lang_before.set(target::current_layout(h(hwnd)));

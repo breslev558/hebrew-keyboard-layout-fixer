@@ -38,14 +38,15 @@ $log = Join-Path $env:APPDATA 'KeyboardLayoutFixer\debug.log'
 $exe = Join-Path $env:LOCALAPPDATA 'Programs\KeyboardLayoutFixer\KeyboardLayoutFixer.exe'
 # the keyboard stays as it is after F10 (otherwise the next « akuo » would be typed in Hebrew)
 Get-Process KeyboardLayoutFixer -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep 1
-'{ "WelcomeDone": true, "ShowBubble": false, "SwitchLanguageAfterConvert": false, "PasteDelayMs": 100, "SettingsVersion": 4, "UiLanguage": "en" }' | Set-Content -Encoding UTF8 (Join-Path $env:APPDATA 'KeyboardLayoutFixer\settings.json')
+$reglages = '{ "WelcomeDone": true, "ShowBubble": false, "SwitchLanguageAfterConvert": false, "PasteDelayMs": 100, "SettingsVersion": 4, "UiLanguage": "en" }'
+$reglages | Set-Content -Encoding UTF8 (Join-Path $env:APPDATA 'KeyboardLayoutFixer\settings.json')
 Start-Process $exe; Start-Sleep 3
 $edge = @("${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe", "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $edge) { Write-Host "MANQUE : Edge introuvable sur cette machine, essai sauté"; exit 0 }
 $profil = Join-Path $env:TEMP 'klf-edge-profil'
 # the page title shows the text of the box (« T:akuo… »): read through the window title, never through
 # the clipboard (both reads came back empty in the 2nd 1.9.2 trial)
-$html = '<!doctype html><title>T:</title><body style="margin:0"><textarea id=t autofocus oninput="document.title=''T:''+this.value+'':F''" style="position:fixed;left:0;top:0;width:100%;height:100%;font-size:20px"></textarea></body>'
+$html = '<!doctype html><title>T::F</title><body style="margin:0"><textarea id=t autofocus oninput="document.title=''T:''+this.value+'':F''" style="position:fixed;left:0;top:0;width:100%;height:100%;font-size:20px"></textarea></body>'
 $page = 'data:text/html;base64,' + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($html))   # (avis Fable : # % " cassent une URL brute)
 $p = Start-Process -FilePath $edge -ArgumentList "--user-data-dir=`"$profil`"", '--inprivate', '--no-first-run', '--no-default-browser-check', '--disable-sync', '--new-window', $page -PassThru
 $h = [IntPtr]::Zero; $t = 0
@@ -66,6 +67,7 @@ Start-Sleep -Milliseconds 800
 
 function Lancer($chemin) {
   Get-Process KeyboardLayoutFixer -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep 1
+  $reglages | Set-Content -Encoding UTF8 (Join-Path $env:APPDATA 'KeyboardLayoutFixer\settings.json')   # same settings for each version (avis Fable)
   Start-Process $chemin; Start-Sleep 3
   if (-not (Get-Process KeyboardLayoutFixer -ErrorAction SilentlyContinue)) { Fail "le programme ne démarre pas ($chemin)" }
   [void][N]::Front($h); Start-Sleep -Milliseconds 500
@@ -90,12 +92,16 @@ function Mesure($version, $nom, [scriptblock]$avant, $attendu, $seuil) {
   # outside measure, same for both versions: from the F10 press to the end of the attempt (it includes
   # the 100 ms wait before the clipboard is put back)
   $ext = [int]((Heure $fin) - $appui).TotalMilliseconds
-  $exact = @(Get-Content $log) | Select-Object -Skip $n0 | Where-Object { $_ -match 'Timing: until paste (\d+) ms' } | Select-Object -Last 1
+  # the timing line may come just after the end line: waited for up to 2 s (avis Fable)
+  $exact = $null; $sw2 = [Diagnostics.Stopwatch]::StartNew()
+  do {
+    $exact = @(Get-Content $log) | Select-Object -Skip $n0 | Where-Object { $_ -match 'Timing: until paste (\d+) ms' } | Select-Object -Last 1
+    if (-not $exact) { Start-Sleep -Milliseconds 200 }
+  } while (-not $exact -and $sw2.ElapsedMilliseconds -lt 2000 -and -not $script:avant)
   $ms = if ($exact) { [int]([regex]::Match($exact, 'until paste (\d+) ms').Groups[1].Value) } else { $null }
   Start-Sleep 1
   $texte = Texte
   Write-Host "       fin : $(($fin -split '\] ', 2)[1])"
-  [N]::Key(0x23)   # End: no selection left for the next case
   $jusque = if ($null -ne $ms) { "$ms ms jusqu'au collage, " } else { '' }
   Write-Host "MESURE $version $nom : $jusque$ext ms en tout ; texte '$texte'"
   if ($exact) { Write-Host "       $(($exact -split 'Timing: ')[1])" }
@@ -113,8 +119,12 @@ function Mediane3($version, $nom, [scriptblock]$avant, $attendu, $seuil) {
   "OK    $version $nom : médiane $m ms"
 }
 $shalom = [string][char]0x05E9 + [char]0x05DC + [char]0x05D5 + [char]0x05DD
-$sans = { [System.Windows.Forms.SendKeys]::SendWait('^a'); [N]::Key(0x2E); [System.Windows.Forms.SendKeys]::SendWait('akuo') }
-$avec = { [System.Windows.Forms.SendKeys]::SendWait('^a'); [N]::Key(0x2E); [System.Windows.Forms.SendKeys]::SendWait('akuo'); Start-Sleep -Milliseconds 300; [System.Windows.Forms.SendKeys]::SendWait('^a') }
+# the box is emptied with Ctrl+A then Backspace (the Delete key sent by keybd_event did nothing in the
+# 3rd 1.9.2 trial: the texts piled up)
+$vider = { [System.Windows.Forms.SendKeys]::SendWait('^a'); Start-Sleep -Milliseconds 150; [System.Windows.Forms.SendKeys]::SendWait('{BACKSPACE}'); Start-Sleep -Milliseconds 300
+           if ((Texte) -ne '') { Fail "zone de texte pas vidée : '$(Texte)'" } }
+$sans = { & $vider; [System.Windows.Forms.SendKeys]::SendWait('akuo') }
+$avec = { & $vider; [System.Windows.Forms.SendKeys]::SendWait('akuo'); Start-Sleep -Milliseconds 300; [System.Windows.Forms.SendKeys]::SendWait('^a') }
 if ($env:GITHUB_STEP_SUMMARY) { @("", "### Vitesse de F10 dans Edge", "", "| Version | Cas | Jusqu'au collage | En tout (dont 100 ms avant la remise du presse-papiers) |", "|---|---|---|---|") | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY }
 # AVANT : la 1.9.1 publiée
 $ancien = Join-Path $env:TEMP 'klf-191\KeyboardLayoutFixer.exe'

@@ -203,6 +203,10 @@ fn note_foreground(hwnd: HWND) {
         return;
     }
     crate::indicator::soon();
+    // 1.9.2: Chrome, Edge, Electron: UI Automation made ready for F10 (see uia::warm_up)
+    if klf_core::policy::copies_nothing_without_selection(&class) {
+        crate::platform::uia::warm_up(hwnd as usize);
+    }
     let exe = target::exe_of(hwnd);
     if exe.is_empty() || SHELL_EXES.contains(&exe.as_str()) || exe == "keyboardlayoutfixer.exe" {
         return;
@@ -220,6 +224,12 @@ fn watch_foreground() {
     let h = unsafe { SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, null_mut(), Some(on_foreground), 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS) };
     if h.is_null() {
         log("Foreground window cannot be followed: the tray menu will not offer per-program rules");
+    }
+    // 1.9.2: the window already in front at start gets its UI Automation ready too
+    // SAFETY: no pointers.
+    let fg = unsafe { GetForegroundWindow() };
+    if !fg.is_null() && klf_core::policy::copies_nothing_without_selection(&sys::class_name(fg)) {
+        crate::platform::uia::warm_up(fg as usize);
     }
 }
 

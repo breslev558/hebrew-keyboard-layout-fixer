@@ -182,6 +182,18 @@ pub fn selection_empty(ms: u64) -> Option<bool> {
     rx.recv_timeout(std::time::Duration::from_millis(ms)).ok().flatten()
 }
 
+/// 1.9.2: a web page or an Electron app came to the front: a first question is asked now (answer
+/// dropped), so that the browser has its accessibility ready when F10 asks (its first answer comes
+/// too late or empty: 422 ms lost in the Windows test). Once per window.
+pub fn warm_up(hwnd: usize) {
+    static LAST: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    if LAST.swap(hwnd, std::sync::atomic::Ordering::Relaxed) == hwnd {
+        return;
+    }
+    let (tx, _rx) = channel();
+    send(Kind::SelectionEmpty, tx);
+}
+
 fn send(kind: Kind, reply: Sender<Option<bool>>) {
     let tx = TX.get_or_init(|| {
         let (tx, rx) = channel::<(Kind, Sender<Option<bool>>)>();

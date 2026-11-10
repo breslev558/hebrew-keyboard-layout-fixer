@@ -54,10 +54,13 @@ public static class A {
     var hc = new HIGHCONTRAST(); hc.cbSize = (uint)Marshal.SizeOf(typeof(HIGHCONTRAST)); hc.dwFlags = on ? 1u : 0u; hc.lpszDefaultScheme = on ? "High Contrast Black" : null;
     return SystemParametersInfo(0x0043, hc.cbSize, ref hc, 2);   // SPI_SETHIGHCONTRAST, told to the windows, NOT written to the profile
   }
-  [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint f);
+  [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int w, int ht, uint f);
 }
 '@
 $out = Join-Path (Get-Location) 'captures\audit'; New-Item -ItemType Directory -Force -Path $out | Out-Null
+# a bigger screen, so that the 200 % window fits (Windows Server cmdlet; the default is often 1024x768)
+try { Set-DisplayResolution -Width 1920 -Height 1080 -Force -ErrorAction Stop; Start-Sleep 3 } catch { Write-Host "écran : résolution non changée ($($_.Exception.Message))" }
+$sc = [Windows.Forms.Screen]::PrimaryScreen.Bounds; Write-Host "écran : $($sc.Width) x $($sc.Height)"
 $dir = Join-Path $env:APPDATA 'KeyboardLayoutFixer'
 $exe = Join-Path $env:LOCALAPPDATA 'Programs\KeyboardLayoutFixer\KeyboardLayoutFixer.exe'
 $manques = New-Object System.Collections.ArrayList
@@ -68,9 +71,9 @@ function Photo($hw, $nom) {
     if (($r.R - $r.L) -le 0 -or ($r.B - $r.T) -le 0) { Manque "taille nulle pour $nom"; return }
     $bmp = New-Object Drawing.Bitmap ($r.R - $r.L), ($r.B - $r.T)
     $g = [Drawing.Graphics]::FromImage($bmp)
-    # PrintWindow draws the whole window even if it goes past the screen (200 %); screen copy otherwise
-    $dc = $g.GetHdc(); $ok = [A]::PrintWindow($hw, $dc, 2); $g.ReleaseHdc($dc)
-    if (-not $ok) { $g.CopyFromScreen($r.L, $r.T, 0, 0, $bmp.Size) }
+    # what is really on the screen (PrintWindow drew Hebrew windows mirrored, 1.9.0 trial); CaptureBlt
+    # includes the layered windows (the bubbles came out black without it)
+    $g.CopyFromScreen($r.L, $r.T, 0, 0, $bmp.Size, [Drawing.CopyPixelOperation]::SourceCopy -bor [Drawing.CopyPixelOperation]::CaptureBlt)
     $g.Dispose()
     $bmp.Save((Join-Path $out $nom), [Drawing.Imaging.ImageFormat]::Png); $bmp.Dispose()
     Write-Host "OK    $nom"
@@ -96,6 +99,7 @@ function Reglages($lg, $suffixe, $pages) {
   Start-Process -FilePath $exe -ArgumentList '--settings' | Out-Null
   $w = Attendre { [A]::FindWindow('KBLayoutFixerSettings', [NullString]::Value) } 10000
   if ($w -eq [IntPtr]::Zero) { Manque "réglages ($lg $suffixe)"; return [IntPtr]::Zero }
+  [void][A]::SetWindowPos($w, [IntPtr]::Zero, 0, 0, 0, 0, 0x0015)   # top left corner (SWP_NOSIZE|NOZORDER|NOACTIVATE): all of it on the screen
   [void][A]::Front($w); Start-Sleep -Milliseconds 700
   $tc = [A]::GetDlgItem($w, 240)
   foreach ($tab in $pages) {
@@ -193,7 +197,7 @@ if ($un) {
     Start-Sleep 2
   }
   Start-Sleep 3
-  & taskkill.exe /T /F /PID $pu.Id 2>&1 | Out-Null   # the uninstaller and the copy it started, only them
+  cmd.exe /c "taskkill /T /F /PID $($pu.Id) >nul 2>&1"   # the uninstaller and the copy it started, only them (already gone = fine)
 } else { Manque "désinstalleur introuvable" }
 
 "Captures de l'audit : $((Get-ChildItem $out -Filter *.png).Count) ; manques : $($manques.Count)"

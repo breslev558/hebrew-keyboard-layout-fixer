@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.9.1 (November 2026)
+- The F10 bubble showed the preview cut at both ends ("kuo → לום" for "akuo → שלום"), seen in the visual test: it is now measured in the same reading order as it is drawn, with a margin.
+- Settings, Diagnostics page: the explanation of the last attempt is in the language of the interface (it was always French), and the copied information is in English for the Hebrew and English interfaces (French for French).
+- Download page: the program alone (KeyboardLayoutFixer.exe) is offered next to the installer, for antivirus programs that wrongly flag the small installer.
+
 ## 1.9.0 (November 2026)
 - **Remote desktop**: while a remote desktop or virtual machine window is in front (Remote Desktop, AnyDesk, TeamViewer, RustDesk, VNC, Parsec, Hyper-V), F10 and F9 are left to it, so that the copy running on the other PC fixes the text. Before, F10 was taken here and nothing happened on either side.
 - Fix while typing: in a one-line Windows text box (a form field), **Tab always moves to the next field**; it never accepts a proposal there.

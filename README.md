@@ -20,6 +20,7 @@ A small, free Windows app that fixes text typed with the wrong keyboard layout (
 
 <p align="center"><sub>
 KeyboardLayoutFixer-Setup.exe, about 0.5 MB, for Windows 10 and 11 (x64)<br>
+Antivirus blocks the installer? Take the <a href="https://github.com/breslev558/hebrew-keyboard-layout-fixer/releases/latest/download/KeyboardLayoutFixer.exe"><b>program alone</b></a> (no installation needed)<br>
 <a href="https://github.com/breslev558/hebrew-keyboard-layout-fixer/releases/latest/download/KeyboardLayoutFixer-Setup-arm64.exe">ARM64 installer</a> (Snapdragon, Copilot+ PCs) ·
 <a href="https://github.com/breslev558/hebrew-keyboard-layout-fixer/releases/latest/download/KeyboardLayoutFixer.zip">zip</a> ·
 <a href="https://github.com/breslev558/hebrew-keyboard-layout-fixer/releases/latest">all release files</a> ·
@@ -60,6 +61,7 @@ To update by hand, run a newer installer over the old one: the running copy is c
 
 - **SHA-256**: in PowerShell, run `Get-FileHash KeyboardLayoutFixer-Setup.exe` and compare the result with the `.sha256` file on the [release page](https://github.com/breslev558/hebrew-keyboard-layout-fixer/releases/latest).
 - **Build provenance**: the x64 files are built by GitHub Actions from this repository, with a provenance attestation. With the GitHub CLI: `gh attestation verify KeyboardLayoutFixer-Setup.exe --repo breslev558/hebrew-keyboard-layout-fixer`.
+- **Program alone**: download [KeyboardLayoutFixer.exe](https://github.com/breslev558/hebrew-keyboard-layout-fixer/releases/latest/download/KeyboardLayoutFixer.exe), put it in a folder of your choice (for example `%LOCALAPPDATA%\Programs\KeyboardLayoutFixer`) and double-click it. To start it with Windows, tick **Start with Windows** in its settings. Some antivirus programs wrongly flag the small installer; the program itself has never been flagged.
 - **Without the installer**: download the [zip](https://github.com/breslev558/hebrew-keyboard-layout-fixer/releases/latest/download/KeyboardLayoutFixer.zip) (x64), extract it and double-click **Installer.cmd**.
 - **Where it goes**: the program in `%LOCALAPPDATA%\Programs\KeyboardLayoutFixer`, your settings in `%APPDATA%\KeyboardLayoutFixer`.
 
@@ -234,6 +236,7 @@ Releases are built by [`.github/workflows/release.yml`](.github/workflows/releas
 **Vous avez tapé `akuo` au lieu de `שלום` ?** Sélectionnez le texte et appuyez sur **F10**. Sans sélection, le texte est corrigé du curseur jusqu'au début de la ligne. Un second appui dans les 5 secondes remet le texte d'origine. **F9** corrige un texte tapé avec Verr. Maj activé. Hébreu ⇄ anglais, ou hébreu ⇄ français AZERTY. Gratuit, pour Windows 10 et 11.
 
 - **Installation** (sans droits d'administrateur) : [téléchargez **KeyboardLayoutFixer-Setup.exe**](https://github.com/breslev558/hebrew-keyboard-layout-fixer/releases/latest/download/KeyboardLayoutFixer-Setup.exe) (PC Windows sur ARM : [version ARM64](https://github.com/breslev558/hebrew-keyboard-layout-fixer/releases/latest/download/KeyboardLayoutFixer-Setup-arm64.exe)) et double-cliquez dessus. Si Windows affiche « Windows a protégé votre ordinateur » (le programme n'est pas encore signé avec un certificat reconnu) : **Informations complémentaires**, puis **Exécuter quand même**.
+- **Si votre antivirus bloque l'installateur** : prenez le [**programme seul**](https://github.com/breslev558/hebrew-keyboard-layout-fixer/releases/latest/download/KeyboardLayoutFixer.exe) (KeyboardLayoutFixer.exe), rangez-le dans un dossier de votre choix et double-cliquez dessus ; cochez **Démarrer avec Windows** dans ses paramètres. Le programme lui-même n'a jamais été signalé.
 - **Paramètres** : cliquez sur l'icône près de l'horloge. Clic droit pour le menu : pause, désactivation dans un programme, options.
 - **Options** (désactivées par défaut, dans le menu de l'icône) :
   - **Proposer la correction pendant la frappe (Tab)** : une bulle propose la correction, Tab l'accepte. Le programme apprend de vos corrections (**Mes mots…**). Jamais dans un champ de mot de passe, y compris sur les pages web.
@@ -251,6 +254,7 @@ Releases are built by [`.github/workflows/release.yml`](.github/workflows/releas
 **הקלדתם `akuo` במקום `שלום`?** סמנו את הטקסט ולחצו **F10**. בלי סימון, הטקסט מתוקן מהסמן ועד תחילת השורה. לחיצה נוספת תוך 5 שניות מחזירה את הטקסט המקורי. **F9** מתקן טקסט שהוקלד כש-Caps Lock היה מופעל. עברית ⇄ אנגלית, או עברית ⇄ צרפתית AZERTY. חינם, למערכות Windows 10 ו-Windows 11.
 
 - **התקנה** (בלי הרשאות מנהל): [הורידו את **KeyboardLayoutFixer-Setup.exe**](https://github.com/breslev558/hebrew-keyboard-layout-fixer/releases/latest/download/KeyboardLayoutFixer-Setup.exe) ולחצו עליו פעמיים. אם מופיעה ההודעה "Windows הגן על המחשב שלך" (התוכנה עדיין לא חתומה בתעודה מוכרת), לחצו **מידע נוסף** ואז **הפעל בכל זאת**.
+- **אם האנטי-וירוס חוסם את קובץ ההתקנה**: הורידו את [**התוכנה לבדה**](https://github.com/breslev558/hebrew-keyboard-layout-fixer/releases/latest/download/KeyboardLayoutFixer.exe) (KeyboardLayoutFixer.exe), שמרו אותה בתיקייה לבחירתכם ולחצו עליה פעמיים; סמנו **הפעל בעת הכניסה ל-Windows** בהגדרות. התוכנה עצמה מעולם לא סומנה כחשודה.
 - **הגדרות**: לחיצה על הסמל ליד השעון. לחיצה ימנית פותחת את התפריט: השהיה, כיבוי בתוכנה מסוימת, אפשרויות.
 - **אפשרויות** (כבויות כברירת מחדל, בתפריט הסמל):
   - **הצע תיקון בזמן ההקלדה (Tab)**: בועה קטנה מציעה את התיקון, ומקש Tab מאשר אותו. התוכנה לומדת מהתיקונים שלכם (**המילים שלי…**). לעולם לא בשדות סיסמה, גם לא בדפי אינטרנט.

@@ -111,7 +111,8 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 SetBkMode(dc, TRANSPARENT as i32);
                 SetTextColor(dc, if hc { GetSysColor(COLOR_INFOTEXT) } else { rgb(255, 255, 255) });
                 let old = SelectObject(dc, FONT.with(|f| f.get()));
-                let mut flags = DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX;
+                // 1.9.1: too wide anyway = an ellipsis at the end, never cut at both ends
+                let mut flags = DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS;
                 if RTL.with(|r| r.get()) {
                     flags |= DT_RTLREADING;
                 }
@@ -224,7 +225,14 @@ fn show_at(pos: u32, message: &str, rtl: bool, caret: Option<(i32, i32)>, target
         // SAFETY: previous font, no longer selected anywhere.
         unsafe { DeleteObject(old) };
     }
-    TEXT.with(|t| *t.borrow_mut() = wide(message));
+    // 1.9.1: the « before → after » preview is drawn WITHOUT its direction marks and always left to
+    // right: the marks were the only difference with the messages that fit, and the preview came out
+    // cut at both ends (« kuo → לום », visual test of 1.9.0). In a left-to-right line,
+    // « שלום → akuo » and « akuo → שלום » keep their order without them.
+    let preview = message.contains('\u{2192}');
+    let shown: String = if preview { message.chars().filter(|c| !klf_core::bubble::is_direction_mark(*c)).collect() } else { message.to_string() };
+    let rtl = rtl && !preview;
+    TEXT.with(|t| *t.borrow_mut() = wide(&shown));
     RTL.with(|r| r.set(rtl));
     OK.with(|c| c.set(ok));
     ELAPSED.with(|c| c.set(0));
@@ -235,17 +243,21 @@ fn show_at(pos: u32, message: &str, rtl: bool, caret: Option<(i32, i32)>, target
         let t = t.borrow();
         // SAFETY: memory DC only for measuring; released.
         unsafe {
-            let dc = GetDC(null_mut());
+            let dc = GetDC(hwnd); // 1.9.1: the bubble's own DC, the one it is drawn on
             let oldf = SelectObject(dc, FONT.with(|f| f.get()));
             let mut rc = RECT { left: 0, top: 0, right: 0, bottom: 0 };
-            DrawTextW(dc, t.as_ptr(), (t.len() as i32) - 1, &mut rc, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX);
+            // 1.9.1: measured with the same reading order as it is drawn (the 1.9.0 visual test showed
+            // the F10 preview cut at both ends: « kuo → לום » for « akuo → שלום »)
+            let rtl_flag = if rtl { DT_RTLREADING } else { 0 };
+            DrawTextW(dc, t.as_ptr(), (t.len() as i32) - 1, &mut rc, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX | rtl_flag);
             SelectObject(dc, oldf);
-            ReleaseDC(null_mut(), dc);
+            ReleaseDC(hwnd, dc);
             (rc.right - rc.left, rc.bottom - rc.top)
         }
     });
     let sc = |v: i32| v * dpi as i32 / 96;
-    let (w, h) = (tw + 2 * sc(16), th + 2 * sc(8));
+    // 1.9.1: a small margin more (mixed Hebrew / Latin text)
+    let (w, h) = (tw + sc(8) + 2 * sc(16), th + 2 * sc(8));
     let wa = work_area_of(mon);
     let (x, y) = klf_core::bubble::place(pos, caret, (w, h), (wa.left, wa.top, wa.right, wa.bottom), sc(12), sc(6), sc(24));
     // SAFETY: our window; no activation anywhere.

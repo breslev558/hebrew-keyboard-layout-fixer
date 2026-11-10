@@ -11,6 +11,7 @@ pub mod policy;
 pub mod profile;
 pub mod school;
 pub mod settings;
+pub mod sound;
 pub mod replace;
 pub mod report;
 pub mod typing;

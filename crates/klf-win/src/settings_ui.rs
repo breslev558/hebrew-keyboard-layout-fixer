@@ -511,7 +511,7 @@ fn layouts_line(l: Lang) -> String {
         .iter()
         .map(|h| {
             let ok = !matches!(klf_core::layouts::classify_hkl(*h), klf_core::layouts::LayoutKind::Unsupported);
-            format!("{}{}", klf_core::layouts::hkl_name(*h), if ok { " ✓" } else { " ✗" })
+            format!("{}{}", klf_core::layouts::hkl_name_in(*h, l), if ok { " ✓" } else { " ✗" })
         })
         .collect();
     text(l, Msg::LayoutsLine).replace("{list}", &list.join(", "))
@@ -859,6 +859,10 @@ fn on_import() {
     new.typing_suggestions = old.typing_suggestions; // watching the keys is the user's own choice
     new.double_shift_convert = old.double_shift_convert;
     new.typing_sound = old.typing_sound;
+    new.f10_only_wrong_words = old.f10_only_wrong_words; // downloads the word lists: the user's choice
+    new.ctrl_tap_language = old.ctrl_tap_language; // these watch the keys: the user's own choices
+    new.messenger_guard = old.messenger_guard;
+    new.one_language_programs = old.one_language_programs;
     new.text_replacements = old.text_replacements; // also watches the keys: the user's own choice
     new.typing_skip_code_editors = old.typing_skip_code_editors;
     let diff = klf_core::profile::differences(&old, &new, &app::locked());
@@ -1171,6 +1175,15 @@ pub fn open() {
         create("BUTTON", "", BS_PUSHBUTTON | WS_TABSTOP, 0, ID_ABOUT);
         create("BUTTON", "", BS_DEFPUSHBUTTON | WS_TABSTOP, 0, ID_SAVE);
         create("BUTTON", "", BS_PUSHBUTTON | WS_TABSTOP, 0, ID_CLOSE);
+        // 1.8.5: technical text (diagnostic, program names) always left to right, even in the
+        // mirrored Hebrew window: the mirroring inherited by these boxes is taken off
+        if l.is_rtl() {
+            for id in [ID_DIAG_TEXT, ID_EXCLUDED, ID_LIMIT, ID_DELAY] {
+                let h = GetDlgItem(hwnd, id);
+                let ex = GetWindowLongPtrW(h, GWL_EXSTYLE) as u32;
+                SetWindowLongPtrW(h, GWL_EXSTYLE, (ex & !(WS_EX_LAYOUTRTL | WS_EX_RTLREADING | WS_EX_RIGHT | WS_EX_LEFTSCROLLBAR)) as isize);
+            }
+        }
         // the tab control last: at the bottom of the Z order, under the page controls (clicks
         // reach them), and last in the Tab order (Ctrl+Tab changes the page from anywhere)
         create("SysTabControl32", "", WS_TABSTOP | WS_CLIPSIBLINGS, 0, ID_TAB);

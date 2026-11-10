@@ -76,16 +76,28 @@ Start-Sleep 1
 
 # 4. lecture du texte du Bloc-notes
 $txt = Texte
-Stop-Process -Id $n.Id -Force -ErrorAction SilentlyContinue
 "Texte obtenu : '$txt'"
-if ($txt -ne ([string][char]0x05E9 + [char]0x05DC + [char]0x05D5 + [char]0x05DD)) { Fail "attendu « שלום »" }
+if ($txt -ne ([string][char]0x05E9 + [char]0x05DC + [char]0x05D5 + [char]0x05DD)) { Stop-Process -Id $n.Id -Force -ErrorAction SilentlyContinue; Fail "attendu « שלום »" }
 "OK    akuo + F10 = shalom (bout en bout), en $ms ms"
+
+# 5. (1.8.5) F10 répété vite : 5 appuis à 150 ms, chacun pris en compte tout de suite (aller-retour)
+#    après le 1er F10 (texte = שלום) : 5 appuis de plus = nombre impair -> « akuo »
+Start-Sleep 1
+$sw2 = [Diagnostics.Stopwatch]::StartNew()
+for ($i = 0; $i -lt 5; $i++) { [W]::Key(0x79); Start-Sleep -Milliseconds 150 }
+while ($sw2.ElapsedMilliseconds -lt 3000 -and (Texte) -ne 'akuo') { Start-Sleep -Milliseconds 20 }
+$ms2 = $sw2.ElapsedMilliseconds
+$txt2 = Texte
+Stop-Process -Id $n.Id -Force -ErrorAction SilentlyContinue
+"Texte après 5 F10 rapides : '$txt2'"
+if ($txt2 -ne 'akuo') { Fail "5 F10 rapides : attendu « akuo » (aller-retour à chaque appui)" }
+"OK    5 F10 à 150 ms : chaque appui pris en compte, en $ms2 ms"
 $pr = Get-Process KeyboardLayoutFixer -ErrorAction SilentlyContinue | Select-Object -First 1
 if ($pr) {
   $ws = [math]::Round($pr.WorkingSet64 / 1MB, 1); $pv = [math]::Round($pr.PrivateMemorySize64 / 1MB, 1); $cpu = [math]::Round($pr.TotalProcessorTime.TotalMilliseconds)
   "MESURE mémoire de travail $ws Mo ; mémoire privée $pv Mo ; processeur depuis le démarrage $cpu ms ; correction F10 $ms ms"
   if ($env:GITHUB_STEP_SUMMARY) {
-    @("### Mesures (Windows, machine GitHub)", "", "| Mesure | Valeur |", "|---|---|", "| Correction F10 (akuo -> shalom), de la touche au texte corrigé | $ms ms |", "| Mémoire de travail | $ws Mo |", "| Mémoire privée | $pv Mo |", "| Temps processeur depuis le démarrage | $cpu ms |") | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+    @("### Mesures (Windows, machine GitHub)", "", "| Mesure | Valeur |", "|---|---|", "| Correction F10 (akuo -> shalom), de la touche au texte corrigé | $ms ms |", "| 5 F10 à 150 ms (aller-retour), jusqu au texte final | $ms2 ms |", "| Mémoire de travail | $ws Mo |", "| Mémoire privée | $pv Mo |", "| Temps processeur depuis le démarrage | $cpu ms |") | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
   }
 }
 exit 0

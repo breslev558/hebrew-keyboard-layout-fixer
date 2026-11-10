@@ -100,7 +100,7 @@ pub fn choose(active: Option<u32>) -> Choice {
     let kind = |h: u32| -> LayoutKind {
         match classify_hkl(h) {
             LayoutKind::Unsupported => match read_layout(h) {
-                Some(t) if same_hebrew_letters(&t) => LayoutKind::HebrewStandard,
+                Some(t) if same_hebrew_letters(&t) || hebrew_variant_ok(h, &t) => LayoutKind::HebrewStandard,
                 Some(t) if is_latin_table(&t) => LayoutKind::Latin(LatinKind::Us),
                 _ => LayoutKind::Unsupported,
             },
@@ -148,9 +148,29 @@ pub fn choose(active: Option<u32>) -> Choice {
                 _ => Choice::Map(klf_core::convert::us_map(), latin_hkl),
             }
         }
+        // 1.8.5: a Hebrew variant whose keys differ from the classic Hebrew layout (Hebrew
+        // Standard 2018, 0003040D: Q, W, comma, period, slash, apostrophe...): its own table
+        _ if hebrew_layout().and_then(|h| read_layout(h).map(|t| (h, t))).is_some_and(|(h, t)| h != 0x040D_040D && !same_unshifted(&t, &klf_core::layouts::reference::hebrew())) => {
+            let he = hebrew_layout().and_then(read_layout).unwrap_or_else(klf_core::layouts::reference::hebrew);
+            match build_keymap(LatinKind::Us, &klf_core::layouts::reference::us(), &he) {
+                Ok(m) => Choice::Map(m, latin_hkl),
+                Err(_) => Choice::Map(klf_core::convert::us_map(), latin_hkl),
+            }
+        }
         // US, or a Latin layout with the US letters (UK, US-International...): the fixed US table
         _ => Choice::Map(klf_core::convert::us_map(), latin_hkl),
     }
+}
+
+/// 1.8.5: a Hebrew-language layout (0x040D) whose 27 letters each have their own key, wherever
+/// they are: it converts with its own table.
+fn hebrew_variant_ok(hkl: u32, t: &[KeyChar]) -> bool {
+    hkl & 0xFFFF == 0x040D && build_keymap(LatinKind::Us, &klf_core::layouts::reference::us(), t).is_ok()
+}
+
+/// The same character on every key the two tables share.
+fn same_unshifted(a: &[KeyChar], b: &[KeyChar]) -> bool {
+    a.iter().all(|k| b.iter().find(|x| x.sc == k.sc).is_none_or(|x| x.ch == k.ch))
 }
 
 /// The standard Hebrew layout, if installed.
@@ -159,7 +179,7 @@ pub fn hebrew_layout() -> Option<u32> {
     installed.iter().copied().find(|h| classify_hkl(*h) == LayoutKind::HebrewStandard)
         // 1.8.2: only a variant installed ("Hebrew (Standard)" SI-1452, 0002040D): the keyboard
         // must still switch to it after a conversion (before, it stayed on English)
-        .or_else(|| installed.iter().copied().find(|h| h & 0xFFFF == 0x040D && read_layout(*h).is_some_and(|t| klf_core::layouts::same_hebrew_letters(&t))))
+        .or_else(|| installed.iter().copied().find(|h| h & 0xFFFF == 0x040D && read_layout(*h).is_some_and(|t| klf_core::layouts::same_hebrew_letters(&t) || hebrew_variant_ok(*h, &t))))
 }
 
 /// Asks the window to switch to an installed layout (WM_INPUTLANGCHANGEREQUEST).

@@ -168,6 +168,20 @@ pub struct AppSettings {
     /// 1.8.1: two quick taps on Shift convert like F10 (public install only, off by default)
     #[serde(rename = "DoubleShiftConvert", deserialize_with = "de_bool_false")]
     pub double_shift_convert: bool,
+    /// 1.8.5: F10 converts only the words typed on the wrong layout (word lists needed: public
+    /// version; off by default)
+    #[serde(rename = "F10OnlyWrongWords", deserialize_with = "de_bool_false")]
+    pub f10_only_wrong_words: bool,
+    /// 1.8.5 (public, off by default): left Ctrl alone = English, right Ctrl alone = Hebrew
+    #[serde(rename = "CtrlTapLanguage", deserialize_with = "de_bool_false")]
+    pub ctrl_tap_language: bool,
+    /// 1.8.5 (public, off by default): a first Enter held back in chat programs when the whole
+    /// sentence is in the wrong language
+    #[serde(rename = "MessengerGuard", deserialize_with = "de_bool_false")]
+    pub messenger_guard: bool,
+    /// 1.8.5 (public, off by default): one-language programs (terminals) get their keyboard
+    #[serde(rename = "OneLanguagePrograms", deserialize_with = "de_bool_false")]
+    pub one_language_programs: bool,
     /// 1.8.2: a short Windows sound when a word is fixed while typing (off by default)
     #[serde(rename = "TypingSound", deserialize_with = "de_bool_false")]
     pub typing_sound: bool,
@@ -295,6 +309,10 @@ impl Default for AppSettings {
             typing_suggestions: false,
             typing_skip_code_editors: true,
             double_shift_convert: false,
+            f10_only_wrong_words: false,
+            ctrl_tap_language: false,
+            messenger_guard: false,
+            one_language_programs: false,
             typing_sound: false,
             text_replacements: false,
             update_skip_tag: String::new(),

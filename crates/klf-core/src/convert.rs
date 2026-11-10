@@ -151,6 +151,8 @@ mod tests {
     #[test]
     fn same_results_as_csharp_tests() {
         assert_eq!(t("akuo"), "שלום");
+        // 1.8.5: digits and a final letter typed for a period: "1ץ8" was "1.8"
+        assert_eq!(t("1ץ8"), "1.8");
         assert_eq!(t("שלום"), "akuo");
         assert_eq!(t("hello"), "יקךךם");
         assert_eq!(convert("Hello", MixedTextMode::ToggleAll, false), "Hקךךם");

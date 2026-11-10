@@ -198,6 +198,12 @@ impl Host for WinHost {
     fn send_paste(&self) -> bool {
         input::paste()
     }
+    fn wrong_words_only(&self, text: &str, map: &klf_core::layouts::KeyMap, replace_caps: bool) -> Option<String> {
+        crate::typing::wrong_words_only(text, map, replace_caps)
+    }
+    fn pasted(&self, before: &str, after: &str) {
+        crate::app::remember_paste(self.target.get() as usize, self.focus.get() as usize, before, after);
+    }
     fn switch_language(&self, hwnd: usize, to_hebrew: bool) {
         self.lang_before.set(target::current_layout(h(hwnd)));
         // the exact layouts of the conversion: standard Hebrew, or the Latin layout used
@@ -208,6 +214,18 @@ impl Host for WinHost {
     }
     fn modifiers_down(&self) -> bool {
         input::modifiers_down()
+    }
+    fn send_extend_up(&self) -> bool {
+        input::select_up_to_line_start()
+    }
+    fn send_shrink_down(&self) -> bool {
+        input::select_down()
+    }
+    fn send_collapse(&self) -> bool {
+        input::collapse_right()
+    }
+    fn user_activity(&self) -> Option<(u32, u32)> {
+        input::activity_watched().then(input::user_activity)
     }
     fn send_select_last(&self, n: usize) -> bool {
         input::select_last(n)

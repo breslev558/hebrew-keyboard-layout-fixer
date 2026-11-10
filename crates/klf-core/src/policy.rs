@@ -182,6 +182,21 @@ pub fn caps_lock_press_needed(
     was_on_at_hotkey == Some(true) && on_now == Some(true) && untouched
 }
 
+/// 1.8.5: the fields where F10 without a selection may grow to the whole paragraph: web pages and
+/// Electron apps (their content area), Word, plain multi-line controls; never code editors,
+/// spreadsheets, terminals, address bars or lists (Up does something else there).
+pub fn paragraph_field(focus_class: &str, exe: &str) -> bool {
+    let c = focus_class.to_ascii_lowercase();
+    let known = c == "chrome_renderwidgethostwnd" || c == "chrome_renderwidgethosthwnd" || c == "edit" || c.starts_with("richedit") || c == "_wwg" || c == "mozillawindowclass";
+    known && !no_paragraph_extension(exe) && !crate::typing::is_code_editor(exe)
+}
+
+/// 1.8.5: programs where F10 without a selection never extends to the whole paragraph (Shift+Up
+/// would leave the cell being edited in Excel, or do something else in a terminal).
+pub fn no_paragraph_extension(exe: &str) -> bool {
+    matches!(exe.to_ascii_lowercase().as_str(), "excel.exe" | "scalc.exe" | "soffice.bin" | "windowsterminal.exe" | "wt.exe" | "conhost.exe" | "cmd.exe" | "powershell.exe" | "pwsh.exe" | "mintty.exe" | "putty.exe")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -262,3 +277,4 @@ mod tests {
         assert!(!caps_lock_press_needed(Some(true), Some(true), c, None));
     }
 }
+

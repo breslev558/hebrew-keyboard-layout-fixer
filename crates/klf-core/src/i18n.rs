@@ -170,6 +170,15 @@ pub enum Msg {
     TypingWordsHelp,
     MenuDoubleShift,
     MenuTypingSound,
+    MenuCtrlTap,
+    MenuMessengerGuard,
+    MessengerWarning,
+    MenuOneLanguage,
+    MenuOneLanguageFile,
+    OneLanguageHelp,
+    TypingRestored,
+    HookLost,
+    MenuF10WrongWords,
     DormantFullscreen,
     DormantExcluded,
     DormantCodeEditor,
@@ -189,7 +198,7 @@ pub const ALL_MSGS: &[Msg] = &[
     Msg::ButtonResume, Msg::LabelHotkey, Msg::LabelDirection, Msg::DirectionAuto, Msg::DirectionToHebrew,
     Msg::DirectionToEnglish, Msg::LabelTry, Msg::LabelResult, Msg::CheckSwitchLanguage, Msg::CheckBubble, Msg::BubbleTop, Msg::BubbleBottom, Msg::BubbleCaret,
     Msg::CheckSound, Msg::CheckConsole, Msg::CheckAutostart, Msg::AutostartManaged, Msg::LabelLanguage,
-    Msg::LanguageAuto, Msg::ButtonSave, Msg::ButtonClose, Msg::ButtonAbout, Msg::HotkeyInvalid, Msg::SaveFailed, Msg::AutostartFailed, Msg::AboutText, Msg::IndicatorCapsOn, Msg::IndicatorCapsOff, Msg::CheckIndicator, Msg::SchoolManaged, Msg::ButtonExport, Msg::ButtonImport, Msg::ButtonUndoImport, Msg::ImportConfirm, Msg::ImportNothing, Msg::ImportFailed, Msg::ImportTooBig, Msg::ImportNotJson, Msg::ImportUnknownFormat, Msg::ImportNewerFormat, Msg::ImportUnreadable, Msg::MenuRestoreClipboard, Msg::MenuCheckUpdates, Msg::MenuPreview, Msg::WelcomeTitle, Msg::WelcomeText, Msg::WelcomeTry, Msg::WelcomeClose, Msg::WelcomeNoMore, Msg::MenuInstallUpdate, Msg::UpdateAvailable, Msg::UpdateInstalling, Msg::UpdateFailed, Msg::ClipboardRestoredLater, Msg::ClipboardNotRestoredNewCopy, Msg::ImportDone, Msg::ExportDone, Msg::UndoConfirm, Msg::UndoNone, Msg::CheckLastWord, Msg::TabSimple, Msg::TabAdvanced, Msg::TabDiagnostic, Msg::LabelHotkeyLayout, Msg::LabelHotkeyCase, Msg::LabelWorkshop, Msg::WorkFollow, Msg::WorkToLatin, Msg::WorkToHebrew, Msg::WorkCase, Msg::ButtonCopyResult, Msg::LabelText, Msg::CheckCareful, Msg::CheckCapsOff, Msg::LabelLimit, Msg::LabelDelay, Msg::LabelExcluded, Msg::NumberInvalid, Msg::DiagNone, Msg::DiagLast, Msg::ButtonCopyDiag, Msg::ButtonRefresh, Msg::DiagCopied, Msg::CopyFailed, Msg::LayoutsLine, Msg::MenuReports, Msg::MenuReportProblem, Msg::MenuSendReport, Msg::MenuReportAlways, Msg::MenuReportNever, Msg::ReportAskTitle, Msg::ReportAskText, Msg::ReportSent, Msg::ReportFailed, Msg::ReportDialogText, Msg::ReportPreviewLabel, Msg::ReportSend, Msg::ReportCancel, Msg::MenuTyping, Msg::TypingReady, Msg::TypingFailed, Msg::MenuTypingWords, Msg::TypingUndone, Msg::TypingWordsHelp, Msg::MenuDoubleShift, Msg::MenuTypingSound, Msg::DormantFullscreen, Msg::DormantExcluded, Msg::DormantCodeEditor, Msg::DormantSensitive, Msg::MenuReplacements, Msg::MenuReplacementsFile, Msg::ReplacementsHelp,
+    Msg::LanguageAuto, Msg::ButtonSave, Msg::ButtonClose, Msg::ButtonAbout, Msg::HotkeyInvalid, Msg::SaveFailed, Msg::AutostartFailed, Msg::AboutText, Msg::IndicatorCapsOn, Msg::IndicatorCapsOff, Msg::CheckIndicator, Msg::SchoolManaged, Msg::ButtonExport, Msg::ButtonImport, Msg::ButtonUndoImport, Msg::ImportConfirm, Msg::ImportNothing, Msg::ImportFailed, Msg::ImportTooBig, Msg::ImportNotJson, Msg::ImportUnknownFormat, Msg::ImportNewerFormat, Msg::ImportUnreadable, Msg::MenuRestoreClipboard, Msg::MenuCheckUpdates, Msg::MenuPreview, Msg::WelcomeTitle, Msg::WelcomeText, Msg::WelcomeTry, Msg::WelcomeClose, Msg::WelcomeNoMore, Msg::MenuInstallUpdate, Msg::UpdateAvailable, Msg::UpdateInstalling, Msg::UpdateFailed, Msg::ClipboardRestoredLater, Msg::ClipboardNotRestoredNewCopy, Msg::ImportDone, Msg::ExportDone, Msg::UndoConfirm, Msg::UndoNone, Msg::CheckLastWord, Msg::TabSimple, Msg::TabAdvanced, Msg::TabDiagnostic, Msg::LabelHotkeyLayout, Msg::LabelHotkeyCase, Msg::LabelWorkshop, Msg::WorkFollow, Msg::WorkToLatin, Msg::WorkToHebrew, Msg::WorkCase, Msg::ButtonCopyResult, Msg::LabelText, Msg::CheckCareful, Msg::CheckCapsOff, Msg::LabelLimit, Msg::LabelDelay, Msg::LabelExcluded, Msg::NumberInvalid, Msg::DiagNone, Msg::DiagLast, Msg::ButtonCopyDiag, Msg::ButtonRefresh, Msg::DiagCopied, Msg::CopyFailed, Msg::LayoutsLine, Msg::MenuReports, Msg::MenuReportProblem, Msg::MenuSendReport, Msg::MenuReportAlways, Msg::MenuReportNever, Msg::ReportAskTitle, Msg::ReportAskText, Msg::ReportSent, Msg::ReportFailed, Msg::ReportDialogText, Msg::ReportPreviewLabel, Msg::ReportSend, Msg::ReportCancel, Msg::MenuTyping, Msg::TypingReady, Msg::TypingFailed, Msg::MenuTypingWords, Msg::TypingUndone, Msg::TypingWordsHelp, Msg::MenuDoubleShift, Msg::MenuTypingSound, Msg::MenuCtrlTap, Msg::MenuMessengerGuard, Msg::MessengerWarning, Msg::MenuOneLanguage, Msg::MenuOneLanguageFile, Msg::OneLanguageHelp, Msg::TypingRestored, Msg::HookLost, Msg::MenuF10WrongWords, Msg::DormantFullscreen, Msg::DormantExcluded, Msg::DormantCodeEditor, Msg::DormantSensitive, Msg::MenuReplacements, Msg::MenuReplacementsFile, Msg::ReplacementsHelp,
 ];
 
 /// `{key}` in a text is replaced by the hotkey name (e.g. F10).
@@ -203,7 +212,7 @@ pub fn text(lang: Lang, m: Msg) -> &'static str {
         (NothingToConvert, He) => "אין מה לתקן",
         (NothingToConvert, Fr) => "Rien à corriger",
         (NothingToConvert, En) => "Nothing to fix",
-        (SelectText, He) => "סמנו את הטקסט ולחצו שוב על {key}",
+        (SelectText, He) => "סמנו את הטקסט ולחצו שוב על {key}\u{200F}",
         (SelectText, Fr) => "Sélectionnez le texte, puis appuyez sur {key}",
         (SelectText, En) => "Select the text, then press {key}",
         (ConsoleUnsupported, He) => "חלון שורת הפקודה הזה עדיין לא נתמך",
@@ -239,7 +248,7 @@ pub fn text(lang: Lang, m: Msg) -> &'static str {
         (PasteFailed, He) => "ההדבקה נכשלה",
         (PasteFailed, Fr) => "Impossible de coller",
         (PasteFailed, En) => "Could not paste",
-        (KeysBlocked, He) => "המקשים נחסמו על ידי Windows",
+        (KeysBlocked, He) => "המקשים נחסמו על ידי Windows\u{200F}",
         (KeysBlocked, Fr) => "Windows a bloqué les touches",
         (KeysBlocked, En) => "Windows blocked the keys",
         (NewCopyKept, He) => "העתקתם משהו אחר בזמן התיקון: לא הודבק דבר, ההעתקה שלכם נשמרה",
@@ -272,22 +281,22 @@ pub fn text(lang: Lang, m: Msg) -> &'static str {
         (MenuExit, He) => "יציאה",
         (MenuExit, Fr) => "Quitter",
         (MenuExit, En) => "Exit",
-        (MenuRuleDisable, He) => "השבת בתוכנה {app}",
+        (MenuRuleDisable, He) => "השבת בתוכנה {app}\u{200F}",
         (MenuRuleDisable, Fr) => "Désactiver dans {app}",
         (MenuRuleDisable, En) => "Disable in {app}",
-        (MenuRuleSelection, He) => "רק עם טקסט מסומן בתוכנה {app}",
+        (MenuRuleSelection, He) => "רק עם טקסט מסומן בתוכנה {app}\u{200F}",
         (MenuRuleSelection, Fr) => "Seulement avec une sélection dans {app}",
         (MenuRuleSelection, En) => "Only with a selection in {app}",
-        (MenuRuleRemove, He) => "הפעל מחדש בתוכנה {app}",
+        (MenuRuleRemove, He) => "הפעל מחדש בתוכנה {app}\u{200F}",
         (MenuRuleRemove, Fr) => "Réactiver dans {app}",
         (MenuRuleRemove, En) => "Enable again in {app}",
         (MenuPause10, He) => "השהה ל-10 דקות",
         (MenuPause10, Fr) => "Pause pendant 10 minutes",
         (MenuPause10, En) => "Pause for 10 minutes",
-        (MenuResumeAt, He) => "המשך (מושהה עד {time})",
+        (MenuResumeAt, He) => "המשך (מושהה עד {time})\u{200F}",
         (MenuResumeAt, Fr) => "Reprendre (en pause jusqu'à {time})",
         (MenuResumeAt, En) => "Resume (paused until {time})",
-        (TipReady, He) => "מתקן שפת מקלדת ({key})",
+        (TipReady, He) => "מתקן שפת מקלדת ({key})\u{200F}",
         (TipReady, Fr) => "Correcteur de clavier ({key})",
         (TipReady, En) => "Keyboard Layout Fixer ({key})",
         (TipPaused, He) => "מתקן שפת מקלדת – מושהה",
@@ -299,7 +308,7 @@ pub fn text(lang: Lang, m: Msg) -> &'static str {
         (WindowTitle, He) => "מתקן שפת מקלדת",
         (WindowTitle, Fr) => "Correcteur de clavier",
         (WindowTitle, En) => "Keyboard Layout Fixer",
-        (StatusReady, He) => "מוכן – סמנו טקסט ולחצו על {key}",
+        (StatusReady, He) => "מוכן – סמנו טקסט ולחצו על {key}\u{200F}",
         (StatusReady, Fr) => "Prêt – sélectionnez un texte et appuyez sur {key}",
         (StatusReady, En) => "Ready – select text and press {key}",
         (StatusPaused, He) => "מושהה – המקש {key} פנוי לתוכנות אחרות",
@@ -356,7 +365,7 @@ pub fn text(lang: Lang, m: Msg) -> &'static str {
         (CheckConsole, He) => "תקן גם ב-cmd/PowerShell (ניסיוני)",
         (CheckConsole, Fr) => "Corriger aussi dans cmd/PowerShell (expérimental)",
         (CheckConsole, En) => "Also fix in cmd/PowerShell (experimental)",
-        (CheckAutostart, He) => "הפעל בעת הכניסה ל-Windows",
+        (CheckAutostart, He) => "הפעל בעת הכניסה ל-Windows\u{200F}",
         (CheckAutostart, Fr) => "Démarrer avec Windows",
         (CheckAutostart, En) => "Start with Windows",
         (AutostartManaged, He) => "הפעלה אוטומטית: מנוהלת על ידי מנהל המערכת",
@@ -377,7 +386,7 @@ pub fn text(lang: Lang, m: Msg) -> &'static str {
         (ButtonAbout, He) => "אודות",
         (ButtonAbout, Fr) => "À propos",
         (ButtonAbout, En) => "About",
-        (HotkeyInvalid, He) => "צירוף מקשים לא מותר: הוסיפו Ctrl או Alt (לא Ctrl+C/V/X/A/Z), או בחרו F1–F11",
+        (HotkeyInvalid, He) => "צירוף מקשים לא מותר: הוסיפו Ctrl או Alt (לא Ctrl+C/V/X/A/Z), או בחרו F1–F11\u{200F}",
         (HotkeyInvalid, Fr) => "Touche non permise : ajoutez Ctrl ou Alt (pas Ctrl+C/V/X/A/Z), ou choisissez F1–F11",
         (HotkeyInvalid, En) => "Not allowed: add Ctrl or Alt (not Ctrl+C/V/X/A/Z), or choose F1–F11",
         (SaveFailed, He) => "לא ניתן היה לשמור את ההגדרות. לא השתנה דבר.",
@@ -407,7 +416,7 @@ pub fn text(lang: Lang, m: Msg) -> &'static str {
         (WorkFollow, He) => "לפי ההגדרה",
         (WorkFollow, Fr) => "Comme les paramètres",
         (WorkFollow, En) => "As in the settings",
-        (WorkToLatin, He) => "מעברית ל-{latin}",
+        (WorkToLatin, He) => "מעברית ל-{latin}\u{200F}",
         (WorkToLatin, Fr) => "Hébreu → {latin}",
         (WorkToLatin, En) => "Hebrew → {latin}",
         (WorkToHebrew, He) => "מ-{latin} לעברית",
@@ -431,19 +440,19 @@ pub fn text(lang: Lang, m: Msg) -> &'static str {
         (LabelLimit, He) => "מגבלת תווים (0 = ללא):",
         (LabelLimit, Fr) => "Limite (0 = aucune) :",
         (LabelLimit, En) => "Limit (0 = none):",
-        (LabelDelay, He) => "המתנה לפני שחזור הלוח (ms):",
+        (LabelDelay, He) => "המתנה לפני שחזור הלוח (ms):\u{200F}",
         (LabelDelay, Fr) => "Délai avant rétablissement du Presse-papiers (ms) :",
         (LabelDelay, En) => "Wait before restore (ms):",
         (LabelExcluded, He) => "מוחרגות (+{n} כללים):",
         (LabelExcluded, Fr) => "Exclus (+{n} règles) :",
         (LabelExcluded, En) => "Excluded (+{n} rules):",
-        (NumberInvalid, He) => "מגבלת התווים חייבת להיות מספר (0 ומעלה) וההמתנה בין 100 ל-10000 ms",
+        (NumberInvalid, He) => "מגבלת התווים חייבת להיות מספר (0 ומעלה) וההמתנה בין 100 ל-10000 ms\u{200F}",
         (NumberInvalid, Fr) => "La limite doit être un nombre (0 ou plus) et le délai entre 100 et 10 000 ms",
         (NumberInvalid, En) => "The limit must be a number (0 or more) and the wait between 100 and 10000 ms",
         (DiagNone, He) => "אין עדיין ניסיון מאז הפעלת התוכנה.",
         (DiagNone, Fr) => "Aucune tentative depuis le démarrage du programme.",
         (DiagNone, En) => "No attempt since the program started.",
-        (DiagLast, He) => "ניסיון אחרון ({time}):",
+        (DiagLast, He) => "ניסיון אחרון ({time}):\u{200F}",
         (DiagLast, Fr) => "Dernière tentative ({time}) :",
         (DiagLast, En) => "Last attempt ({time}):",
         (ButtonCopyDiag, He) => "העתק את המידע",
@@ -458,7 +467,7 @@ pub fn text(lang: Lang, m: Msg) -> &'static str {
         (CopyFailed, He) => "ההעתקה נכשלה: הלוח תפוס, נסו שוב",
         (CopyFailed, Fr) => "Copie impossible : Presse-papiers occupé, réessayez",
         (CopyFailed, En) => "Could not copy: clipboard busy, try again",
-        (LayoutsLine, He) => "מקלדות: {list}",
+        (LayoutsLine, He) => "מקלדות: {list}\u{200F}",
         (LayoutsLine, Fr) => "Claviers : {list}",
         (LayoutsLine, En) => "Keyboards: {list}",
         (CheckLastWord, He) => "ללא סימון: רק המילה האחרונה (ניסיוני)",
@@ -467,7 +476,7 @@ pub fn text(lang: Lang, m: Msg) -> &'static str {
         (IndicatorCapsOn, He) => "CAPS LOCK",
         (IndicatorCapsOn, Fr) => "VERR. MAJ",
         (IndicatorCapsOn, En) => "CAPS LOCK",
-        (IndicatorCapsOff, He) => "Caps Lock כבוי",
+        (IndicatorCapsOff, He) => "\u{200F}Caps Lock כבוי",
         (IndicatorCapsOff, Fr) => "Verr. Maj désactivé",
         (IndicatorCapsOff, En) => "Caps Lock off",
         (CheckIndicator, He) => "הצג את שפת המקלדת (HE / EN) כשהיא משתנה",
@@ -509,7 +518,7 @@ pub fn text(lang: Lang, m: Msg) -> &'static str {
         (WelcomeTitle, He) => "ברוכים הבאים למתקן שפת המקלדת",
         (WelcomeTitle, Fr) => "Bienvenue dans le correcteur de clavier",
         (WelcomeTitle, En) => "Welcome to Keyboard Layout Fixer",
-        (WelcomeText, He) => "הקלדתם בשפה הלא נכונה? סמנו את הטקסט ולחצו על {key}: הוא יתוקן. בלי סימון, השורה מתוקנת מהסמן ועד תחילתה.\nF9 מתקן טקסט שהוקלד כש-Caps Lock היה דולק.\nהסמל נמצא ליד השעון: לחיצה פותחת את ההגדרות, לחיצה ימנית את התפריט.",
+        (WelcomeText, He) => "הקלדתם בשפה הלא נכונה? סמנו את הטקסט ולחצו על {key}: הוא יתוקן. בלי סימון, השורה מתוקנת מהסמן ועד תחילתה.\n\u{200F}F9 מתקן טקסט שהוקלד כש-Caps Lock היה דולק.\nהסמל נמצא ליד השעון: לחיצה פותחת את ההגדרות, לחיצה ימנית את התפריט.",
         (WelcomeText, Fr) => "Vous avez tapé avec le mauvais clavier ? Sélectionnez le texte et appuyez sur {key} : il est corrigé. Sans sélection, la ligne est corrigée du curseur jusqu'à son début.\nF9 corrige un texte tapé avec Verr. Maj allumé.\nL'icône est près de l'horloge : un clic ouvre les paramètres, un clic droit le menu.",
         (WelcomeText, En) => "Typed with the wrong keyboard layout? Select the text and press {key}: it is fixed. With nothing selected, the line is fixed from the cursor back to its start.\nF9 fixes text typed with Caps Lock on.\nThe icon is near the clock: click it for the settings, right-click for the menu.",
         (WelcomeTry, He) => "נסה עכשיו",
@@ -524,7 +533,7 @@ pub fn text(lang: Lang, m: Msg) -> &'static str {
         (MenuCheckUpdates, He) => "בדוק אם קיימים עדכונים",
         (MenuCheckUpdates, Fr) => "Rechercher des mises à jour",
         (MenuCheckUpdates, En) => "Check for updates",
-        (MenuInstallUpdate, He) => "התקן גרסה {version}",
+        (MenuInstallUpdate, He) => "התקן גרסה {version}\u{200F}",
         (MenuInstallUpdate, Fr) => "Installer la version {version}",
         (MenuInstallUpdate, En) => "Install version {version}",
         (UpdateAvailable, He) => "גרסה {version} זמינה: בתפריט הסמל",
@@ -602,7 +611,7 @@ pub fn text(lang: Lang, m: Msg) -> &'static str {
         (ReportCancel, He) => "ביטול",
         (ReportCancel, Fr) => "Annuler",
         (ReportCancel, En) => "Cancel",
-        (MenuTyping, He) => "הצע תיקון בזמן ההקלדה (Tab)",
+        (MenuTyping, He) => "הצע תיקון בזמן ההקלדה (Tab)\u{200F}",
         (MenuTyping, Fr) => "Proposer la correction pendant la frappe (Tab)",
         (MenuTyping, En) => "Suggest fixes while typing (Tab)",
         (TypingReady, He) => "תיקון בזמן ההקלדה פעיל: כשמופיעה הצעה, לחצו Tab כדי לתקן.",
@@ -620,7 +629,7 @@ pub fn text(lang: Lang, m: Msg) -> &'static str {
         (TypingWordsHelp, He) => "מילה אחת בכל שורה: המילים שלכם לא יתוקנו לעולם. שורה שמתחילה ב-'-' : לעולם לא לתקן את המילה הזו.",
         (TypingWordsHelp, Fr) => "Un mot par ligne : vos mots ne sont jamais corrigés. Une ligne qui commence par - : ne jamais corriger ce mot.",
         (TypingWordsHelp, En) => "One word per line: your words are never fixed. A line starting with - : never fix this word.",
-        (MenuDoubleShift, He) => "לחיצה כפולה על Shift ממירה (כמו F10)",
+        (MenuDoubleShift, He) => "לחיצה כפולה על Shift ממירה (כמו F10)\u{200F}",
         (MenuDoubleShift, Fr) => "Double appui sur Maj = conversion (comme F10)",
         (MenuDoubleShift, En) => "Double-tap Shift to convert (like F10)",
         (DormantFullscreen, He) => "התיקון בזמן ההקלדה מושהה: תוכנה במסך מלא",
@@ -635,6 +644,33 @@ pub fn text(lang: Lang, m: Msg) -> &'static str {
         (DormantCodeEditor, He) => "התיקון בזמן ההקלדה מושהה: עורך קוד (F10 עובד)",
         (DormantCodeEditor, Fr) => "Correction pendant la frappe en veille : éditeur de code (F10 marche)",
         (DormantCodeEditor, En) => "Fixing while typing asleep: code editor (F10 works)",
+        (MenuF10WrongWords, He) => "\u{200F}F10 מתקן רק את המילים השגויות",
+        (MenuF10WrongWords, Fr) => "F10 ne corrige que les mots faux",
+        (MenuF10WrongWords, En) => "F10 fixes only the wrong words",
+        (HookLost, He) => "\u{200F}Windows עצר את המעקב אחרי המקלדת ולא ניתן היה להפעיל אותו מחדש: הפעילו מחדש את התוכנה.",
+        (HookLost, Fr) => "Windows a coupé la surveillance du clavier, qui n'a pas pu repartir : relancez le programme.",
+        (HookLost, En) => "Windows stopped the keyboard watch and it could not restart: restart the program.",
+        (TypingRestored, He) => "התיקון לא יצא נכון: הטקסט כפי שהוקלד הוחזר.",
+        (TypingRestored, Fr) => "La correction n'est pas sortie juste : le texte tapé a été remis.",
+        (TypingRestored, En) => "The fix did not come out right: the text as typed was put back.",
+        (MenuCtrlTap, He) => "\u{200F}Ctrl שמאלי = אנגלית, Ctrl ימני = עברית",
+        (MenuCtrlTap, Fr) => "Ctrl gauche = anglais, Ctrl droit = hébreu",
+        (MenuCtrlTap, En) => "Left Ctrl = English, right Ctrl = Hebrew",
+        (MenuMessengerGuard, He) => "בתוכנות צ'אט: עצירה לפני שליחת משפט בשפה הלא נכונה",
+        (MenuMessengerGuard, Fr) => "Messageries : retenir l'envoi d'une phrase dans la mauvaise langue",
+        (MenuMessengerGuard, En) => "Chat apps: hold back a sentence in the wrong language",
+        (MessengerWarning, He) => "שפה לא נכונה? F10 לתיקון, Enter כדי לשלוח בכל זאת",
+        (MessengerWarning, Fr) => "Mauvaise langue ? F10 pour corriger, Entrée pour envoyer quand même",
+        (MessengerWarning, En) => "Wrong language? F10 to fix, Enter to send anyway",
+        (MenuOneLanguage, He) => "תוכנות בשפה אחת (למשל הטרמינל באנגלית)",
+        (MenuOneLanguage, Fr) => "Programmes à une seule langue (ex. le Terminal en anglais)",
+        (MenuOneLanguage, En) => "One-language programs (e.g. Terminal in English)",
+        (MenuOneLanguageFile, He) => "רשימת התוכנות…",
+        (MenuOneLanguageFile, Fr) => "Liste des programmes…",
+        (MenuOneLanguageFile, En) => "List of programs…",
+        (OneLanguageHelp, He) => "תוכנה אחת בכל שורה: program.exe (אנגלית) או program.exe = he (עברית).",
+        (OneLanguageHelp, Fr) => "Un programme par ligne : programme.exe (anglais) ou programme.exe = he (hébreu).",
+        (OneLanguageHelp, En) => "One program per line: program.exe (English) or program.exe = he (Hebrew).",
         (MenuTypingSound, He) => "צליל קצר כשמילה מתוקנת",
         (MenuTypingSound, Fr) => "Petit son quand un mot est corrigé",
         (MenuTypingSound, En) => "Short sound when a word is fixed",
@@ -647,7 +683,7 @@ pub fn text(lang: Lang, m: Msg) -> &'static str {
         (ReplacementsHelp, He) => "שורה אחת לכל החלפה: קיצור = טקסט. למשל: @@ = name@example.com . ההחלפה נעשית אחרי רווח; Backspace מיד אחריה מבטל.",
         (ReplacementsHelp, Fr) => "Une ligne par remplacement : abréviation = texte. Exemple : @@ = nom@exemple.com . Remplacé après une espace ; Retour arrière juste après annule.",
         (ReplacementsHelp, En) => "One line per replacement: shortcut = text. Example: @@ = name@example.com . Replaced after a space; Backspace right after undoes it.",
-        (AboutText, He) => "מתקן שפת מקלדת – גרסה {version}\n\nמתקן טקסט שהוקלד בשפת מקלדת שגויה (עברית ⇄ אנגלית) בלחיצה על {key}.\nמקש נוסף (F9 כברירת מחדל) מתקן טקסט שהוקלד כש-Caps Lock היה דולק.\nשום דבר ממה שמקלידים לא נשלח ולא נשמר.\n\nמבוסס על Keyboard Layout Fixer מאת Ravid Saadia (רישיון MIT).\nגרסת NOAM.",
+        (AboutText, He) => "מתקן שפת מקלדת – גרסה {version}\u{200F}\n\nמתקן טקסט שהוקלד בשפת מקלדת שגויה (עברית ⇄ אנגלית) בלחיצה על {key}.\u{200F}\nמקש נוסף (F9 כברירת מחדל) מתקן טקסט שהוקלד כש-Caps Lock היה דולק.\nשום דבר ממה שמקלידים לא נשלח ולא נשמר.\n\nמבוסס על Keyboard Layout Fixer מאת Ravid Saadia (רישיון MIT).\u{200F}\nגרסת NOAM.\u{200F}",
         (AboutText, Fr) => "Correcteur de clavier – version {version}\n\nCorrige un texte tapé avec le mauvais clavier (hébreu ⇄ anglais) avec {key}.\nUne 2e touche (F9 par défaut) corrige un texte tapé avec Verr. Maj allumé.\nRien de ce que vous tapez n'est envoyé ni enregistré.\n\nD'après Keyboard Layout Fixer de Ravid Saadia (licence MIT).\nVersion NOAM.",
         (AboutText, En) => "Keyboard Layout Fixer – version {version}\n\nFixes text typed with the wrong keyboard layout (Hebrew ⇄ English) with {key}.\nA second key (F9 by default) fixes text typed with Caps Lock on.\nNothing you type is sent or recorded.\n\nBased on Keyboard Layout Fixer by Ravid Saadia (MIT license).\nNOAM version.",
     }
@@ -660,6 +696,37 @@ pub fn text_with_key(lang: Lang, m: Msg, key: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 1.8.5: a Hebrew line that starts or ends with Latin letters, digits or a {placeholder}
+    /// carries an RLM there, so that it is shown right to left with its signs in place.
+    #[test]
+    fn hebrew_lines_keep_their_direction() {
+        let heb = |c: char| ('\u{0590}'..='\u{05FF}').contains(&c);
+        for m in ALL_MSGS {
+            if matches!(m, Msg::IndicatorCapsOn) {
+                continue;
+            }
+            let t = text(Lang::He, *m);
+            if !t.chars().any(heb) {
+                continue;
+            }
+            for line in t.lines().filter(|l| !l.trim().is_empty()) {
+                let first = line.chars().next().unwrap();
+                assert!(!(first.is_ascii_alphanumeric() || first == '{'), "{m:?} starts with Latin without RLM: {line}");
+                let core = line.trim_end_matches(['.', ')', '!', '?', ':', '…', ' ', '\u{200F}']);
+                let last = core.chars().last().unwrap_or(' ');
+                if last.is_ascii_alphanumeric() || last == '}' {
+                    assert!(line.ends_with('\u{200F}'), "{m:?} ends with Latin without RLM: {line}");
+                }
+            }
+        }
+        // isolates are never used (drawn as boxes on some PCs)
+        for l in [Lang::He, Lang::Fr, Lang::En] {
+            for m in ALL_MSGS {
+                assert!(!text(l, *m).chars().any(|c| ('\u{2066}'..='\u{2069}').contains(&c)), "{m:?}");
+            }
+        }
+    }
 
     #[test]
     fn every_text_exists_and_is_short_enough() {

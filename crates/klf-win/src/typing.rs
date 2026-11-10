@@ -39,6 +39,11 @@ const UNDO: usize = 6;
 const DOUBLE_SHIFT: usize = 7;
 const REPLACE: usize = 8;
 const REPL_REFRESH: usize = 9;
+const VERIFY: usize = 10;
+const CTRL_EN: usize = 11;
+const CTRL_HE: usize = 12;
+const GUARD: usize = 13;
+const TIMING: usize = 14;
 /// a pause longer than this starts a new run
 const PAUSE_MS: u64 = 15_000;
 /// a proposal stays valid this long
@@ -50,6 +55,25 @@ static PERSONAL_AT: Mutex<Option<std::time::SystemTime>> = Mutex::new(None);
 
 /// The lists are loaded (read in the hook without any lock).
 static LISTS_READY: AtomicBool = AtomicBool::new(false);
+/// 1.8.5: time spent in the keyboard hook, measured on every key (two clock reads), written to
+/// debug.log every 500 keys: Windows removes a hook that answers too slowly, and typing waits for it.
+static HOOK_KEYS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+static HOOK_SUM_US: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static HOOK_MAX_US: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn qpc() -> (i64, i64) {
+    use windows_sys::Win32::System::Performance::{QueryPerformanceCounter, QueryPerformanceFrequency};
+    let (mut c, mut f) = (0i64, 0i64);
+    // SAFETY: plain out values.
+    unsafe {
+        QueryPerformanceCounter(&mut c);
+        QueryPerformanceFrequency(&mut f);
+    }
+    (c, f.max(1))
+}
+
+/// 1.8.5: last event seen by the typing hooks (GetTickCount, ms)
+static LAST_EVENT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 fn dict_ready_fast() -> bool {
     LISTS_READY.load(Ordering::SeqCst)
@@ -106,6 +130,26 @@ fn decode_text(b: &[u8]) -> String {
 }
 
 /// Adds lines to the personal file (UTF-8; a line break first if the file does not end with one).
+/// 1.8.5: a quick second F10 put the original back: what the first one taught ("+word") is
+/// taken back out of my-words.txt (a round trip teaches nothing).
+pub fn forget_learned(typed: &str) {
+    let Some(line) = t::learned_line(typed) else { return };
+    let Some(p) = personal_path() else { return };
+    let Ok(current) = std::fs::read(&p) else { return };
+    if current.len() > 256 * 1024 {
+        return;
+    }
+    let text = decode_text(&current);
+    if !text.lines().any(|l| l.trim().eq_ignore_ascii_case(&line)) {
+        return;
+    }
+    let kept: Vec<&str> = text.lines().filter(|l| !l.trim().eq_ignore_ascii_case(&line)).collect();
+    if std::fs::write(&p, kept.join("\r\n") + "\r\n").is_ok() {
+        log("F10 round trip: the word learned by the first F10 was taken back");
+        refresh_personal();
+    }
+}
+
 fn append_personal(lines: &[String]) {
     let Some(p) = personal_path() else { return };
     let current = std::fs::read(&p).unwrap_or_default();
@@ -160,6 +204,9 @@ struct Proposal {
 }
 
 /// The last fix, for 5 s: Backspace as the very next key undoes it and teaches "never again".
+/// (control, length before the words in UTF-16 units, its last 64 units, words typed, fix typed)
+type VerifyState = (usize, usize, String, String, String);
+
 struct LastFix {
     /// undoing teaches "never fix these words" (not for a text replacement)
     learn: bool,
@@ -187,11 +234,29 @@ thread_local! {
     static WANT_TYPING: Cell<bool> = const { Cell::new(false) };
     /// 1.8.2, text replacements on
     static WANT_REPL: Cell<bool> = const { Cell::new(false) };
+    /// 1.8.5: left/right Ctrl alone switch the keyboard; chat guard on Enter
+    static WANT_CTRLTAP: Cell<bool> = const { Cell::new(false) };
+    static CTRLTAP: RefCell<t::CtrlTap> = RefCell::new(t::CtrlTap::default());
+    static WANT_GUARD: Cell<bool> = const { Cell::new(false) };
+    static IS_MESSENGER: Cell<bool> = const { Cell::new(false) };
+    /// key maps of the installed layouts (prepared outside the hook, for the chat guard)
+    static KEYMAPS: RefCell<HashMap<u32, klf_core::layouts::KeyMap>> = RefCell::new(HashMap::new());
+    /// (window, time): the next Enter there is let through (the user was warned)
+    static GUARD_ARMED: Cell<Option<(usize, u64)>> = const { Cell::new(None) };
+    static SWALLOW_ENTER_UP: Cell<bool> = const { Cell::new(false) };
+    /// Enter is down (auto-repeat while held is not a new press)
+    static ENTER_HELD: Cell<bool> = const { Cell::new(false) };
     static TOKEN: RefCell<klf_core::replace::Token> = RefCell::new(klf_core::replace::Token::default());
     static PENDING_REPL: RefCell<Option<(String, usize)>> = const { RefCell::new(None) };
     /// characters with Shift, for shortcuts such as "@@" (prepared outside the hook too)
     static MAPS_SHIFT: RefCell<HashMap<u32, HashMap<u32, char>>> = RefCell::new(HashMap::new());
     static TABLES_AT: Cell<u64> = const { Cell::new(0) };
+    /// 1.8.5: (control, text before the words, words typed, fix typed) for the check after a fix
+    /// (control, length of the text before the words in UTF-16 units, its last 64 units, words
+    /// typed, fix typed)
+    static VERIFY_STATE: RefCell<Option<VerifyState>> = const { RefCell::new(None) };
+    /// user keys and clicks counted when the fix was typed (any since: no check, never undone)
+    static VERIFY_KEYS: Cell<(u32, u32)> = const { Cell::new((0, 0)) };
     static MAPS_ALTGR: RefCell<HashMap<u32, HashMap<u32, char>>> = RefCell::new(HashMap::new());
 
     static WANT_DSHIFT: Cell<bool> = const { Cell::new(false) };
@@ -223,10 +288,18 @@ pub fn apply() {
     WANT_DSHIFT.with(|w| w.set(dshift));
     let repl = s.text_replacements && allowed();
     WANT_REPL.with(|w| w.set(repl));
+    let ctrl = s.ctrl_tap_language && allowed();
+    WANT_CTRLTAP.with(|w| w.set(ctrl));
+    let guard = s.messenger_guard && typing;
+    WANT_GUARD.with(|w| w.set(guard));
     if repl {
         refresh_replacements(true);
     }
-    if !typing && !dshift && !repl {
+    // 1.8.5: F10 "only the wrong words" needs the word lists too (no keyboard watching for it)
+    if s.f10_only_wrong_words && allowed() && !dict_ready() {
+        load_lists();
+    }
+    if !typing && !dshift && !repl && !ctrl {
         stop();
         app::refresh_dormant(None);
         return;
@@ -263,6 +336,11 @@ fn prepare_tables() {
             altgr.insert(hkl, t.into_iter().map(|k| (k.sc as u32, k.ch)).collect::<HashMap<u32, char>>());
         }
     }
+    let keymaps: HashMap<u32, klf_core::layouts::KeyMap> = maps.keys().filter_map(|&h| match layouts::choose(Some(h)) {
+        layouts::Choice::Map(m, _) => Some((h, m)),
+        _ => None,
+    }).collect();
+    KEYMAPS.with(|k| *k.borrow_mut() = keymaps);
     MAPS.with(|m| *m.borrow_mut() = maps);
     MAPS_SHIFT.with(|m| *m.borrow_mut() = shifted);
     MAPS_ALTGR.with(|m| *m.borrow_mut() = altgr);
@@ -287,6 +365,7 @@ fn start() {
         KHOOK.with(|h| h.set(k));
         MHOOK.with(|h| h.set(m));
     }
+    LAST_EVENT.store(input::tick32(), Ordering::SeqCst);
     log("Typing correction on");
 }
 
@@ -427,6 +506,20 @@ fn on_key(vk: u32, sc: u32) -> bool {
         post(FIX);
         return true;
     }
+    // 1.8.5, chat guard: Enter alone in a chat program, with a sentence typed. Decided here, at
+    // once (tables and lists prepared beforehand; the lists only if free this instant): a wrong
+    // sentence holds this Enter back with a warning, and the user's NEXT Enter sends it. The
+    // program never sends Enter itself.
+    if vk == VK_RETURN as u32 && WANT_GUARD.with(|g| g.get()) && IS_MESSENGER.with(|m| m.get()) && !down(VK_SHIFT) && !down(VK_CONTROL) && !down(VK_MENU) && !down(VK_LWIN) && !down(VK_RWIN) {
+        let armed = GUARD_ARMED.with(|g| g.take()).is_some_and(|(h, at)| h == fg && now.saturating_sub(at) < 10_000);
+        if !armed && sentence_wrong_now(hkl) {
+            GUARD_ARMED.with(|g| g.set(Some((fg, now))));
+            SWALLOW_ENTER_UP.with(|s| s.set(true));
+            BUF.with(|b| b.borrow_mut().clear());
+            post(GUARD);
+            return true;
+        }
+    }
     // any other key: the proposal and the words waiting for a check are dropped
     PROPOSAL.with(|p| p.borrow_mut().take());
     PENDING.with(|p| p.borrow_mut().take());
@@ -554,12 +647,48 @@ fn caps_on() -> bool {
 }
 
 unsafe extern "system" fn key_proc(code: i32, w: WPARAM, l: LPARAM) -> LRESULT {
+    let (t0, f) = qpc();
+    // SAFETY: same contract as the hook itself.
+    let r = unsafe { key_proc_inner(code, w, l) };
+    let us = ((qpc().0 - t0).max(0) as u64) * 1_000_000 / f as u64;
+    HOOK_SUM_US.fetch_add(us, Ordering::Relaxed);
+    HOOK_MAX_US.fetch_max(us, Ordering::Relaxed);
+    if HOOK_KEYS.fetch_add(1, Ordering::Relaxed) + 1 >= 500 {
+        post(TIMING);
+    }
+    r
+}
+
+unsafe fn key_proc_inner(code: i32, w: WPARAM, l: LPARAM) -> LRESULT {
+    LAST_EVENT.store(input::tick32(), Ordering::Relaxed);
     if code == HC_ACTION as i32 {
         // SAFETY: for HC_ACTION, l points to a KBDLLHOOKSTRUCT.
         let k = unsafe { &*(l as *const KBDLLHOOKSTRUCT) };
         // our own typing (the fix) and other programs' injected keys are not the user's typing
         if k.flags & LLKHF_INJECTED == 0 {
             let msg = w as u32;
+            if WANT_CTRLTAP.with(|c| c.get()) {
+                let down = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
+                let ctrl = match k.vkCode as u16 {
+                    VK_LCONTROL => Some(true),
+                    VK_RCONTROL => Some(false),
+                    _ => None,
+                };
+                if let Some(left) = CTRLTAP.with(|c| c.borrow_mut().key(ctrl, down, tick())) {
+                    post(if left { CTRL_EN } else { CTRL_HE });
+                }
+            }
+            if (msg == WM_KEYUP || msg == WM_SYSKEYUP) && k.vkCode == VK_RETURN as u32 {
+                ENTER_HELD.with(|e| e.set(false));
+                if SWALLOW_ENTER_UP.with(|s| s.replace(false)) {
+                    return 1;
+                }
+            }
+            // Enter held after it was held back: its repeats are held back too (never sent by
+            // the repeat of the very press that was stopped)
+            if (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) && k.vkCode == VK_RETURN as u32 && ENTER_HELD.with(|e| e.replace(true)) && SWALLOW_ENTER_UP.with(|s| s.get()) {
+                return 1;
+            }
             if WANT_DSHIFT.with(|d| d.get()) {
                 let is_shift = matches!(k.vkCode as u16, VK_SHIFT | VK_LSHIFT | VK_RSHIFT);
                 let down = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
@@ -593,8 +722,14 @@ unsafe extern "system" fn key_proc(code: i32, w: WPARAM, l: LPARAM) -> LRESULT {
 }
 
 unsafe extern "system" fn mouse_proc(code: i32, w: WPARAM, l: LPARAM) -> LRESULT {
+    LAST_EVENT.store(input::tick32(), Ordering::Relaxed);
+    // Ctrl with the wheel (zoom) or with a button is not a Ctrl tap
+    if code == HC_ACTION as i32 && matches!(w as u32, WM_MOUSEWHEEL | WM_MOUSEHWHEEL | WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN | WM_XBUTTONDOWN) {
+        CTRLTAP.with(|c| c.borrow_mut().cancel());
+    }
     if code == HC_ACTION as i32 && matches!(w as u32, WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN) {
         reset(); // the caret may have moved: the words kept no longer end at the caret
+        CTRLTAP.with(|c| c.borrow_mut().cancel()); // Ctrl+click is not a Ctrl tap
         DSHIFT.with(|d| *d.borrow_mut() = t::DoubleShift::default()); // Shift+click is not a double Shift
     }
     // SAFETY: passes the event on.
@@ -628,6 +763,23 @@ pub fn on_message(code: WPARAM) {
         UNDO => undo(),
         REPLACE => replace_now(),
         REPL_REFRESH => refresh_replacements(false),
+        VERIFY => verify_fix(),
+        CTRL_EN | CTRL_HE => {
+            let fg = target::foreground();
+            let hkl = if code == CTRL_HE { layouts::hebrew_layout() } else { latin_layout(fg) };
+            if let Some(h) = hkl {
+                layouts::request(fg, h);
+            }
+        }
+        GUARD => guard_check(),
+        TIMING => {
+            let n = HOOK_KEYS.swap(0, Ordering::Relaxed);
+            let sum = HOOK_SUM_US.swap(0, Ordering::Relaxed);
+            let max = HOOK_MAX_US.swap(0, Ordering::Relaxed);
+            if n > 0 {
+                log(&format!("Hook timing: {n} key events, average {} us, max {max} us", sum / n as u64));
+            }
+        }
         READY => {
             if app::settings().typing_suggestions && allowed() {
                 start();
@@ -685,7 +837,7 @@ fn check() {
 /// For Edit / RichEdit controls, the text just before the caret must be exactly what was typed
 /// (dead keys, autocorrection, autocompletion... would make the erase hit other text). Other
 /// controls cannot be read back: allowed.
-fn text_before_caret_matches(expected: &str) -> bool {
+pub fn text_before_caret_matches(expected: &str) -> bool {
     text_before_caret(expected, false)
 }
 
@@ -744,10 +896,29 @@ fn fix() {
         return;
     }
     let layout_back = target::current_layout(fg).map(|h| h as u32);
-    if !input::replace(p.s.erase, &p.s.text) {
-        log("Typing correction: the fix could not be typed");
-        return;
-    }
+    // 1.8.5: in a control that can be read back, what is before the words is remembered, to check
+    // the result once typed (an autocompletion or a key typed meanwhile could spoil it)
+    // (only the length and the end of the text before are kept: never the whole field)
+    let check = edit_text_to_caret().map(|(focus, t)| {
+        let units: Vec<u16> = t.encode_utf16().collect();
+        let cut = units.len().saturating_sub(erase_text.encode_utf16().count());
+        let tail_from = cut.saturating_sub(64);
+        (focus, cut, String::from_utf16_lossy(&units[tail_from..cut]), erase_text.clone(), p.s.text.clone())
+    });
+    // counted BEFORE sending: a key typed while the fix is being typed is seen
+    VERIFY_KEYS.with(|v| v.set(input::user_activity()));
+    let owner = app::main_window() as usize;
+    let verify = check.is_some();
+    VERIFY_STATE.with(|v| *v.borrow_mut() = check);
+    // typed from a worker thread (the hooks live on this one and must never wait); the check
+    // comes 250 ms after the last character was sent
+    input::replace_paced_then(p.s.erase, p.s.text.clone(), move || {
+        if verify {
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            // SAFETY: posting a message without pointers to our own window.
+            unsafe { PostMessageW(owner as HWND, WM_APP_TYPING, VERIFY, 0) };
+        }
+    });
     LAST_FIX.with(|f| *f.borrow_mut() = Some(LastFix { learn: true, typed: erase_text.clone(), fixed: p.s.text.clone(), hwnd: fg as usize, layout_back, at: tick() }));
     let to = if p.s.keep_layout { None } else if p.s.to_hebrew { layouts::hebrew_layout() } else { p.latin_hkl };
     if let Some(h) = to {
@@ -780,6 +951,9 @@ fn undo() {
     }
     let lines: Vec<String> = f.typed.split_whitespace().map(t::never_line).collect();
     append_personal(&lines);
+    if app::settings().typing_sound {
+        crate::platform::sys::undo_sound();
+    }
     let l = app::lang();
     crate::bubble::show(text(l, Msg::TypingUndone), l.is_rtl(), target::caret_point(fg), fg as usize, true);
     log("Typing correction: fix undone, word(s) added to the personal list");
@@ -916,6 +1090,93 @@ pub fn on_foreground() {
     if WANT_REPL.with(|w| w.get()) {
         refresh_replacements(false);
     }
+    let fg = target::foreground();
+    let exe = target::exe_of(fg);
+    IS_MESSENGER.with(|m| m.set(t::is_messenger(&exe)));
+    GUARD_ARMED.with(|g| g.set(None));
+    SWALLOW_ENTER_UP.with(|s| s.set(false));
+    // 1.8.5: one-language programs get their keyboard
+    let s = app::settings();
+    if s.one_language_programs && allowed() {
+        if let Some(&hebrew) = one_language_list().get(&exe.to_ascii_lowercase()) {
+            let want = if hebrew { layouts::hebrew_layout() } else { latin_layout(fg) };
+            if let Some(h) = want {
+                if target::current_layout(fg).map(|c| c as u32) != Some(h) {
+                    layouts::request(fg, h);
+                    log(&format!("One-language program {exe}: keyboard switched"));
+                }
+            }
+        }
+    }
+}
+
+/// The Latin layout to switch to (the one F10 would use), if any is installed.
+fn latin_layout(fg: HWND) -> Option<u32> {
+    match layouts::choose(target::current_layout(fg).map(|h| h as u32)) {
+        layouts::Choice::Map(_, l) => l,
+        _ => layouts::installed().into_iter().find(|h| h & 0x3FF != 0x0D),
+    }
+}
+
+pub fn one_language_path() -> Option<std::path::PathBuf> {
+    crate::util::app_dir().map(|d| d.join("one-language-programs.txt"))
+}
+
+/// The user's list, or the default one (terminals in English) while there is no file.
+fn one_language_list() -> HashMap<String, bool> {
+    let text = one_language_path().and_then(|p| std::fs::read(p).ok()).filter(|b| b.len() <= 64 * 1024).map(|b| decode_text(&b));
+    t::parse_one_language(text.as_deref().unwrap_or(t::ONE_LANGUAGE_DEFAULT))
+}
+
+pub fn open_one_language() {
+    let Some(p) = one_language_path() else { return };
+    if !p.exists() {
+        let l = app::lang();
+        let _ = std::fs::write(&p, format!("# {}\r\n{}", text(l, Msg::OneLanguageHelp), t::ONE_LANGUAGE_DEFAULT));
+    }
+    let _ = std::process::Command::new("notepad.exe").arg(&p).spawn();
+}
+
+/// 1.8.5, chat guard, in the hook: the sentence being typed looks typed in the wrong language
+/// (word lists only if free this instant: never waits).
+fn sentence_wrong_now(hkl: u32) -> bool {
+    let Some((words, hebrew)) = BUF.with(|b| b.borrow().snapshot()) else { return false };
+    let Ok(guard) = DICT.try_lock() else { return false };
+    let Some(dict) = guard.as_ref() else { return false };
+    KEYMAPS.with(|k| {
+        let Ok(k) = k.try_borrow() else { return false };
+        let Some(map) = k.get(&hkl) else { return false };
+        let pairs: Vec<(String, String)> = words.iter().map(|w| (w.clone(), klf_core::convert::convert_with(map, w, klf_core::settings::MixedTextMode::ToggleAll, true))).collect();
+        t::sentence_wrong(&pairs, hebrew, dict)
+    })
+}
+
+/// 1.8.5, chat guard: the warning, shown outside the hook.
+fn guard_check() {
+    let fg = target::foreground();
+    let l = app::lang();
+    crate::bubble::show_near_caret(text(l, Msg::MessengerWarning), l.is_rtl(), target::caret_point(fg), fg as usize);
+    log("Chat guard: Enter held back, the sentence looks typed in the wrong language");
+}
+
+/// 1.8.5: the typing hooks are put back if Windows removed them (silently, when a hook was too
+/// slow once). false = they should be there and could not be put back.
+pub fn check_hooks() -> bool {
+    if !active() || !input::hook_lost(LAST_EVENT.load(Ordering::SeqCst)) || input::foreground_hides_input() {
+        return true;
+    }
+    // at most once every 30 s (never a loop); the time is written only when repairing
+    static LAST_FIX: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let now = tick();
+    let last = LAST_FIX.load(Ordering::SeqCst);
+    if last != 0 && now.saturating_sub(last) < 30_000 {
+        return true;
+    }
+    LAST_FIX.store(now, Ordering::SeqCst);
+    log("Typing hooks removed by Windows: put back");
+    stop();
+    start();
+    active()
 }
 
 /// Every minute (UI thread).
@@ -966,4 +1227,90 @@ fn replace_now() {
         LAST_FIX.with(|f| f.borrow_mut().take());
     }
     log("Text replacement made");
+}
+
+/// 1.8.5, F10 "only the wrong words" (public version, option): the text with only its words typed
+/// on the wrong layout converted; None without the lists or when no word looks wrong.
+pub fn wrong_words_only(text: &str, map: &klf_core::layouts::KeyMap, replace_caps: bool) -> Option<String> {
+    if !allowed() {
+        return None;
+    }
+    refresh_personal();
+    let guard = DICT.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let dict = guard.as_ref()?;
+    t::convert_wrong_words(text, dict, |w| klf_core::convert::convert_with(map, w, klf_core::settings::MixedTextMode::ToggleAll, replace_caps))
+}
+
+/// 1.8.5: the focused Edit / RichEdit control and its text up to the caret (no selection); None
+/// for any other control (it cannot be read back).
+fn edit_text_to_caret() -> Option<(usize, String)> {
+    // SAFETY: structure sized; EM_GETSEL / WM_GETTEXTLENGTH / WM_GETTEXT are marshalled by
+    // Windows for Edit and RichEdit controls; the buffer size is passed.
+    unsafe {
+        let mut gi: GUITHREADINFO = std::mem::zeroed();
+        gi.cbSize = std::mem::size_of::<GUITHREADINFO>() as u32;
+        if GetGUIThreadInfo(0, &mut gi) == 0 || gi.hwndFocus.is_null() {
+            return None;
+        }
+        let focus = gi.hwndFocus;
+        let class = crate::platform::sys::class_name(focus);
+        // plain Edit only: RichEdit counts a line break as 1 in its positions but returns CR LF
+        // in its text, so positions and text would not match
+        if !class.eq_ignore_ascii_case("Edit") {
+            return None;
+        }
+        // a program that does not answer within 200 ms is not waited for (the hooks live here)
+        let ask = |msg: u32, w: WPARAM, l: LPARAM| -> Option<usize> {
+            let mut r: usize = 0;
+            (SendMessageTimeoutW(focus, msg, w, l, SMTO_ABORTIFHUNG | SMTO_BLOCK, 200, &mut r) != 0).then_some(r)
+        };
+        let (mut start, mut end) = (0u32, 0u32);
+        ask(0x00B0, &mut start as *mut u32 as WPARAM, &mut end as *mut u32 as LPARAM)?; // EM_GETSEL
+        let len = ask(WM_GETTEXTLENGTH, 0, 0)?;
+        if start != end || len > 100_000 || end as usize > len {
+            return None;
+        }
+        let mut buf = vec![0u16; len + 1];
+        let n = ask(WM_GETTEXT, buf.len(), buf.as_mut_ptr() as LPARAM)?;
+        Some((focus as usize, String::from_utf16_lossy(&buf[..(end as usize).min(n)])))
+    }
+}
+
+/// 1.8.5: 250 ms after a fix while typing, in a control that can be read back: the text must be
+/// exactly what was before + the fix. Otherwise, if what was before is intact, the part after it
+/// is replaced by the words as typed (one undoable replacement), and the user is told.
+fn verify_fix() {
+    let Some((focus, before_len, before_tail, typed, fixed)) = VERIFY_STATE.with(|v| v.borrow_mut().take()) else { return };
+    // the user typed or clicked since: the text is theirs now, nothing is touched
+    if input::user_activity() != VERIFY_KEYS.with(|v| v.get()) {
+        return;
+    }
+    let Some((f, now)) = edit_text_to_caret() else { return };
+    if f != focus {
+        return;
+    }
+    let units: Vec<u16> = now.encode_utf16().collect();
+    let fixed_units: Vec<u16> = fixed.encode_utf16().collect();
+    let tail: Vec<u16> = before_tail.encode_utf16().collect();
+    let before_intact = units.len() >= before_len && units[..before_len].ends_with(&tail);
+    if before_intact && units[before_len..] == fixed_units[..] {
+        return; // exactly the fix: all good
+    }
+    if !before_intact {
+        log("Typing correction: text changed around the fix, left as it is");
+        return;
+    }
+    let start = before_len;
+    let end = units.len();
+    let w = wide(&typed);
+    // SAFETY: EM_SETSEL / EM_REPLACESEL on an Edit control; the string is NUL-terminated and lives
+    // for the call.
+    unsafe {
+        SendMessageW(focus as HWND, 0x00B1, start, end as LPARAM); // EM_SETSEL
+        SendMessageW(focus as HWND, 0x00C2, 1, w.as_ptr() as LPARAM); // EM_REPLACESEL, undoable
+    }
+    LAST_FIX.with(|f| f.borrow_mut().take());
+    log("Typing correction: the result was not the fix (autocompletion?), the words as typed were put back");
+    let l = app::lang();
+    crate::bubble::show(text(l, Msg::TypingRestored), l.is_rtl(), None, 0, false);
 }

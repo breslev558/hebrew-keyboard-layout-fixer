@@ -6,7 +6,7 @@ use crate::diag::{Step, Trace};
 use crate::layouts::KeyMap;
 use crate::i18n::Msg;
 use crate::policy::{self, ConsoleKind, ConsoleReader, Selection};
-use crate::settings::{Action, AppSettings, RuleMode};
+use crate::settings::{Action, AppSettings, MixedTextMode, RuleMode};
 
 /// What we know about the window that had the focus when F10 was pressed.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -170,6 +170,33 @@ pub fn may_restore(st: &ClipState, now: &ClipObs) -> bool {
 
 pub trait Host {
     fn foreground(&self) -> usize;
+    /// 1.8.5, F10 "only the wrong words": the text with only its words typed on the wrong layout
+    /// converted, when the word lists are there (public version); None = convert everything.
+    fn wrong_words_only(&self, _text: &str, _map: &KeyMap, _replace_caps: bool) -> Option<String> {
+        None
+    }
+    /// 1.8.5: Ctrl+V was just sent with `after` replacing `before` (the clipboard path): a quick
+    /// next F10 may toggle it back without the clipboard.
+    fn pasted(&self, _before: &str, _after: &str) {}
+    /// 1.8.5: Shift+Up then Shift+Home (the selection grows by one DISPLAYED line, in a field that
+    /// wraps a long line); false = not sent / not supported.
+    fn send_extend_up(&self) -> bool {
+        false
+    }
+    /// 1.8.5: Shift+Down (undoes one `send_extend_up`).
+    fn send_shrink_down(&self) -> bool {
+        false
+    }
+    /// 1.8.5: the selection is collapsed back to the caret (Right arrow), after an aborted
+    /// paragraph extension.
+    fn send_collapse(&self) -> bool {
+        false
+    }
+    /// 1.8.5: keys and clicks of the user counted so far (None: not counted); any change during
+    /// the paragraph extension stops it.
+    fn user_activity(&self) -> Option<(u32, u32)> {
+        None
+    }
     /// The window in the foreground when the hotkey was pressed (read on the UI thread before
     /// the work starts, audit A03); a different window later stops the conversion.
     fn initial_target(&self) -> usize {
@@ -305,9 +332,27 @@ pub fn caps_fixed_to_hebrew(text: &str, out: &str) -> bool {
     typed_with_caps_lock(text) && !contains_hebrew(text) && contains_hebrew(out) && !out.chars().any(|c| c.is_alphabetic() && c.is_uppercase() && !crate::layouts::is_hebrew_letter(c))
 }
 
+/// The keyboard language to switch to after a conversion: Hebrew if the result has Hebrew. With
+/// only some words converted (1.8.5), the language of the LAST word that changed (the one the user
+/// was typing when F10 was pressed).
+pub fn language_after(text: &str, out: &str) -> bool {
+    let a: Vec<&str> = text.split_whitespace().collect();
+    let b: Vec<&str> = out.split_whitespace().collect();
+    if a.len() == b.len() {
+        if let Some((_, w)) = a.iter().zip(&b).rev().find(|(x, y)| x != y && y.chars().any(char::is_alphabetic)) {
+            return contains_hebrew(w);
+        }
+    }
+    contains_hebrew(out)
+}
+
 /// The conversion of this run: keyboard layout (F10) or Caps Lock case swap (F9).
-fn transform(s: &AppSettings, map: &KeyMap, text: &str) -> String {
+fn transform(host: &dyn Host, s: &AppSettings, map: &KeyMap, text: &str) -> String {
     match s.action {
+        // 1.8.5: only the wrong words (option, word lists needed); everything when none is found
+        Action::Layout if s.f10_only_wrong_words && s.mixed_text_mode == MixedTextMode::ToggleAll => {
+            host.wrong_words_only(text, map, s.replace_caps).unwrap_or_else(|| convert_with(map, text, s.mixed_text_mode, s.replace_caps))
+        }
         Action::Layout => convert_with(map, text, s.mixed_text_mode, s.replace_caps),
         Action::Case => swap_case(text),
     }
@@ -552,6 +597,14 @@ fn convert_window(
                 if multi {
                     return Outcome::say(Msg::SelectText, "Shift+Home copied several lines, nothing pasted");
                 }
+                // 1.8.5: in a field that wraps a long line (chat boxes, Electron, browsers), Shift+Home
+                // stops at the start of the DISPLAYED line: the selection grows one displayed line
+                // at a time while it stays in the same real line (no line break) and still grows
+                if !(s.last_word_only && policy::last_word_field(&info.window_class, &info.focus_class)) && policy::paragraph_field(&info.focus_class, &info.exe_name) {
+                    if let Err(o) = extend_to_paragraph(host, target, st, s) {
+                        return o;
+                    }
+                }
             }
             Copy::NoChange => return Outcome::say(Msg::NothingToConvert, "No clipboard change after Ctrl+C (no text?)"),
             Copy::NoText => return Outcome::say(Msg::NothingToConvert, NO_TEXT_LOG),
@@ -578,11 +631,11 @@ fn convert_window(
     if s.max_character_limit > 0 && n as i64 > s.max_character_limit {
         return Outcome::say(Msg::TooLong, format!("Text exceeds limit ({n} > {})", s.max_character_limit));
     }
-    let out = transform(s, map, text);
+    let out = transform(&*host, s, map, text);
     if out == text {
         return Outcome::say(Msg::NothingToConvert, "Text unchanged");
     }
-    let to_hebrew = contains_hebrew(&out);
+    let to_hebrew = language_after(text, &out);
     st.converted = Some(out.clone());
 
     trace.mark(Step::Publish, host.now_ms());
@@ -626,6 +679,9 @@ fn convert_window(
         }
         return Outcome::say(Msg::KeysBlocked, "Ctrl+V not sent, NOT pasted");
     }
+    if s.action == Action::Layout {
+        host.pasted(text, &out);
+    }
     if s.turn_off_caps_lock && (s.action == Action::Case || (s.action == Action::Layout && caps_fixed_to_hebrew(text, &out))) {
         host.caps_lock_off();
     }
@@ -639,6 +695,72 @@ fn convert_window(
 /// normalised), otherwise nothing is pasted. Any doubt = refusal, the clipboard is put back.
 /// Returns the text to convert (quotes normalised). `st.captured` always keeps the RAW text of
 /// the last copy: the clipboard checks compare it with what is really there.
+/// 1.8.5: at most this many displayed lines are added (a paragraph longer than that: its end only).
+const PARAGRAPH_LINES: usize = 30;
+/// ...and at most this long (ms) in all.
+const PARAGRAPH_MS: u64 = 1_500;
+
+fn extend_to_paragraph(host: &mut dyn Host, target: usize, st: &mut ClipState, s: &AppSettings) -> Result<(), Outcome> {
+    let limit = if s.max_character_limit > 0 { s.max_character_limit as usize } else { 5_000 };
+    let activity = host.user_activity();
+    let started = host.now_ms();
+    // one displayed line back, then the selection must be exactly `before` again (the caret may
+    // land elsewhere: right-to-left lines, indents, "smart Home"); otherwise nothing is pasted
+    let step_back = |host: &mut dyn Host, st: &mut ClipState, before: String| -> Result<(), Outcome> {
+        if !host.send_shrink_down() {
+            host.send_collapse();
+            return Err(Outcome::say(Msg::KeysBlocked, "Shift+Down not sent, stopped"));
+        }
+        match copy_selection(host, target, st) {
+            Copy::Text(t) if t == before => {
+                st.captured = Some(t);
+                Ok(())
+            }
+            Copy::Stopped(o) => {
+                host.send_collapse();
+                Err(o)
+            }
+            _ => {
+                host.send_collapse();
+                Err(Outcome::say(Msg::SelectText, "Paragraph: the selection could not be put back exactly, nothing pasted"))
+            }
+        }
+    };
+    for _ in 0..PARAGRAPH_LINES {
+        let before = st.captured.clone().unwrap_or_default();
+        // a key typed or a click, a move, too long: stop where we are (the text selected now is `before`)
+        if host.foreground() != target || !host.focus_unchanged() || host.user_moving() || host.user_activity() != activity {
+            host.send_collapse();
+            return Err(Outcome::say(Msg::WindowChanged, "Target window or field changed, stopped"));
+        }
+        if host.now_ms().saturating_sub(started) > PARAGRAPH_MS {
+            return Ok(());
+        }
+        if !host.send_extend_up() {
+            return Ok(()); // not supported: the displayed line only, as before
+        }
+        match copy_selection(host, target, st) {
+            Copy::Text(t) if policy::contains_line_break(&t) => return step_back(host, st, before),
+            Copy::Text(t) if t == before => {
+                st.captured = Some(t); // start of the field: complete
+                return Ok(());
+            }
+            Copy::Text(t) if t.chars().count() > limit || !t.ends_with(&before) || t.chars().count() < before.chars().count() => {
+                // too long, or it did not grow backwards from the same end: one step back
+                return step_back(host, st, before);
+            }
+            Copy::Text(t) => st.captured = Some(t),
+            // the copy failed after the selection moved: back one step and checked
+            Copy::NoChange | Copy::NoText => return step_back(host, st, before),
+            Copy::Stopped(o) => {
+                host.send_collapse();
+                return Err(o);
+            }
+        }
+    }
+    Ok(())
+}
+
 fn select_last_word(host: &mut dyn Host, target: usize, st: &mut ClipState, trace: &mut Trace) -> Result<String, Outcome> {
     use crate::words::{last_word, normalize_quotes, WordRefusal};
     let line = st.captured.clone().unwrap_or_default();
@@ -832,7 +954,7 @@ fn console_line(
     if !policy::console_text_ok(&text, max) || text.chars().count() != count {
         return Err(Outcome::say(Msg::ConsoleBusy, "Console: line has unsupported characters or is too long, nothing done"));
     }
-    let out = transform(s, map, &text);
+    let out = transform(&*host, s, map, &text);
     if out == text {
         return Err(Outcome::say(Msg::NothingToConvert, "Console: text unchanged"));
     }
@@ -894,6 +1016,13 @@ mod tests {
     /// A simulated Windows: a text field with an optional selection, a clipboard with a sequence
     /// number and an owner, a foreground window, and a user who may copy at any moment.
     struct Mock {
+        /// 1.8.5: what wrong_words_only returns
+        smart: Option<String>,
+        /// 1.8.5: displayed lines ABOVE the caret line in the same paragraph (nearest first), then
+        /// whether a real line break comes before them; `up` = how many were added
+        above: Vec<String>,
+        break_above: bool,
+        up: Cell<usize>,
         fg: Cell<usize>,
         /// window in the foreground at the hotkey (0 = same as `fg`), audit A03
         start_fg: usize,
@@ -972,6 +1101,10 @@ mod tests {
     impl Mock {
         fn new() -> Self {
             Self {
+                smart: None,
+                above: Vec::new(),
+                break_above: false,
+                up: Cell::new(0),
                 fg: Cell::new(7),
                 start_fg: 0,
                 info: TargetInfo { window_class: "Notepad".into(), exe_name: "notepad.exe".into(), elevated: Some(false), ..Default::default() },
@@ -1075,6 +1208,34 @@ mod tests {
     impl Host for Mock {
         fn foreground(&self) -> usize {
             self.fg.get()
+        }
+        fn wrong_words_only(&self, _text: &str, _map: &KeyMap, _replace_caps: bool) -> Option<String> {
+            self.smart.clone()
+        }
+        fn send_extend_up(&self) -> bool {
+            self.ev("extend-up");
+            let n = (self.up.get() + 1).min(self.above.len() + 1);
+            self.up.set(n);
+            let line = self.line.clone().unwrap_or_default();
+            let k = n.min(self.above.len());
+            let mut t: String = self.above[..k].iter().rev().cloned().collect::<String>() + &line;
+            if n > self.above.len() && self.break_above {
+                t = format!("previous paragraph\r\n{t}");
+            }
+            *self.selected.borrow_mut() = Some(t);
+            true
+        }
+        fn send_collapse(&self) -> bool {
+            self.ev("collapse");
+            true
+        }
+        fn send_shrink_down(&self) -> bool {
+            self.ev("shrink-down");
+            let n = self.up.get().saturating_sub(1);
+            self.up.set(n);
+            let line = self.line.clone().unwrap_or_default();
+            *self.selected.borrow_mut() = Some(self.above[..n.min(self.above.len())].iter().rev().cloned().collect::<String>() + &line);
+            true
         }
         fn initial_target(&self) -> usize {
             if self.start_fg != 0 { self.start_fg } else { self.fg.get() }
@@ -1889,6 +2050,66 @@ mod tests {
         s.require_selection = true;
         let o = run(&mut m, &s);
         assert!(m.c_replaced.borrow().is_none(), "RequireSelection changed an unselected console command: {}", o.log);
+    }
+
+    // ---- 1.8.5 : no selection = the whole paragraph, in a field that wraps ----
+
+    #[test]
+    fn no_selection_takes_the_whole_wrapped_paragraph() {
+        // a paragraph displayed on 3 lines, a real line break before it
+        let mut m = Mock::new();
+        *m.selected.borrow_mut() = None;
+        m.info.focus_class = "Chrome_RenderWidgetHostHWND".into();
+        m.line = Some("vk ".into());
+        m.above = vec!["nv ".into(), "akuo ".into()];
+        m.break_above = true;
+        let o = run(&mut m, &settings());
+        assert_eq!(o.msg, Some(Msg::Converted), "{}", o.log);
+        assert_eq!(m.pasted.borrow().as_deref(), Some("שלום מה הל "));
+        assert!(m.happened("shrink-down"), "one step back after the real line break");
+        // the paragraph starts the field: no line break, the selection stops growing
+        let mut m = Mock::new();
+        *m.selected.borrow_mut() = None;
+        m.info.focus_class = "Chrome_RenderWidgetHostHWND".into();
+        m.line = Some("nv".into());
+        m.above = vec!["akuo ".into()];
+        let o = run(&mut m, &settings());
+        assert_eq!(m.pasted.borrow().as_deref(), Some("שלום מה"), "{}", o.log);
+        assert!(!m.happened("shrink-down"));
+        // a single displayed line: as before
+        let mut m = Mock::new();
+        *m.selected.borrow_mut() = None;
+        m.info.focus_class = "Chrome_RenderWidgetHostHWND".into();
+        m.line = Some("akuo".into());
+        run(&mut m, &settings());
+        assert_eq!(m.pasted.borrow().as_deref(), Some("שלום"));
+    }
+
+    // ---- 1.8.5 : F10 only the wrong words ----
+
+    #[test]
+    fn f10_only_wrong_words_when_asked() {
+        let on = AppSettings { f10_only_wrong_words: true, ..settings() };
+        // the option on and an answer: only the wrong words are pasted; the keyboard follows the last
+        let mut m = Mock::new();
+        m.smart = Some("שלום לכולם מה נשמע".into());
+        *m.selected.borrow_mut() = Some("שלום לכולם nv bang".into());
+        let o = run(&mut m, &on);
+        assert_eq!(o.msg, Some(Msg::Converted), "{}", o.log);
+        assert_eq!(m.pasted.borrow().as_deref(), Some("שלום לכולם מה נשמע"));
+        // no answer (no word lists, nothing found wrong): everything is converted, as before
+        let mut m = Mock::new();
+        *m.selected.borrow_mut() = Some("akuo".into());
+        run(&mut m, &on);
+        assert_eq!(m.pasted.borrow().as_deref(), Some("שלום"));
+        // option off: never asked
+        let mut m = Mock::new();
+        m.smart = Some("x".into());
+        *m.selected.borrow_mut() = Some("akuo".into());
+        run(&mut m, &settings());
+        assert_eq!(m.pasted.borrow().as_deref(), Some("שלום"));
+        assert!(language_after("hello akuo", "hello שלום"));
+        assert!(!language_after("שלום ים' שרק", "שלום how are"), "last changed word is English");
     }
 
     // ---- 1.8.3 : F10 on text typed with Caps Lock ----

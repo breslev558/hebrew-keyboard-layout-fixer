@@ -29,7 +29,21 @@ pub struct Dict {
     en_model: crate::ngram::Model,
     /// (gap, min), NGRAM_GAP and NGRAM_MIN; changed only by the measurement
     ngram: (f64, f64),
+    /// 1.8.5: technical words and brands (lower case -> as written: "github" -> "GitHub")
+    tech: HashMap<String, String>,
 }
+
+/// 1.8.5: technical words and brands often typed with the wrong layout, missing from the word
+/// lists or written with capitals inside: recognised, and written their usual way.
+pub const TECH_WORDS: &[&str] = &[
+    "GitHub", "ChatGPT", "WhatsApp", "YouTube", "Gmail", "Google", "Facebook", "Instagram", "TikTok", "Zoom", "Outlook", "Excel",
+    "PowerPoint", "OneDrive", "Dropbox", "iPhone", "iPad", "Android", "Windows", "Linux", "Python", "JavaScript", "TypeScript", "Netflix",
+    "Spotify", "LinkedIn", "Telegram", "Discord", "Slack", "PayPal", "Bitcoin", "Wikipedia", "Copilot", "Claude", "Gemini", "OpenAI",
+    "Microsoft", "Samsung", "Chrome", "Firefox", "Waze", "Canva", "Notion", "Trello", "Jira", "Docker", "Kubernetes", "WordPress",
+    "Shopify", "AliExpress", "eBay", "Amazon", "Bluetooth", "WiFi", "USB", "PDF", "HTML", "CSS", "SQL", "Gmail", "Hotmail", "Yahoo",
+    "Skype", "Viber", "Signal", "Teams", "Photoshop", "AutoCAD", "Excel", "Zoom", "MacBook", "PlayStation", "Xbox", "Minecraft",
+    "Fortnite", "Roblox", "Uber", "Airbnb", "Booking", "Waze", "Moovit", "Gett", "Wolt", "Bit", "Pango", "NetFree",
+];
 
 /// 1.8.2, a word in no list: proposed only when the reading looks much more like its language
 /// than what was typed looks like its own (average log-probability per letter), 5 letters or more.
@@ -94,7 +108,21 @@ impl Dict {
             m
         };
         let model = |t: &str| crate::ngram::Model::train(t.lines().filter_map(|l| l.split_whitespace().next()).filter(|w| w.chars().count() <= MAX_WORD_CHARS).take(max));
-        Dict { he: take(he, false), en: take(en, true), personal: HashSet::new(), never: HashSet::new(), learned: HashSet::new(), he_model: model(he), en_model: model(en), ngram: (NGRAM_GAP, NGRAM_MIN) }
+        let mut en_map = take(en, true);
+        let mut tech = HashMap::new();
+        for w in TECH_WORDS {
+            let l = w.to_lowercase();
+            // only words that are not ordinary English words (bit, signal, teams, windows, zoom...
+            // keep their place and their small letters: "a bit", "two teams")
+            if en_map.contains_key(&l) {
+                continue;
+            }
+            en_map.insert(l.clone(), 2_000);
+            if w.chars().any(|c| c.is_uppercase()) {
+                tech.insert(l, w.to_string());
+            }
+        }
+        Dict { he: take(he, false), en: en_map, personal: HashSet::new(), never: HashSet::new(), learned: HashSet::new(), he_model: model(he), en_model: model(en), ngram: (NGRAM_GAP, NGRAM_MIN), tech }
     }
     /// The personal dictionary (replaces the previous one).
     pub fn set_personal(&mut self, text: &str) {
@@ -119,6 +147,15 @@ impl Dict {
     /// sure (prefixed forms of common words are in the frequency list anyway).
     pub fn is_he_exact(&self, w: &str) -> bool {
         self.he.contains_key(w)
+    }
+    /// 1.8.5: a technical word or brand as usually written ("github" -> "GitHub"), else as is.
+    pub fn display(&self, w: &str) -> String {
+        // only a whole lower-case word, without the signs around it
+        let core = w.trim_matches(|c: char| !c.is_alphanumeric());
+        match self.tech.get(core) {
+            Some(d) if core == core.to_lowercase() => w.replacen(core, d, 1),
+            _ => w.to_string(),
+        }
     }
     /// Rank in the list of that language (0 = most frequent).
     pub fn rank(&self, w: &str, hebrew: bool) -> Option<u32> {
@@ -301,6 +338,187 @@ fn letters_only(w: &str, hebrew: bool) -> bool {
     !w.is_empty() && w.chars().all(|c| if hebrew { crate::layouts::is_hebrew_letter(c) || c == '\'' || c == '"' } else { c.is_alphabetic() && !crate::layouts::is_hebrew_letter(c) || c == '\'' })
 }
 
+/// One word typed with the Hebrew (`hebrew_active`) or the Latin layout, and its reading on the
+/// other layout: was it typed with the wrong layout? (1.8.5: shared by the proposals while typing
+/// and by F10 "only the wrong words".)
+pub fn word_wrong(dict: &Dict, typed: &str, read: &str, hebrew_active: bool) -> bool {
+    // personal dictionary first: a word of the user, or a word never to fix, is never wrong;
+    // a reading that is a word of the user counts as a real word
+    if dict.never(typed) || dict.personal(typed) || (!hebrew_active && (code_like(typed) || all_caps(typed))) {
+        return false;
+    }
+    // 1.8.2: a word followed by a sign ("hello," "שלום."): the word itself decides; the keys
+    // , . ; / ' are Hebrew letters on the other layout ("ac," = שבת), so they stay in the word
+    // (on the Hebrew layout "/" and "'" are the letters q and w, not signs)
+    let core = if hebrew_active { typed.trim_end_matches([',', '.', ';']) } else { typed.trim_end_matches(WORD_SIGNS) };
+    let signs_after = core != typed;
+    if signs_after && dict.personal(core) {
+        return false;
+    }
+    // (an English word of the list stays, unless the reading is a word at least 4 times more
+    // frequent: "ac," = שבת, rank 2 634, rather than "ac", rank 11 948)
+    let read_rank = dict.rank(read, !hebrew_active).filter(|_| dict.common_enough(read, !hebrew_active));
+    if signs_after && (if hebrew_active { dict.is_he(core) } else { dict.rank(core, false).is_some_and(|k| read_rank.is_none_or(|r| r.saturating_mul(4) >= k)) }) {
+        return false;
+    }
+    // taught with F10: wrong whatever the lists say
+    if dict.learned(typed) && letters_only(read, !hebrew_active) {
+        return true;
+    }
+    let typed_is_word = if hebrew_active { dict.is_he(typed) } else { dict.is_en(typed) };
+    if dict.personal(read) && letters_only(read, !hebrew_active) && !typed_is_word {
+        return true;
+    }
+    if typed_is_word || !letters_only(read, !hebrew_active) {
+        return false;
+    }
+    if dict.common_enough(read, !hebrew_active) {
+        // 1.8.4 (real sentences): a rare Hebrew word that looks like Hebrew ("פרם", "נשאי")
+        // whose reading is a less common English word ("pro", "bath") is left alone
+        if hebrew_active && dict.rank(read, false).is_some_and(|r| r >= HE_LOOKS_OK_RANK) && dict.looks_like(core, true, HE_LOOKS_OK) {
+            return false;
+        }
+        return true;
+    }
+    // 1.8.2: the reading is in no list (a rare word, a Hebrew word with prefixes)
+    let read_listed = if hebrew_active { dict.is_en(read) } else { dict.is_he_exact(read) };
+    if read_listed {
+        return false; // a rare short word of the list: left alone, as before
+    }
+    // "hello,world", "yes,no": words of the list joined by a comma
+    if !hebrew_active && core.contains(',') && core.split(',').all(|p| p.is_empty() || dict.is_en(p)) {
+        return false;
+    }
+    // a sign INSIDE what was typed that is no letter on the other layout ("file.txt",
+    // "google.com"): the letter models would be fooled, so no proposal without the lists
+    if !interior_signs_ok(core, hebrew_active) {
+        return false;
+    }
+    // what was typed is judged without the signs after it ("kauai," as "kauai"): a word and
+    // a comma is never less English than the word; the reading keeps them (ת ץ ף...)
+    (!hebrew_active && dict.ngram.0.is_finite() && dict.is_he_prefixed(read) && dict.looks_swapped(core, read, false, PREFIX_GAP, f64::NEG_INFINITY))
+        || (!core.is_empty() && dict.looks_swapped(core, read, hebrew_active, dict.ngram.0, dict.ngram.1))
+}
+
+/// 1.8.2: a short word that happens to be a rare word here ("ak", "gk") but a very common one on
+/// the other layout (של, על): fixed together with the wrong word next to it.
+pub fn short_word_follows(dict: &Dict, t: &str, r: &str, hebrew_active: bool) -> bool {
+    let n = t.chars().count();
+    (2..=3).contains(&n) && !dict.never(t) && !dict.personal(t) && !(!hebrew_active && (all_caps(t) || code_like(t))) && letters_only(t, hebrew_active) && dict.rank(t, hebrew_active).is_none_or(|k| k >= SHORT_OWN_RANK) && dict.rank(r, !hebrew_active).is_some_and(|k| k < SHORT_OTHER_RANK)
+}
+
+/// 1.8.5, F10 "only the wrong words": in a text where some words were typed with the right
+/// layout and others with the wrong one, only the wrong ones are converted (each word judged on
+/// its own script, then short words next to a wrong word follow it). None when no word looks
+/// wrong: the caller then converts everything, as before (never stuck).
+pub fn convert_wrong_words(text: &str, dict: &Dict, convert: impl Fn(&str) -> String) -> Option<String> {
+    if dict.is_empty() {
+        return None;
+    }
+    // words and the blanks between them, kept exactly
+    let mut parts: Vec<(String, bool)> = Vec::new(); // (text, is_word)
+    for c in text.chars() {
+        let w = !c.is_whitespace();
+        match parts.last_mut() {
+            Some((t, iw)) if *iw == w => t.push(c),
+            _ => parts.push((c.to_string(), w)),
+        }
+    }
+    let words: Vec<usize> = (0..parts.len()).filter(|&i| parts[i].1).collect();
+    let info: Vec<(String, bool)> = words.iter().map(|&i| {
+        let t = &parts[i].0;
+        let he = t.chars().filter(|c| crate::layouts::is_hebrew_letter(*c)).count();
+        let la = t.chars().filter(|c| c.is_alphabetic() && !crate::layouts::is_hebrew_letter(*c)).count();
+        (convert(t), he > la)
+    }).collect();
+    // each word is judged without the signs around it that are signs on BOTH layouts ("?", "!",
+    // quotes, brackets, "/" = "."), keeping those that are letters on the other one ("," = ת)
+    // (on the Hebrew layout "'" and "/" are the letters w and q)
+    let core_of = |t: &str, he: bool| -> String {
+        let sign = |c: char| !c.is_alphabetic() && !(he && matches!(c, '\'' | '/')) && !convert(&c.to_string()).chars().any(char::is_alphabetic);
+        t.trim_matches(sign).to_string()
+    };
+    let letters = |t: &str| t.chars().filter(|c| c.is_alphabetic()).count();
+    // typed on the Hebrew layout, a final ץ ת ף may be the "." "," ";" ending an English word
+    // ("נוממטץ" = "bunny."): the word is judged with and without it
+    let judge = |c: &str, he: bool| -> bool {
+        if letters(c) >= 2 && word_wrong(dict, c, &convert(c), he) {
+            return true;
+        }
+        if he {
+            let r = convert(c);
+            let rc = r.trim_end_matches([',', '.', ';']);
+            let n = r.chars().count() - rc.chars().count();
+            if n > 0 {
+                let tc: String = c.chars().take(c.chars().count().saturating_sub(n)).collect();
+                return letters(&tc) >= 2 && word_wrong(dict, &tc, rc, he);
+            }
+        }
+        false
+    };
+    let mut flags: Vec<bool> = words.iter().zip(&info).map(|(&i, (_, he))| judge(&core_of(&parts[i].0, *he), *he)).collect();
+    if !flags.iter().any(|f| *f) {
+        return None;
+    }
+    // short words next to a wrong word of the same script follow it (a few passes, both sides)
+    for _ in 0..3 {
+        for k in 0..flags.len() {
+            if flags[k] {
+                continue;
+            }
+            let he = &info[k].1;
+            let t = &core_of(&parts[words[k]].0, *he);
+            let r = &convert(t);
+            let near = (k > 0 && flags[k - 1] && info[k - 1].1 == *he) || (k + 1 < flags.len() && flags[k + 1] && info[k + 1].1 == *he);
+            let one_letter = letters(t) == 1 && t.chars().count() <= 2 && dict.rank(r.trim_matches(|c: char| !c.is_alphabetic()), !*he).is_some_and(|x| x < SHORT_OTHER_RANK) && dict.rank(t, *he).is_none_or(|x| x >= SHORT_OWN_RANK);
+            // between two wrong words, a short word whose reading is far more frequent ("שרק",
+            // rank 1 844, between two wrong words reads "are", rank 30)
+            let both = k > 0 && k + 1 < flags.len() && flags[k - 1] && flags[k + 1] && info[k - 1].1 == *he && info[k + 1].1 == *he;
+            let sandwiched = both && letters(t) <= 3 && dict.rank(r, !*he).is_some_and(|x| dict.rank(t, *he).is_none_or(|o| x.saturating_mul(20) < o));
+            if near && (short_word_follows(dict, t, r, *he) || one_letter || sandwiched) {
+                flags[k] = true;
+            }
+        }
+    }
+    // a run of words of the same script where most words are wrong: the whole run was typed on
+    // the wrong layout, its short ambiguous words too ("אם" = "to", "ש" = "a" in English text)
+    let mut k = 0;
+    while k < flags.len() {
+        let mut e = k;
+        while e + 1 < flags.len() && info[e + 1].1 == info[k].1 {
+            e += 1;
+        }
+        let run: Vec<usize> = (k..=e).filter(|&j| letters(&parts[words[j]].0) >= 1).collect();
+        let wrong = run.iter().filter(|&&j| flags[j]).count();
+        if run.len() >= 3 && wrong * 10 >= run.len() * 6 {
+            for &j in &run {
+                let t = &parts[words[j]].0;
+                // never a word the user protects, capitals or code-like words
+                if !dict.never(t) && !dict.personal(t) && !(!info[j].1 && (all_caps(t) || code_like(t))) {
+                    flags[j] = true;
+                }
+            }
+        }
+        k = e + 1;
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut k = 0;
+    for (t, is_word) in &parts {
+        if *is_word {
+            if flags[k] {
+                // a Hebrew-layout word read as Latin: brands written their usual way
+                out.push_str(&if info[k].1 { dict.display(&info[k].0) } else { info[k].0.clone() });
+            } else {
+                out.push_str(t);
+            }
+            k += 1;
+        } else {
+            out.push_str(t);
+        }
+    }
+    Some(out)
+}
+
 /// `words`: the last words typed, oldest first, each as (typed, reading on the other layout);
 /// they were all typed with the same layout, `hebrew_active` telling which. A space was just
 /// typed after the last one.
@@ -308,63 +526,9 @@ pub fn suggest(words: &[(String, String)], hebrew_active: bool, dict: &Dict) -> 
     if dict.is_empty() || words.is_empty() {
         return None;
     }
-    let wrong = |typed: &str, read: &str| -> bool {
-        // personal dictionary first: a word of the user, or a word never to fix, is never wrong;
-        // a reading that is a word of the user counts as a real word
-        if dict.never(typed) || dict.personal(typed) || (!hebrew_active && (code_like(typed) || all_caps(typed))) {
-            return false;
-        }
-        // 1.8.2: a word followed by a sign ("hello," "שלום."): the word itself decides; the keys
-        // , . ; / ' are Hebrew letters on the other layout ("ac," = שבת), so they stay in the word
-        let core = typed.trim_end_matches(WORD_SIGNS);
-        let signs_after = core != typed;
-        if signs_after && dict.personal(core) {
-            return false;
-        }
-        // (an English word of the list stays, unless the reading is a word at least 4 times more
-        // frequent: "ac," = שבת, rank 2 634, rather than "ac", rank 11 948)
-        let read_rank = dict.rank(read, !hebrew_active).filter(|_| dict.common_enough(read, !hebrew_active));
-        if signs_after && (if hebrew_active { dict.is_he(core) } else { dict.rank(core, false).is_some_and(|k| read_rank.is_none_or(|r| r.saturating_mul(4) >= k)) }) {
-            return false;
-        }
-        // taught with F10: wrong whatever the lists say
-        if dict.learned(typed) && letters_only(read, !hebrew_active) {
-            return true;
-        }
-        let typed_is_word = if hebrew_active { dict.is_he(typed) } else { dict.is_en(typed) };
-        if dict.personal(read) && letters_only(read, !hebrew_active) && !typed_is_word {
-            return true;
-        }
-        if typed_is_word || !letters_only(read, !hebrew_active) {
-            return false;
-        }
-        if dict.common_enough(read, !hebrew_active) {
-            // 1.8.4 (real sentences): a rare Hebrew word that looks like Hebrew ("פרם", "נשאי")
-            // whose reading is a less common English word ("pro", "bath") is left alone
-            if hebrew_active && dict.rank(read, false).is_some_and(|r| r >= HE_LOOKS_OK_RANK) && dict.looks_like(core, true, HE_LOOKS_OK) {
-                return false;
-            }
-            return true;
-        }
-        // 1.8.2: the reading is in no list (a rare word, a Hebrew word with prefixes)
-        let read_listed = if hebrew_active { dict.is_en(read) } else { dict.is_he_exact(read) };
-        if read_listed {
-            return false; // a rare short word of the list: left alone, as before
-        }
-        // "hello,world", "yes,no": words of the list joined by a comma
-        if !hebrew_active && core.contains(',') && core.split(',').all(|p| p.is_empty() || dict.is_en(p)) {
-            return false;
-        }
-        // a sign INSIDE what was typed that is no letter on the other layout ("file.txt",
-        // "google.com"): the letter models would be fooled, so no proposal without the lists
-        if !interior_signs_ok(core, hebrew_active) {
-            return false;
-        }
-        // what was typed is judged without the signs after it ("kauai," as "kauai"): a word and
-        // a comma is never less English than the word; the reading keeps them (ת ץ ף...)
-        (!hebrew_active && dict.ngram.0.is_finite() && dict.is_he_prefixed(read) && dict.looks_swapped(core, read, false, PREFIX_GAP, f64::NEG_INFINITY))
-            || (!core.is_empty() && dict.looks_swapped(core, read, hebrew_active, dict.ngram.0, dict.ngram.1))
-    };
+    // while typing, an abbreviation with a geresh (ים' דק') is left alone when the word without
+    // it is Hebrew (F10 "only the wrong words" still judges it with its neighbours)
+    let wrong = |typed: &str, read: &str| !(hebrew_active && typed.ends_with('\'') && dict.is_he(typed.trim_end_matches('\''))) && word_wrong(dict, typed, read, hebrew_active);
     let len = |s: &str| s.chars().count();
     let n = words.len();
     let flags: Vec<bool> = words.iter().map(|(t, r)| len(t) >= 2 && wrong(t, r)).collect();
@@ -376,16 +540,13 @@ pub fn suggest(words: &[(String, String)], hebrew_active: bool, dict: &Dict) -> 
     let mut start = n - 1;
     // 1.8.2: a short word that happens to be a rare word here ("ak", "gk") but a very common one
     // on the other layout (של, על) joins the run when the word after it is wrong
-    let soft = |(t, r): &(String, String)| -> bool {
-        let n = len(t);
-        (2..=3).contains(&n) && !dict.never(t) && !dict.personal(t) && !(!hebrew_active && (all_caps(t) || code_like(t))) && letters_only(t, hebrew_active) && dict.rank(t, hebrew_active).is_none_or(|k| k >= SHORT_OWN_RANK) && dict.rank(r, !hebrew_active).is_some_and(|k| k < SHORT_OTHER_RANK)
-    };
+    let soft = |(t, r): &(String, String)| short_word_follows(dict, t, r, hebrew_active);
     while start > 0 && (flags[start - 1] || soft(&words[start - 1])) {
         start -= 1;
     }
     let run = &words[start..];
     let erase = run.iter().map(|(t, _)| len(t)).sum::<usize>() + run.len(); // each word + its space
-    let text = run.iter().map(|(_, r)| r.as_str()).collect::<Vec<_>>().join(" ") + " ";
+    let text = run.iter().map(|(_, r)| if hebrew_active { dict.display(r) } else { r.clone() }).collect::<Vec<_>>().join(" ") + " ";
     // a single word taught with F10 is fixed at once (Backspace still undoes it)
     let auto = run.len() == 1 && dict.learned(&run[0].0);
     Some(Suggestion { erase, text, to_hebrew: !hebrew_active, keep_layout: false, auto })
@@ -474,6 +635,18 @@ impl Buffer {
             self.clear();
         }
     }
+    /// 1.8.5: the words of the sentence being typed, the current one included (for the chat
+    /// guard on Enter); None when nothing is tracked.
+    pub fn snapshot(&self) -> Option<(Vec<String>, bool)> {
+        if self.broken {
+            return None;
+        }
+        let mut w = self.words.clone();
+        if !self.current.is_empty() {
+            w.push(self.current.clone());
+        }
+        (!w.is_empty()).then_some((w, self.hebrew?))
+    }
     /// Nothing typed yet in the current word.
     pub fn is_empty_word(&self) -> bool {
         self.current.is_empty()
@@ -547,6 +720,81 @@ impl DoubleShift {
             }
         }
     }
+}
+
+/// 1.8.5, option: a quick tap on LEFT Ctrl alone = English keyboard, on RIGHT Ctrl alone = Hebrew.
+/// Any other key or click in between, or Ctrl held longer (a shortcut), cancels it.
+#[derive(Debug, Default)]
+pub struct CtrlTap {
+    down: Option<(bool, u64)>,
+}
+
+impl CtrlTap {
+    /// One key event: `ctrl` = Some(true) left Ctrl, Some(false) right Ctrl, None another key.
+    /// Some(true) = switch to English, Some(false) = switch to Hebrew.
+    pub fn key(&mut self, ctrl: Option<bool>, down: bool, now: u64) -> Option<bool> {
+        match (ctrl, down) {
+            (None, true) => {
+                self.down = None; // a shortcut (Ctrl+C...), AltGr (Ctrl + right Alt)...
+                None
+            }
+            (None, false) => None,
+            (Some(left), true) => {
+                if self.down.is_none_or(|(l, _)| l != left) {
+                    self.down = Some((left, now)); // key repeat while held: ignored
+                }
+                None
+            }
+            (Some(left), false) => match self.down.take() {
+                Some((l, at)) if l == left && now.saturating_sub(at) <= TAP_MS => Some(left),
+                _ => None,
+            },
+        }
+    }
+    pub fn cancel(&mut self) {
+        self.down = None;
+    }
+}
+
+/// 1.8.5: chat programs where Enter sends the message (option: a first Enter is held back when
+/// the whole sentence is in the wrong language).
+pub const MESSENGERS: &[&str] = &["whatsapp.exe", "whatsapp.root.exe", "telegram.exe", "ms-teams.exe", "teams.exe", "signal.exe", "discord.exe", "slack.exe", "viber.exe", "element.exe"];
+
+pub fn is_messenger(exe: &str) -> bool {
+    MESSENGERS.iter().any(|m| m.eq_ignore_ascii_case(exe))
+}
+
+/// 1.8.5: the sentence about to be sent looks typed in the wrong language: at least 2 words
+/// and most of them wrong, or a single long wrong word.
+pub fn sentence_wrong(pairs: &[(String, String)], hebrew_active: bool, dict: &Dict) -> bool {
+    let words: Vec<&(String, String)> = pairs.iter().filter(|(t, _)| t.chars().filter(|c| c.is_alphabetic()).count() >= 2).collect();
+    let wrong = words.iter().filter(|(t, r)| word_wrong(dict, t, r, hebrew_active)).count();
+    match words.len() {
+        0 => false,
+        1 => wrong == 1 && words[0].0.chars().count() >= 4,
+        n => wrong * 2 > n,
+    }
+}
+
+/// 1.8.5, option: programs that use one language only get that keyboard when they come to the
+/// front. The list is the user's file, one program per line, "program.exe" (English) or
+/// "program.exe = he" (Hebrew); these are written when the option is first turned on.
+pub const ONE_LANGUAGE_DEFAULT: &str = "windowsterminal.exe\r\npowershell.exe\r\npwsh.exe\r\ncmd.exe\r\nconhost.exe\r\nputty.exe\r\nmintty.exe\r\n";
+
+/// Parsed list: exe (lower case) -> true for Hebrew, false for English.
+pub fn parse_one_language(text: &str) -> HashMap<String, bool> {
+    let mut m = HashMap::new();
+    for l in text.trim_start_matches('\u{feff}').lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).take(500) {
+        let (exe, lang) = match l.split_once('=') {
+            Some((e, g)) => (e.trim(), g.trim().to_ascii_lowercase()),
+            None => (l, String::new()),
+        };
+        let exe = exe.to_ascii_lowercase();
+        if exe.ends_with(".exe") && !exe.contains(['\\', '/']) && exe.len() <= 80 {
+            m.insert(exe, matches!(lang.as_str(), "he" | "hebrew" | "hébreu" | "עברית"));
+        }
+    }
+    m
 }
 
 /// Where the word lists are: a dedicated GitHub release (not "latest", so later releases need not
@@ -1006,6 +1254,31 @@ mod sentences {
                 }
             }
             println!("{name} : mêmes phrases tapées sur le MAUVAIS clavier (1 sur 4) : {wn} mots, corrigés {:.1} %", 100.0 * wfixed as f64 / wn.max(1) as f64);
+            // F10 "only the wrong words": first half right, second half on the wrong layout
+            let (mut mn, mut mok, mut mnone, mut mfull, mut mcase) = (0usize, 0usize, 0usize, 0usize, 0usize);
+            for line in text.lines().filter(|l| l.split_whitespace().count() >= 4).step_by(4) {
+                let words: Vec<&str> = line.split_whitespace().collect();
+                let half = words.len() / 2;
+                let typed = format!("{} {}", words[..half].join(" "), words[half..].iter().map(|w| convert_with(&m, w, MixedTextMode::ToggleAll, true)).collect::<Vec<_>>().join(" "));
+                let want = words.join(" ");
+                mn += 1;
+                let got = convert_wrong_words(&typed, &d, |w| convert_with(&m, w, MixedTextMode::ToggleAll, true));
+                if got.as_deref() == Some(want.as_str()) {
+                    mok += 1;
+                }
+                // capitals cannot come back from Hebrew letters ("איק" = "the", not "The")
+                if got.as_deref().map(str::to_lowercase) == Some(want.to_lowercase()) {
+                    mcase += 1;
+                } else if show && mn < 40 {
+                    println!("  mélangée : {want:?}\n    tapé : {typed:?}\n    F10  : {got:?}");
+                }
+                // a sentence typed right: nothing to change
+                match convert_wrong_words(&want, &d, |w| convert_with(&m, w, MixedTextMode::ToggleAll, true)) {
+                    None => mnone += 1,
+                    Some(_) => mfull += 1,
+                }
+            }
+            println!("{name} : F10 « seulement les mots faux », {mn} phrases mélangées (1re moitié juste, 2e moitié sur le mauvais clavier) : entièrement justes {:.1} % ({:.1} % aux majuscules près) ; phrases justes touchées à tort {:.2} %", 100.0 * mok as f64 / mn.max(1) as f64, 100.0 * mcase as f64 / mn.max(1) as f64, 100.0 * mfull as f64 / (mnone + mfull).max(1) as f64);
             println!("{name} : {n} phrases bien tapées, {words} mots vérifiés ; phrases avec une fausse proposition : {bad} ({:.2} %) ; propositions par mot : {:.3} %", 100.0 * bad as f64 / n.max(1) as f64, 100.0 * props as f64 / words.max(1) as f64);
         }
     }
@@ -1033,6 +1306,45 @@ mod cases {
     }
 
     #[test]
+    fn tech_words_written_their_way() {
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../");
+        let read = |p: &str| std::fs::read_to_string(format!("{root}{p}")).ok();
+        let (Some(he), Some(en)) = (read("data/words/KeyboardLayoutFixer-words-he.txt"), read("data/words/KeyboardLayoutFixer-words-en.txt")) else { return };
+        let d = Dict::from_lists(&he, &en, DICT_SIZE);
+        let m = us_map();
+        let conv = |s: &str| convert_with(&m, s, MixedTextMode::ToggleAll, true);
+        for w in ["github", "chatgpt", "whatsapp"] {
+            let typed = conv(w);
+            let s = suggest(&[(typed.clone(), conv(&typed))], true, &d).unwrap_or_else(|| panic!("{w}"));
+            assert_eq!(s.text.trim().to_lowercase(), w);
+            assert!(s.text.chars().any(|c| c.is_uppercase()), "{}", s.text);
+        }
+        assert_eq!(d.display("github,"), "GitHub,");
+        assert_eq!(d.display("hello"), "hello");
+    }
+
+    #[test]
+    fn ctrl_taps_and_lists() {
+        let mut c = CtrlTap::default();
+        assert_eq!(c.key(Some(true), true, 0), None);
+        assert_eq!(c.key(Some(true), false, 100), Some(true), "left Ctrl tap = English");
+        assert_eq!(c.key(Some(false), true, 200), None);
+        assert_eq!(c.key(Some(false), false, 250), Some(false), "right Ctrl tap = Hebrew");
+        // Ctrl+C, held Ctrl, AltGr: nothing
+        c.key(Some(true), true, 0);
+        c.key(None, true, 50);
+        assert_eq!(c.key(Some(true), false, 100), None);
+        c.key(Some(true), true, 0);
+        assert_eq!(c.key(Some(true), false, 900), None);
+        let m = parse_one_language("# x\nWindowsTerminal.exe\nnotepad.exe = he\nC:\\bad.exe\nnot-an-exe\n");
+        assert_eq!(m.get("windowsterminal.exe"), Some(&false));
+        assert_eq!(m.get("notepad.exe"), Some(&true));
+        assert_eq!(m.len(), 2);
+        assert_eq!(parse_one_language(ONE_LANGUAGE_DEFAULT).len(), 7);
+        assert!(is_messenger("WhatsApp.exe") && !is_messenger("notepad.exe"));
+    }
+
+    #[test]
     fn short_words_fixed_with_the_next_one() {
         let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../");
         let read = |p: &str| std::fs::read_to_string(format!("{root}{p}")).ok();
@@ -1047,6 +1359,28 @@ mod cases {
         assert_eq!(s.text, "של על שלום ");
         // an English word before stays: "is akuo" fixes only akuo
         assert_eq!(suggest(&pairs("is akuo"), false, &d).map(|s| s.text), Some("שלום ".to_string()));
+    }
+
+    #[test]
+    fn f10_only_wrong_words() {
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../");
+        let read = |p: &str| std::fs::read_to_string(format!("{root}{p}")).ok();
+        let (Some(he), Some(en)) = (read("data/words/KeyboardLayoutFixer-words-he.txt"), read("data/words/KeyboardLayoutFixer-words-en.txt")) else { return };
+        let d = Dict::from_lists(&he, &en, DICT_SIZE);
+        let m = us_map();
+        let conv = |s: &str| convert_with(&m, s, MixedTextMode::ToggleAll, true);
+        // started in Hebrew, went on with the Latin layout
+        let typed = format!("שלום לכולם, {}", conv("מה שלומכם היום"));
+        assert_eq!(convert_wrong_words(&typed, &d, conv).as_deref(), Some("שלום לכולם, מה שלומכם היום"));
+        // started in English, went on with the Hebrew layout
+        let typed = format!("hello my friends {}", conv("how are you today"));
+        assert_eq!(convert_wrong_words(&typed, &d, conv).as_deref(), Some("hello my friends how are you today"));
+        // blanks and line breaks kept exactly
+        let typed = format!("שלום\r\n  {}", conv("מה שלומך"));
+        assert_eq!(convert_wrong_words(&typed, &d, conv).as_deref(), Some("שלום\r\n  מה שלומך"));
+        // nothing wrong: None (the caller converts everything, as before)
+        assert_eq!(convert_wrong_words("שלום לכולם", &d, conv), None);
+        assert_eq!(convert_wrong_words("hello world", &d, conv), None);
     }
 
     #[test]

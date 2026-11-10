@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.8.5 (November 2026)
+- **F10 pressed again quickly** toggles at once: 1st press converted, 2nd the original text, 3rd converted again… each press is taken immediately, typed directly without the clipboard (within 5 s, same field, one line of 300 characters at most, nothing else pressed or clicked in between). Before, presses during the previous conversion were mostly lost. A round trip teaches nothing.
+- **F10 without a selection takes the whole paragraph** in fields that wrap long lines (chat boxes, Electron apps, browsers), not only the last displayed line; it stops at a real line break. Not in Excel or terminals.
+- New option (public version): **F10 fixes only the wrong words** in a text where you started in the right language and went on in the wrong one. Measured on real sentences half typed on the wrong layout: 90.9 % (Hebrew) and 89.8 % (English, capitals aside) fully right; correct sentences touched by mistake: 0.07 % and 0 %.
+- New options (public version, off by default): **chat guard** (in WhatsApp, Telegram, Teams… a first Enter is held back with a warning when the whole sentence is in the wrong language; the next Enter sends it), **left Ctrl alone = English, right Ctrl alone = Hebrew**, **one-language programs** (Windows Terminal, PowerShell, cmd… switch to English when they come to the front; your own list).
+- **Sounds**: the program now makes its own short, soft sounds (two rising notes when a text is fixed, one quieter note when it is undone or toggled back) instead of Windows sounds that sounded like errors.
+- Fix while typing: technical words and brands are recognised and written their usual way (GitHub, ChatGPT, WhatsApp…); 250 ms after a fix, the result is read back where possible and the words as typed are put back if it is not exact; typed text is sent at a gentle pace (the Windows 11 Notepad lost letters).
+- Keyboard hooks removed by Windows are detected and put back, with a warning on the tray icon if that fails; the time spent in the hook is measured (debug.log and the Windows test of every change).
+- Hebrew interface: the diagnostic and program names are written left to right, layout names are translated, and texts mixing Hebrew and Latin keep their punctuation in place.
+- The "Hebrew (Standard 2018)" layout converts with its own table. An unreadable settings file is kept as a copy before being replaced.
+- New page: [THREAT_MODEL.md](THREAT_MODEL.md) (what the program sees, keeps and how risks are handled).
+
 ## 1.8.4 (November 2026)
 - **Fix: the F10 preview bubble** ("before → after") could show boxes labelled FSI, LRI or PDI and put the parts in the wrong order on some PCs (since 1.6.0). It now uses only the invisible marks LRM/RLM and is always drawn left to right, each part keeping its own direction.
 - Fix while typing and text replacements never act in **password managers** (KeePass, KeePassXC, Bitwarden, 1Password, LastPass, Dashlane, Proton Pass…), **crypto wallets** (Exodus, Electrum, Ledger Live…) or **remote desktop and virtual machine** windows (Remote Desktop, Windows App, AnyDesk, RustDesk, TeamViewer, Parsec, VNC, Citrix, Horizon, Hyper-V, VirtualBox, Quick Assist…; not Chrome Remote Desktop, which runs in a browser tab): their fields are not always seen as password fields, and in a remote desktop the keys go to another PC. The tray icon turns grey there; F10 still works.

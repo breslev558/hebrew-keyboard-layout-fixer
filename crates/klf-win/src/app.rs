@@ -77,11 +77,17 @@ const CMD_DOUBLE_SHIFT: usize = 119;
 const CMD_TYPING_SOUND: usize = 120;
 const CMD_REPLACEMENTS: usize = 121;
 const CMD_REPLACEMENTS_FILE: usize = 122;
+const CMD_F10_WRONG_WORDS: usize = 123;
+const CMD_CTRL_TAP: usize = 124;
+const CMD_MESSENGER_GUARD: usize = 125;
+const CMD_ONE_LANGUAGE: usize = 126;
+const CMD_ONE_LANGUAGE_FILE: usize = 127;
 /// End of a timed pause (10 minutes).
 const TIMER_PAUSE_END: usize = 3;
 const TIMED_PAUSE_MS: u32 = 10 * 60 * 1000;
 /// The administrator's settings are read again every 60 s (an administration tool writes them without a notice).
 const TIMER_POLICY: usize = 4;
+const TIMER_HOOKS: usize = 9;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HotkeyState {
@@ -115,6 +121,8 @@ thread_local! {
     static DORMANT: Cell<Option<Msg>> = const { Cell::new(None) };
     /// the last foreground window of a real program
     static LAST_FG: Cell<usize> = const { Cell::new(0) };
+    /// 1.8.5: a keyboard hook removed by Windows could not be put back (alert on the icon)
+    static HOOK_LOST: Cell<bool> = const { Cell::new(false) };
 }
 
 fn s_text_replacements_on() -> bool {
@@ -294,6 +302,7 @@ pub fn load_settings() -> AppSettings {
             let (s, ok) = AppSettings::from_json(&t);
             if !ok {
                 log("settings.json unreadable: defaults used, file left as it is");
+                SETTINGS_UNREADABLE.store(true, Ordering::SeqCst);
             } else if s.migrated {
                 log("settings.json from an older version (before 1.3.3): console support switched off once, Ctrl+Q of the original program replaced by F10");
                 save_settings(&s);
@@ -341,9 +350,19 @@ fn purge_original_log() {
 
 /// Writes settings.json through a temporary file then a rename (MoveFileExW REPLACE_EXISTING):
 /// a cut in the middle never leaves a half-written file.
+/// 1.8.5: settings.json could not be read at start: before it is replaced by a save, a copy of it
+/// is kept (settings.json.unreadable.bak), never lost in silence.
+static SETTINGS_UNREADABLE: AtomicBool = AtomicBool::new(false);
+
 pub fn save_settings(s: &AppSettings) -> bool {
     use std::io::Write;
     let Some(path) = settings_path() else { return false };
+    if SETTINGS_UNREADABLE.swap(false, Ordering::SeqCst) {
+        let keep = path.with_extension("json.unreadable.bak");
+        if std::fs::copy(&path, &keep).is_ok() {
+            log("settings.json was unreadable: a copy is kept as settings.json.unreadable.bak");
+        }
+    }
     let tmp = path.with_extension("json.tmp");
     let written = (|| -> std::io::Result<()> {
         let mut f = std::fs::File::create(&tmp)?;
@@ -430,6 +449,9 @@ pub fn register_hotkey() -> bool {
     unsafe { UnregisterHotKey(hwnd, HOTKEY_ID) };
     // SAFETY: our window, on its own thread.
     let ok = vk != 0 && unsafe { RegisterHotKey(hwnd, HOTKEY_ID, s.hotkey_modifiers | MOD_NOREPEAT, vk) } != 0;
+    // 1.8.5: its own presses are left out of the "other keys" count, and its release swallowed,
+    // only when the key is really ours (registered, without modifiers)
+    crate::platform::input::set_hotkey_vk(if ok && s.hotkey_modifiers == 0 { vk } else { 0 });
     STATE.with(|st| st.registered.set(ok));
     if ok {
         // the retry timer stays on while the Caps Lock hotkey is missing (audit 1.3.5, N4)
@@ -476,6 +498,7 @@ pub fn hotkey_free(mods: u32, key: u32) -> bool {
 
 pub fn unregister_hotkey() {
     let hwnd = STATE.with(|st| st.hwnd.get());
+    crate::platform::input::set_hotkey_vk(0); // paused: F10 is the program's again
     // SAFETY: our window, on its own thread.
     unsafe {
         KillTimer(hwnd, TIMER_RETRY);
@@ -591,6 +614,7 @@ fn tray_data() -> NOTIFYICONDATAW {
     let key = key_name();
     let (tip, icon_id) = match hotkey_state() {
         // 1.8.2: the typing help asleep in this window (grey icon, the reason in the tip)
+        HotkeyState::Ready if HOOK_LOST.with(|h| h.get()) => (format!("{}\n{}", text(l, Msg::HookLost), text_with_key(l, Msg::TipReady, &key)), 2),
         HotkeyState::Ready => match DORMANT.with(|d| d.get()) {
             // the reason first: the tip is cut at 127 characters
             Some(m) => (format!("{}\n{}", text(l, m), text_with_key(l, Msg::TipReady, &key)), 2),
@@ -777,6 +801,7 @@ fn show_menu(hwnd: HWND) {
         items.push((CMD_RESTORE_CLIP, text(l, Msg::MenuRestoreClipboard).to_string(), false));
     }
     if crate::typing::allowed() {
+        items.push((CMD_F10_WRONG_WORDS, text(l, Msg::MenuF10WrongWords).to_string(), s.f10_only_wrong_words));
         items.push((CMD_TYPING, text(l, Msg::MenuTyping).to_string(), s.typing_suggestions));
         if s.typing_suggestions {
             items.push((CMD_TYPING_WORDS, text(l, Msg::MenuTypingWords).to_string(), false));
@@ -787,6 +812,14 @@ fn show_menu(hwnd: HWND) {
             items.push((CMD_REPLACEMENTS_FILE, text(l, Msg::MenuReplacementsFile).to_string(), false));
         }
         items.push((CMD_DOUBLE_SHIFT, text(l, Msg::MenuDoubleShift).to_string(), s.double_shift_convert));
+        items.push((CMD_CTRL_TAP, text(l, Msg::MenuCtrlTap).to_string(), s.ctrl_tap_language));
+        if s.typing_suggestions {
+            items.push((CMD_MESSENGER_GUARD, text(l, Msg::MenuMessengerGuard).to_string(), s.messenger_guard));
+        }
+        items.push((CMD_ONE_LANGUAGE, text(l, Msg::MenuOneLanguage).to_string(), s.one_language_programs));
+        if s.one_language_programs {
+            items.push((CMD_ONE_LANGUAGE_FILE, text(l, Msg::MenuOneLanguageFile).to_string(), false));
+        }
     }
     let reports = crate::report::enabled();
     if reports {
@@ -881,6 +914,8 @@ fn request_exit(hwnd: HWND) {
 // F10
 
 struct Done {
+    /// when the conversion started (a quick toggle after it makes its bubble and lesson stale)
+    started: u64,
     outcome: Outcome,
     caret: Option<(i32, i32)>,
     target: usize,
@@ -896,6 +931,111 @@ pub fn convert_now() {
 
 fn on_hotkey(hwnd: HWND, action: Action) {
     start_hotkey(hwnd, action, false);
+}
+
+// 1.8.5, quick repeated F10: each press right after a conversion toggles the text just pasted
+// (converted <-> original) by typing it, without the clipboard and without waiting for the
+// previous conversion to finish (before: one press kept, run in "selection only" mode, so the
+// next presses did nothing). Only within 5 s, same window and field, nothing pressed or clicked
+// in between but the hotkey, one line of 300 characters at most; otherwise the normal path.
+struct Quick {
+    hwnd: usize,
+    focus: usize,
+    /// what is on the screen now, and what the next press puts back
+    shown: String,
+    other: String,
+    /// the text before the first conversion (back to it: the quieter sound)
+    original: String,
+    at: u64,
+    keys: u32,
+    clicks: u32,
+}
+
+static QUICK: std::sync::Mutex<Option<Quick>> = std::sync::Mutex::new(None);
+/// last quick toggle (tick)
+static LAST_TOGGLE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+const QUICK_MS: u64 = 5_000;
+const QUICK_MAX_CHARS: usize = 300;
+
+fn quick_text_ok(t: &str) -> bool {
+    // each character one Backspace in every program (no emoji, joiner, niqqud...)
+    !t.is_empty() && t.chars().count() <= QUICK_MAX_CHARS && !t.chars().any(|c| c.is_control()) && klf_core::replace::simple_text(t)
+}
+
+/// 1.8.5: the text kept for the quick toggle is forgotten after its 5 s (TIMER_HOOKS).
+pub fn forget_quick_if_old() {
+    let mut g = QUICK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if g.as_ref().is_some_and(|q| sys_tick().saturating_sub(q.at) > QUICK_MS) {
+        *g = None;
+    }
+}
+
+/// Called by the worker right after Ctrl+V (clipboard path of F10).
+pub fn remember_paste(hwnd: usize, focus: usize, before: &str, after: &str) {
+    let mut q = QUICK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    *q = None;
+    if !quick_text_ok(before) || !quick_text_ok(after) || !crate::platform::input::activity_watched() {
+        return;
+    }
+    let (keys, clicks) = crate::platform::input::user_activity();
+    *q = Some(Quick { hwnd, focus, shown: after.to_string(), other: before.to_string(), original: before.to_string(), at: sys_tick(), keys, clicks });
+}
+
+/// The quick toggle, if all its conditions hold. true = done (nothing else to do for this press).
+fn quick_toggle() -> bool {
+    let mut g = QUICK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let Some(q) = g.as_mut() else { return false };
+    let fg = target::foreground();
+    let (keys, clicks) = crate::platform::input::user_activity();
+    // no key pressed since but the hotkey itself, no click; same window and field; in time
+    let quiet = keys == q.keys && clicks == q.clicks;
+    // and the counting hook saw every input since (not removed by Windows meanwhile)
+    if sys_tick().saturating_sub(q.at) > QUICK_MS || fg as usize != q.hwnd || target::focus_of(fg) as usize != q.focus || !quiet || crate::platform::input::counting_unsure() {
+        *g = None;
+        return false;
+    }
+    // where the text can be read back (Edit, RichEdit), it must be exactly what we put there
+    if !crate::typing::text_before_caret_matches(&q.shown) {
+        *g = None;
+        return false;
+    }
+    // sent from a worker thread (the hooks live on this one: never paused)
+    crate::platform::input::replace_paced_async(q.shown.chars().count(), q.other.clone());
+    std::mem::swap(&mut q.shown, &mut q.other);
+    q.at = sys_tick();
+    LAST_TOGGLE.store(q.at, Ordering::SeqCst);
+    q.keys = keys;
+    q.clicks = clicks;
+    let (before, after) = (q.other.clone(), q.shown.clone());
+    let back_to_original = after == q.original;
+    drop(g);
+    let s = settings();
+    if s.switch_language_after_convert {
+        let to_hebrew = klf_core::convert::contains_hebrew(&after);
+        let hkl = if to_hebrew {
+            crate::platform::layouts::hebrew_layout()
+        } else {
+            match crate::platform::layouts::choose(target::current_layout(fg).map(|h| h as u32)) {
+                crate::platform::layouts::Choice::Map(_, l) => l,
+                _ => None,
+            }
+        };
+        if let Some(h) = hkl {
+            crate::platform::layouts::request(fg, h);
+        }
+    }
+    if s.show_bubble && s.show_preview {
+        bubble::show(&klf_core::bubble::preview_text(&before, &after, 24), false, target::caret_point(fg), fg as usize, true);
+    }
+    if back_to_original {
+        crate::typing::forget_learned(&after);
+    }
+    if s.play_sound {
+        // back to the original: the quieter sound; converted again: the usual one
+        if back_to_original { sys::undo_sound() } else { sys::beep() }
+    }
+    log(&format!("Hotkey pressed again: text toggled by typing ({} characters)", after.chars().count()));
+    true
 }
 
 /// `delayed`: a press kept during the previous conversion (1.5.1): run in careful mode (only a
@@ -917,6 +1057,9 @@ fn start_hotkey(hwnd: HWND, action: Action, delayed: bool) {
     }
     let (enabled, busy) = STATE.with(|s| (s.enabled.get(), s.busy.clone()));
     if !enabled {
+        return;
+    }
+    if action == Action::Layout && !delayed && quick_toggle() {
         return;
     }
     if busy.swap(true, Ordering::SeqCst) {
@@ -951,6 +1094,7 @@ fn start_hotkey(hwnd: HWND, action: Action, delayed: bool) {
     } else {
         (None, None)
     };
+    let started = sys_tick();
     let spawned = std::thread::Builder::new().name("f10".into()).spawn(move || {
         log(if s.action == Action::Case { "Caps Lock hotkey pressed" } else { "Hotkey pressed" });
         let fg = fg_at_hotkey as HWND;
@@ -964,7 +1108,7 @@ fn start_hotkey(hwnd: HWND, action: Action, delayed: bool) {
         }
         // the result goes through an internal slot; the message only wakes the UI thread
         // (no pointer in a window message: another program could post a fake one)
-        *DONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Done { outcome, caret, target: fg as usize });
+        *DONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Done { started, outcome, caret, target: fg as usize });
         // SAFETY: posting a message without pointers.
         if unsafe { PostMessageW(owner as HWND, WM_APP_DONE, 0, 0) } == 0 {
             *DONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
@@ -1078,12 +1222,15 @@ fn on_done(hwnd: HWND) {
     }
     log(&done.outcome.log);
     crate::report::after_conversion(hwnd, done.outcome.msg);
+    // toggled again quickly since this conversion started: its result is no longer on the screen
+    // (no lesson, no bubble for it)
+    let stale = LAST_TOGGLE.load(Ordering::SeqCst) >= done.started;
     // 1.8.1: a single word fixed with F10 is learned by the "fix while typing" option
-    if let (Some(Msg::Converted), Some((before, after))) = (done.outcome.msg, &done.outcome.preview) {
+    if let (false, Some(Msg::Converted), Some((before, after))) = (stale, done.outcome.msg, &done.outcome.preview) {
         crate::typing::learn_from_f10(before, after);
     }
     let s = settings();
-    if let Some(msg) = done.outcome.msg {
+    if let (false, Some(msg)) = (stale, done.outcome.msg) {
         if s.show_bubble {
             let l = lang_of(&s);
             // 1.6.0: what was converted ("akuo → שלום"), from memory only, if the user wants it
@@ -1163,6 +1310,25 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 CMD_REPORT_SEND => crate::report::send_pending(hwnd),
                 CMD_TYPING_WORDS if crate::typing::allowed() => crate::typing::open_personal(),
                 CMD_REPLACEMENTS_FILE if crate::typing::allowed() => crate::typing::open_replacements(),
+                CMD_ONE_LANGUAGE_FILE if crate::typing::allowed() => crate::typing::open_one_language(),
+                CMD_CTRL_TAP | CMD_MESSENGER_GUARD | CMD_ONE_LANGUAGE if crate::typing::allowed() => {
+                    let mut s = user_settings();
+                    match wparam & 0xFFFF {
+                        CMD_CTRL_TAP => s.ctrl_tap_language = !s.ctrl_tap_language,
+                        CMD_MESSENGER_GUARD => s.messenger_guard = !s.messenger_guard,
+                        _ => s.one_language_programs = !s.one_language_programs,
+                    }
+                    if save_settings(&s) {
+                        apply_settings(s);
+                    }
+                }
+                CMD_F10_WRONG_WORDS if crate::typing::allowed() => {
+                    let mut s = user_settings();
+                    s.f10_only_wrong_words = !s.f10_only_wrong_words;
+                    if save_settings(&s) {
+                        apply_settings(s);
+                    }
+                }
                 CMD_TYPING_SOUND if crate::typing::allowed() => {
                     let mut s = user_settings();
                     s.typing_sound = !s.typing_sound;
@@ -1259,6 +1425,15 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             crate::host::parked_available(); // a kept clipboard is forgotten after 10 minutes, even unseen
             crate::typing::periodic(); // replacements file changed? full screen started or ended?
             refresh_dormant(None);
+            0
+        }
+        WM_TIMER if wparam == TIMER_HOOKS => {
+            // 1.8.5: hooks removed by Windows are put back; an alert on the icon if they cannot be
+            forget_quick_if_old();
+            let ok = crate::platform::input::check_hooks() & crate::typing::check_hooks();
+            if HOOK_LOST.with(|h| h.replace(!ok)) != !ok {
+                update_tray();
+            }
             0
         }
         WM_TIMER if wparam == TIMER_UPDATE => {
@@ -1373,6 +1548,7 @@ pub fn create_main_window() -> Option<HWND> {
         watch_foreground();
         note_foreground(GetForegroundWindow());
         SetCoalescableTimer(hwnd, TIMER_POLICY, 60_000, None, 5_000);
+        SetCoalescableTimer(hwnd, TIMER_HOOKS, 5_000, None, 1_000);
         // update (public per-user install only): first look 2 minutes after the start
         crate::update::cleanup();
         SetCoalescableTimer(hwnd, TIMER_UPDATE, 120_000, None, 30_000);

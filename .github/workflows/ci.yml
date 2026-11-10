@@ -148,3 +148,14 @@ jobs:
           Copy-Item artefacts\installer\KeyboardLayoutFixer-Setup.exe .\KeyboardLayoutFixer-Setup.exe
           powershell -NoProfile -ExecutionPolicy Bypass -File tests-e2e\bout-en-bout.ps1
           exit $LASTEXITCODE
+      - name: Paragraphe à retour automatique et captures des réglages (hébreu, français, anglais)
+        shell: powershell
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File tests-e2e\captures-et-paragraphe.ps1
+          exit $LASTEXITCODE
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: captures
+          path: captures
+          if-no-files-found: ignore

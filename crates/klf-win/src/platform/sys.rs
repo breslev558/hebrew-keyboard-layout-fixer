@@ -8,8 +8,6 @@ use windows_sys::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_EL
 use windows_sys::Win32::System::Registry::*;
 use windows_sys::Win32::System::SystemInformation::GetLocalTime;
 use windows_sys::Win32::System::Threading::*;
-use windows_sys::Win32::System::Diagnostics::Debug::MessageBeep;
-use windows_sys::Win32::UI::WindowsAndMessaging::MB_OK;
 
 /// High contrast is on (Windows accessibility): only system colours are used then.
 pub fn high_contrast() -> bool {
@@ -119,36 +117,44 @@ pub fn ui_langid() -> u16 {
     unsafe { GetUserDefaultUILanguage() }
 }
 
-pub fn beep() {
-    // SAFETY: no pointers.
-    unsafe {
-        MessageBeep(MB_OK);
+/// 1.8.5: the program's own short sounds (made by klf_core::sound, kept in memory for good):
+/// never the Windows error, warning or default sounds. Played asynchronously from memory (nothing
+/// to load, never blocks typing); SND_NODEFAULT: silence rather than another sound.
+fn play(wav: &'static [u8]) {
+    use std::sync::mpsc::{channel, Sender};
+    // one sound thread for good: loading the sound or a slow audio service never holds the UI
+    // thread (which runs the keyboard hooks)
+    static TX: std::sync::OnceLock<std::sync::Mutex<Option<Sender<&'static [u8]>>>> = std::sync::OnceLock::new();
+    let tx = TX.get_or_init(|| {
+        let (tx, rx) = channel::<&'static [u8]>();
+        let ok = std::thread::Builder::new().name("klf-sound".into()).spawn(move || {
+            use windows_sys::Win32::Media::Audio::{PlaySoundW, SND_MEMORY, SND_NODEFAULT};
+            while let Ok(w) = rx.recv() {
+                // SAFETY: static bytes; played to the end on this thread.
+                unsafe { PlaySoundW(w.as_ptr() as *const u16, null_mut(), SND_MEMORY | SND_NODEFAULT) };
+            }
+        });
+        std::sync::Mutex::new(ok.is_ok().then_some(tx))
+    });
+    if let Some(t) = tx.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref() {
+        let _ = t.send(wav);
     }
 }
 
-/// 1.8.2: the short sound after a fix while typing: a standard Windows sound ("Notification"
-/// event of the user's sound scheme), as a system sound: silent when Windows sounds are off or
-/// muted, nothing when no sound is set. Played on a thread of its own, so that neither loading
-/// the sound nor the audio service can ever slow down typing (the keyboard hook runs on the UI
-/// thread); a sound already playing is not doubled.
+/// A text was fixed (F10, or a fix while typing): two soft rising notes.
+pub fn beep() {
+    static W: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+    play(W.get_or_init(klf_core::sound::fixed));
+}
+
 pub fn fix_sound() {
-    use std::sync::atomic::{AtomicBool, Ordering};
-    static PLAYING: AtomicBool = AtomicBool::new(false);
-    if PLAYING.swap(true, Ordering::SeqCst) {
-        return;
-    }
-    let spawned = std::thread::Builder::new().name("klf-sound".into()).spawn(|| {
-        use windows_sys::Win32::Media::Audio::{PlaySoundW, SND_ALIAS, SND_NODEFAULT, SND_SYSTEM};
-        let alias = wide("SystemNotification");
-        // SAFETY: NUL-terminated alias that lives for the (synchronous) call.
-        unsafe {
-            PlaySoundW(alias.as_ptr(), null_mut(), SND_ALIAS | SND_NODEFAULT | SND_SYSTEM);
-        }
-        PLAYING.store(false, Ordering::SeqCst);
-    });
-    if spawned.is_err() {
-        PLAYING.store(false, Ordering::SeqCst);
-    }
+    beep();
+}
+
+/// A fix undone or toggled back: one lower, quieter note.
+pub fn undo_sound() {
+    static W: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+    play(W.get_or_init(klf_core::sound::undone));
 }
 
 /// Full path of the process exe (None if access is refused).

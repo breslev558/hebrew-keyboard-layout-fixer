@@ -61,7 +61,7 @@ dependencies = [
 
 [[package]]
 name = "klf-core"
-version = "1.8.4"
+version = "1.8.5"
 dependencies = [
  "serde",
  "serde_json",

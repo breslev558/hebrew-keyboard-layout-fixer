@@ -63,6 +63,12 @@ To do this the program watches the keys typed (a low-level keyboard hook), **onl
 ### Text replacements (optional, off and empty by default)
 Tray menu › **Text replacements**, then **My replacements…** opens your list in Notepad: one `shortcut = text` per line, for example `@@ = name@example.com`. Type the shortcut then Space and it is replaced; **Backspace** right after undoes it. Nothing is built in: the list is empty until you write it, and it stays in `%APPDATA%\KeyboardLayoutFixer\replacements.txt`. Same rules as *fix while typing*: keys watched only while the option is on, never in password fields, consoles, administrator windows or programs you turned off.
 
+### More options (public version, all off by default)
+- **F10 fixes only the wrong words**: in a text where you started in the right language and went on in the wrong one, one F10 fixes only the words typed on the wrong layout (word lists needed). If none looks wrong, everything is converted as before.
+- **Chat guard**: in WhatsApp, Telegram, Teams, Signal, Discord, Slack…, a first Enter is held back with a warning when the whole sentence is in the wrong language; press Enter again to send it anyway. The program never presses Enter itself.
+- **Left Ctrl alone = English, right Ctrl alone = Hebrew**: a quick tap switches the keyboard (any other key or a click cancels it).
+- **One-language programs**: Windows Terminal, PowerShell, cmd… switch to English when they come to the front; edit the list from the tray menu (`program.exe` or `program.exe = he`).
+
 ### Double-tap Shift (optional)
 Tray menu › **Double-tap Shift to convert**: two quick taps on Shift convert like F10, handy on laptops where F10 needs the Fn key. Off by default; never with Ctrl, Alt or Win held, in full-screen games, or in JetBrains IDEs (where double Shift opens their search).
 
@@ -90,7 +96,9 @@ All of these are disabled when settings are enforced by an administrator. The di
 ### FAQ
 **Windows or my antivirus warns about the program.** Until the program is signed by a public certificate (a free SignPath signature has been requested), SmartScreen shows *Windows protected your PC*, and a few antivirus programs based on machine learning may flag the unsigned installer. Check the SHA-256 against the release page, or build it yourself from source. The optional *fix while typing* uses a keyboard hook, which some antivirus programs dislike: it is installed only while that option is on.
 
-**F10 converted the wrong thing.** Press Ctrl+Z in the program you were typing in, select exactly the text to fix and press F10 again. With nothing selected, F10 converts from the cursor back to the start of the line; turn on *careful mode* (Settings) to convert only a selection.
+**I pressed F10 twice.** Each quick press toggles: 1st converted, 2nd the original text, 3rd converted again, at once (within 5 seconds, in the same field, if nothing else was typed in between).
+
+**F10 converted the wrong thing.** Press Ctrl+Z in the program you were typing in, select exactly the text to fix and press F10 again. With nothing selected, F10 converts from the cursor back to the start of the paragraph (the line); turn on *careful mode* (Settings) to convert only a selection.
 
 **A proposal appeared but I wanted the word as typed.** Just keep typing: the proposal disappears and nothing is changed. You can switch the option off at any time in the tray menu.
 
@@ -126,7 +134,7 @@ The script runs the tests, checks the dependency licences and builds `target/x86
 
 ## Français
 
-**Vous avez tapé `akuo` au lieu de `שלום` ?** Sélectionnez le texte et appuyez sur **F10**. Sans sélection, la ligne est corrigée du curseur jusqu'à son début. **F9** corrige un texte tapé avec Verr. Maj allumé. Hébreu ⇄ anglais, avec prise en charge du clavier français AZERTY. Pour Windows 10 et 11.
+**Vous avez tapé `akuo` au lieu de `שלום` ?** Sélectionnez le texte et appuyez sur **F10**. Sans sélection, le paragraphe est corrigé du curseur jusqu'à son début. **F9** corrige un texte tapé avec Verr. Maj allumé. Hébreu ⇄ anglais, avec prise en charge du clavier français AZERTY. Pour Windows 10 et 11.
 
 - **Installation (sans droits administrateur)** : [téléchargez **KeyboardLayoutFixer-Setup.exe**](https://github.com/breslev558/hebrew-keyboard-layout-fixer/releases/latest/download/KeyboardLayoutFixer-Setup.exe) et double-cliquez dessus. Si Windows affiche « Windows a protégé votre ordinateur » (programme non encore signé) : **Informations complémentaires › Exécuter quand même**.
 - **Paramètres** : cliquez sur l'icône près de l'horloge ; clic droit pour la pause et les autres options.
@@ -139,7 +147,7 @@ The script runs the tests, checks the dependency licences and builds `target/x86
 
 ## עברית
 
-**הקלדתם `akuo` במקום `שלום`?** סמנו את הטקסט ולחצו **F10**. בלי סימון, השורה מתוקנת מהסמן ועד תחילתה. **F9** מתקן טקסט שהוקלד כש-Caps Lock היה דולק. עברית ⇄ אנגלית, ותמיכה במקלדת צרפתית AZERTY. ל-Windows 10 ו-11.
+**הקלדתם `akuo` במקום `שלום`?** סמנו את הטקסט ולחצו **F10**. בלי סימון, הפסקה מתוקנת מהסמן ועד תחילתה. **F9** מתקן טקסט שהוקלד כש-Caps Lock היה דולק. עברית ⇄ אנגלית, ותמיכה במקלדת צרפתית AZERTY. ל-Windows 10 ו-11.
 
 - **התקנה** (ללא הרשאות מנהל): [הורידו את **KeyboardLayoutFixer-Setup.exe**](https://github.com/breslev558/hebrew-keyboard-layout-fixer/releases/latest/download/KeyboardLayoutFixer-Setup.exe) ולחצו עליו פעמיים. אם מופיעה ההודעה "Windows הגן על המחשב שלך": **מידע נוסף** ואז **הפעל בכל זאת**.
 - **הגדרות**: לחיצה על הסמל ליד השעון; לחיצה ימנית להשהיה ולאפשרויות נוספות.

@@ -43,9 +43,14 @@ The list is yours alone (`%APPDATA%\KeyboardLayoutFixer\replacements.txt`, empty
 it); it is never sent anywhere. Never in password fields, consoles, administrator windows or
 programs you turned the fixer off for.
 
+## Counting keys (1.8.5)
+To switch Caps Lock off safely and to let a quick second F10 toggle the text back, the program
+counts how many keys and mouse buttons are pressed (a number only, never which key or what text).
+The text of the last F10 is kept in memory for 5 seconds for that toggle, then forgotten.
+
 ## Files on your PC
 `%APPDATA%\KeyboardLayoutFixer`: `settings.json` (your settings), `debug.log` (technical steps and
 program names, never your text), `my-words.txt` and the word lists if you use *fix while typing*,
-`replacements.txt` if you use *text replacements*.
+`replacements.txt` if you use *text replacements*, `one-language-programs.txt` if you use that option.
 
 Questions or problems: see [SECURITY.md](SECURITY.md) and the [issues](https://github.com/breslev558/hebrew-keyboard-layout-fixer/issues).

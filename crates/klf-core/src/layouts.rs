@@ -86,6 +86,54 @@ pub fn hkl_name(hkl: u32) -> String {
     }
 }
 
+/// 1.8.5: the name of a layout in the interface language (the settings window), the code kept
+/// left to right ("(0x0002040D)") inside a Hebrew line with invisible marks.
+pub fn hkl_name_in(hkl: u32, l: crate::i18n::Lang) -> String {
+    use crate::i18n::Lang::*;
+    let lang = hkl & 0xFFFF;
+    let name: &str = match (classify_hkl(hkl), lang, l) {
+        (LayoutKind::HebrewStandard, _, He) => "עברית",
+        (LayoutKind::HebrewStandard, _, Fr) => "hébreu",
+        (LayoutKind::HebrewStandard, _, En) => "Hebrew",
+        (LayoutKind::Latin(LatinKind::Us), _, He) => "אנגלית (ארצות הברית)",
+        (LayoutKind::Latin(LatinKind::Us), _, Fr) => "anglais (États-Unis)",
+        (LayoutKind::Latin(LatinKind::Us), _, En) => "English (United States)",
+        (LayoutKind::Latin(_), _, He) => "צרפתית (AZERTY)",
+        (LayoutKind::Latin(_), _, Fr) => "français (AZERTY)",
+        (LayoutKind::Latin(_), _, En) => "French (AZERTY)",
+        (_, 0x040D, He) => "עברית (גרסה אחרת)",
+        (_, 0x040D, Fr) => "hébreu (autre variante)",
+        (_, 0x040D, En) => "Hebrew (other variant)",
+        (_, 0x0409, He) => "אנגלית (גרסה אחרת)",
+        (_, 0x0409, Fr) => "anglais (autre variante)",
+        (_, 0x0409, En) => "English (other variant)",
+        (_, 0x0809, He) => "אנגלית (בריטניה)",
+        (_, 0x0809, Fr) => "anglais (Royaume-Uni)",
+        (_, 0x0809, En) => "English (United Kingdom)",
+        (_, 0x040C | 0x080C | 0x0C0C | 0x100C, He) => "צרפתית (גרסה אחרת)",
+        (_, 0x040C | 0x080C | 0x0C0C | 0x100C, Fr) => "français (autre variante)",
+        (_, 0x040C | 0x080C | 0x0C0C | 0x100C, En) => "French (other variant)",
+        (_, 0x0407, He) => "גרמנית",
+        (_, 0x0407, Fr) => "allemand",
+        (_, 0x0407, En) => "German",
+        (_, 0x0419, He) => "רוסית",
+        (_, 0x0419, Fr) => "russe",
+        (_, 0x0419, En) => "Russian",
+        (_, 0x0401, He) => "ערבית",
+        (_, 0x0401, Fr) => "arabe",
+        (_, 0x0401, En) => "Arabic",
+        (_, _, He) => "מקלדת",
+        (_, _, Fr) => "clavier",
+        (_, _, En) => "keyboard",
+    };
+    // the code is a left-to-right run; in Hebrew, RLM after it keeps the separators in order
+    // (only the invisible marks LRM / RLM: isolates are drawn as boxes on some PCs)
+    match l {
+        He => format!("{name} (\u{200E}0x{hkl:08X}\u{200E})\u{200F}"),
+        _ => format!("{name} (0x{hkl:08X})"),
+    }
+}
+
 /// Hebrew <-> Latin character pairs. `pairs` is in priority order: for the reverse direction
 /// the FIRST pair wins (same rule as the fixed table).
 #[derive(Debug, Clone, PartialEq, Eq)]

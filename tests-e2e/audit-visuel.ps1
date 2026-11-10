@@ -76,6 +76,7 @@ $out = Join-Path (Get-Location) 'captures\audit'; New-Item -ItemType Directory -
 try { Set-DisplayResolution -Width 1920 -Height 1080 -Force -ErrorAction Stop; Start-Sleep 3 } catch { Write-Host "écran : résolution non changée ($($_.Exception.Message))" }
 $sc = [Windows.Forms.Screen]::PrimaryScreen.Bounds; Write-Host "écran : $($sc.Width) x $($sc.Height)"
 $dir = Join-Path $env:APPDATA 'KeyboardLayoutFixer'
+$env:KLF_TEST_CAPTURE = '1'   # the bubbles are normally excluded from screenshots (privacy): shown here for the audit
 $exe = Join-Path $env:LOCALAPPDATA 'Programs\KeyboardLayoutFixer\KeyboardLayoutFixer.exe'
 $manques = New-Object System.Collections.ArrayList
 function Manque($m) { Write-Host "MANQUE : $m"; [void]$manques.Add($m) }
@@ -88,7 +89,17 @@ function Photo($hw, $nom) {
     $bmp = [A]::Screen($r.L, $r.T, ($r.R - $r.L), ($r.B - $r.T))
     $bmp.Save((Join-Path $out $nom), [Drawing.Imaging.ImageFormat]::Png); $bmp.Dispose()
     Write-Host "OK    $nom"
-  } catch { Manque "capture $nom : $($_.Exception.Message)" }
+  } catch {
+    Manque "capture $nom : $($_.Exception.Message)"
+    # backup: the whole screen, so that something is always there to look at
+    try {
+      $sc = [Windows.Forms.Screen]::PrimaryScreen.Bounds
+      $g2 = New-Object Drawing.Bitmap $sc.Width, $sc.Height
+      $gg = [Drawing.Graphics]::FromImage($g2); $gg.CopyFromScreen(0, 0, 0, 0, $g2.Size); $gg.Dispose()
+      $g2.Save((Join-Path $out ("ecran-" + $nom)), [Drawing.Imaging.ImageFormat]::Png); $g2.Dispose()
+      Write-Host "      (écran entier gardé : ecran-$nom)"
+    } catch { Write-Host "      (écran entier impossible aussi : $($_.Exception.Message))" }
+  }
 }
 function Attendre([scriptblock]$cond, $ms) {
   $sw = [Diagnostics.Stopwatch]::StartNew()

@@ -191,7 +191,9 @@ fn ensure_window() -> HWND {
             DwmSetWindowAttribute(h, 33, &pref as *const u32 as *const _, 4);
             // left out of screen captures and shares (Teams, recordings), Windows 10 2004 and
             // later only: older versions would show a black box instead
-            if crate::platform::sys::windows_build() >= 19041 {
+            // 1.9.0: KLF_TEST_CAPTURE=1 (visual test on GitHub's Windows only) lets the bubble be
+            // photographed; otherwise it is never in a screenshot (it can show the fixed text)
+            if crate::platform::sys::windows_build() >= 19041 && std::env::var("KLF_TEST_CAPTURE").as_deref() != Ok("1") {
                 SetWindowDisplayAffinity(h, WDA_EXCLUDEFROMCAPTURE);
             }
         }

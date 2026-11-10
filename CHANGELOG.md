@@ -3,6 +3,7 @@
 ## 1.9.0 (November 2026)
 - **Remote desktop**: while a remote desktop or virtual machine window is in front (Remote Desktop, AnyDesk, TeamViewer, RustDesk, VNC, Parsec, Hyper-V), F10 and F9 are left to it, so that the copy running on the other PC fixes the text. Before, F10 was taken here and nothing happened on either side.
 - Fix while typing: in a one-line Windows text box (a form field), **Tab always moves to the next field**; it never accepts a proposal there.
+- Settings, Advanced page: the delay label is short enough to be read whole (it was cut in the three languages).
 - Full visual audit on Windows at every version: welcome, tray menu, F10 bubble at the top and at the bottom, update bubble, settings at 150 % and 200 %, high contrast and the uninstall question, in Hebrew, French and English.
 
 ## 1.8.9 (November 2026)

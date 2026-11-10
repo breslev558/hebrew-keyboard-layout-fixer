@@ -1,5 +1,5 @@
 //! Hebrew <-> English keyboard layout conversion (standard Windows Hebrew layout + US English).
-//! Ported 1:1 from KeyboardLayoutConverter.cs (1.2.9-noam5), same behaviour, same tests.
+//! Ported 1:1 from KeyboardLayoutConverter.cs (1.2.9), same behaviour, same tests.
 
 use crate::layouts::{KeyMap, LatinKind};
 use crate::settings::MixedTextMode;
@@ -43,7 +43,7 @@ const EN_TO_HE: &[(char, char)] = &[
     (']', '['),
     ('-', '-'),
     ('=', '='),
-    ('`', ';'), // NOAM : Hebrew layout gives ';' on the ` key
+    ('`', ';'), // Hebrew layout gives ';' on the ` key
 ];
 
 /// The fixed US <-> Hebrew map (the proven table above).

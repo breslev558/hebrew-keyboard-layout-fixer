@@ -76,7 +76,7 @@ pub fn update_info_ok(info: &UpdateInfo, r: &Release, current: (u32, u32, u32)) 
     info.version == r.version && info.version > current && info.size == r.exe_size && info.size <= MAX_EXE_BYTES
 }
 
-/// "1.5.4", "v1.5.4", "1.5.4-noam" -> (1, 5, 4); anything else -> None.
+/// "1.5.4", "v1.5.4", "1.5.4-beta" -> (1, 5, 4); anything else -> None.
 pub fn parse_version(s: &str) -> Option<(u32, u32, u32)> {
     let s = s.trim().trim_start_matches(['v', 'V']);
     let core = s.split(['-', '+']).next()?;
@@ -220,7 +220,7 @@ mod tests {
     #[test]
     fn versions() {
         assert_eq!(parse_version("v1.5.4"), Some((1, 5, 4)));
-        assert_eq!(parse_version("1.5.4-noam"), Some((1, 5, 4)));
+        assert_eq!(parse_version("1.5.4-beta"), Some((1, 5, 4)));
         assert_eq!(parse_version("1.5"), None);
         assert_eq!(parse_version("v1.5.4.1"), None);
         assert_eq!(parse_version("x"), None);

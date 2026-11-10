@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.8.7 (November 2026)
+- Fix while typing never proposes anything in a **password field of a web page or an Electron app**: the program asks Windows' UI Automation (on a thread of its own, at most 300 ms; no answer = nothing proposed). Before, only standard Windows password boxes were recognised.
+- F10 in a box with **autocompletion** (Run dialog, Explorer address bar): the suggested end selected by Windows is taken away first, so that F10 converts what you typed, not the suggestion. Only when the last key you pressed there typed a character (a selection you made yourself is kept).
+- The uninstaller offers to also delete your settings and the words the program learned (no by default, never in a silent uninstall).
+- F10 without a selection also fixes the **whole paragraph in classic Windows text boxes** (WinForms), not only the last line.
+- Settings enforced by an administrator are now read from `HKLM\SOFTWARE\Policies\KeyboardLayoutFixer` (see For administrators in the README).
+- New download page: a big download button, the exact menu labels in English, French and Hebrew, clearer privacy and learning explanations.
+
 ## 1.8.6 (November 2026)
 - Fix while typing and F10 "only the wrong words" recognise more: a final letter (ך ם ן ף ץ) inside a word means English typed on the Hebrew layout; English chat words without the apostrophe (dont, youre, thats…) are never converted. Measured on real English sentences typed on the wrong layout: 71.7 % of the words fixed (61.1 % in 1.8.5), with no more false proposals (Hebrew 0.01 %, English 0.002 % of correct sentences).
 - Learning is more careful: a word fixed with F10 is learned only the second time (noted `?word date` the first time, forgotten after 30 days); a round trip with F10 teaches nothing.

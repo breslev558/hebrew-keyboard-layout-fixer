@@ -27,8 +27,8 @@ is ever sent. Everything downloaded is signed with the project's key and checked
 ## Threats and answers
 | Threat | Answer |
 |---|---|
-| The program logs what you type (keylogger) | No text is written anywhere; the hook keeps a few words in memory; options are off by default and absent from the school version. |
-| A fake update or word list | Ed25519 signature checked before use; SHA-256 of every file; a started update must report back within 60 s or the previous version is put back. |
+| The program logs what you type (keylogger) | No text is written anywhere; the hook keeps a few words in memory; options are off by default and unavailable when an administrator manages the PC. |
+| A fake update or word list | ECDSA P-256 signature (key kept offline) checked before use; SHA-256 of every file; a started update must report back within 60 s or the previous version is put back. |
 | Typing into the wrong place (another window, a password field, an administrator window, a remote PC) | Window and field checked again just before acting; password fields (`ES_PASSWORD`), administrator windows, consoles, password managers, crypto wallets and remote desktop clients are left alone; text read back where possible. |
 | Losing the user's clipboard | Saved in full before, put back after, only if it is still ours (sequence number); kept in memory 10 min if Windows refuses. |
 | Another program faking our messages | No pointer is ever passed in a window message; results go through internal slots. |

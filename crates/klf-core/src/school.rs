@@ -1,5 +1,5 @@
 //! Settings imposed by the administrator (1.5.0): read by klf-win from the registry key
-//! HKLM\SOFTWARE\Policies\NOAM\KeyboardLayoutFixer (a standard user cannot write there), merged here
+//! HKLM\SOFTWARE\Policies\KeyboardLayoutFixer (a standard user cannot write there), merged here
 //! over the user's own settings. Pure code, tested on Linux. An invalid value is ignored and
 //! noted (diagnostic), never a crash.
 

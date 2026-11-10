@@ -1,4 +1,4 @@
-//! Keyboard Layout Fixer (NOAM) — pure code, no Windows calls: tested on Linux with `cargo test`.
+//! Keyboard Layout Fixer — pure code, no Windows calls: tested on Linux with `cargo test`.
 pub mod bubble;
 pub mod convert;
 pub mod diag;

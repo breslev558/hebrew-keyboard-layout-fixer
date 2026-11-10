@@ -349,7 +349,7 @@ impl AppSettings {
                     // 1.3.0/1.3.1 wrote ConsoleSupport=true as their default: the experimental
                     // console path is switched off once (audit 1.3.2); the user can switch it on again
                     s.console_support = false;
-                    // file of the ORIGINAL program (RavidSaadia 1.2.8, default Ctrl+Q): the NOAM version
+                    // file of the ORIGINAL program (RavidSaadia 1.2.8, default Ctrl+Q): this version
                     // key F10 is used instead (the original Ctrl+Q setting is never carried over)
                     if (s.hotkey_modifiers, s.hotkey_key) == (MOD_CONTROL, KEY_Q) {
                         s.hotkey_modifiers = 0;
@@ -379,7 +379,7 @@ impl AppSettings {
         serde_json::to_string_pretty(self).unwrap_or_else(|_| String::from("{}"))
     }
 
-    /// Same rules as AppSettings.Validate() of 1.2.9-noam5, plus the new fields.
+    /// Same rules as AppSettings.Validate() of 1.2.9, plus the new fields.
     pub fn validate(&mut self) {
         if self.hotkey_modifiers & !KNOWN_MODS != 0 {
             self.hotkey_modifiers = 0;

@@ -232,7 +232,7 @@ pub fn layout_warnings(layouts: &[u32]) -> Vec<String> {
 /// The text of "Copy the diagnostic information".
 pub fn report(env: &Environment, ring: &Ring) -> String {
     let mut r = String::new();
-    r.push_str("Keyboard Layout Fixer NOAM - informations de diagnostic\n");
+    r.push_str("Keyboard Layout Fixer - informations de diagnostic\n");
     r.push_str("(aucun texte tapé, aucun contenu du presse-papiers, aucun titre de fenêtre ni nom de compte)\n\n");
     r.push_str(&format!("Version : {}\n", or_unknown(&env.version)));
     r.push_str(&format!("Windows : {}\n", env.windows.as_deref().unwrap_or("inconnu")));

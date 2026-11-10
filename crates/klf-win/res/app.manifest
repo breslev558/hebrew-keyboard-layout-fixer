@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
-  <assemblyIdentity type="win32" name="Noam.KeyboardLayoutFixer" version="1.8.6.0" processorArchitecture="*"/>
-  <description>Keyboard Layout Fixer (NOAM)</description>
+  <assemblyIdentity type="win32" name="Breslev558.KeyboardLayoutFixer" version="1.8.7.0" processorArchitecture="*"/>
+  <description>Keyboard Layout Fixer</description>
   <dependency><dependentAssembly>
     <assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0"
       processorArchitecture="*" publicKeyToken="6595b64144ccf1df" language="*"/>

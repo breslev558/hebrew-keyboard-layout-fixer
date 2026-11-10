@@ -79,6 +79,29 @@ if (-not $tim) { Fail 'aucune mesure du temps du crochet dans debug.log' }
 if ($env:GITHUB_STEP_SUMMARY) { @("", "### Crochet clavier (correction pendant la frappe allumée)", "", "``$($tim.Line)``") | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY }
 if ($tim.Line -match 'max (\d+) us' -and [int]$Matches[1] -gt 100000) { Fail "le crochet a pris plus de 100 ms sur une touche" }
 
+# --- 1b2) (1.8.7) champ mot de passe d'une page web : aucune proposition ; champ texte : proposition
+$chrome = @("$env:ProgramFiles\Google\Chrome\Application\chrome.exe", "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+if ($chrome) {
+  $lg = Join-Path $dir 'debug.log'
+  foreach ($cas in @(@('password', 'password field (UI Automation)'), @('text', 'proposal shown'))) {
+    $html = Join-Path $env:TEMP "klf-$($cas[0]).html"
+    "<html><body><input type='$($cas[0])' autofocus></body></html>" | Set-Content -Path $html -Encoding UTF8
+    $avant = (Get-Content $lg -ErrorAction SilentlyContinue).Count
+    $pc = Start-Process $chrome -ArgumentList "--user-data-dir=$env:TEMP\klf-chrome-$($cas[0])", '--no-first-run', '--new-window', "file:///$($html -replace '\\','/')" -PassThru
+    Start-Sleep 6
+    $w = [IntPtr]::Zero; $t = 0; while ($w -eq [IntPtr]::Zero -and $t -lt 20) { $pc.Refresh(); $p2 = Get-Process chrome -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1; if ($p2) { $w = $p2.MainWindowHandle }; Start-Sleep -Milliseconds 500; $t++ }
+    if ($w -ne [IntPtr]::Zero) { [void][V]::Front($w) }
+    Start-Sleep 1
+    foreach ($vk in 0x41, 0x4B, 0x55, 0x4F, 0x20) { [V]::Key([byte]$vk); Start-Sleep -Milliseconds 60 }   # « akuo » + espace
+    Start-Sleep 2
+    $nouveau = @(Get-Content $lg -ErrorAction SilentlyContinue | Select-Object -Skip $avant)
+    Get-Process chrome -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    $vu = @($nouveau | Where-Object { $_ -match [regex]::Escape($cas[1]) }).Count -gt 0
+    "Chrome, champ $($cas[0]) : $(if ($vu) { 'attendu vu' } else { 'attendu NON vu' }) ($($cas[1]))"
+    if (-not $vu) { $nouveau | Select-Object -Last 5 | ForEach-Object { "    log: $_" } }
+  }
+} else { "Chrome absent : essai mot de passe web sauté" }
+
 # --- 1c) phrase témoin : rien de ce qui est tapé ne doit se retrouver dans les fichiers du programme
 $pf = Start-Process powershell -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $fp -PassThru
 $h = [IntPtr]::Zero; $t = 0; while ($h -eq [IntPtr]::Zero) { Start-Sleep -Milliseconds 300; $h = [V]::FindWindow([NullString]::Value, 'KLF-paragraphe'); if (++$t -gt 60) { Fail 'fenêtre de test introuvable (3)' } }

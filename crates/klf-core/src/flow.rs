@@ -180,6 +180,9 @@ pub trait Host {
     /// 1.8.5: Ctrl+V was just sent with `after` replacing `before` (the clipboard path): a quick
     /// next F10 may toggle it back without the clipboard.
     fn pasted(&self, _before: &str, _after: &str, _selected: bool) {}
+    /// 1.8.7: called once the keys are released and the window checked, before anything is
+    /// copied (an autocompletion suggestion is taken away there).
+    fn before_copy(&self) {}
     /// 1.8.6: the text just pasted is selected again (Shift+Left `n` times).
     fn send_select_back(&self, _n: usize) -> bool {
         false
@@ -432,6 +435,8 @@ pub fn run_traced(host: &mut dyn Host, s: &AppSettings, trace: &mut Trace) -> Ou
     if host.foreground() != target {
         return Outcome::say(Msg::WindowChanged, "Target window changed, nothing done");
     }
+    // 1.8.7: keys released, window checked: an autocompletion suggestion may be taken away
+    host.before_copy();
 
     trace.mark(Step::ClipboardSave, host.now_ms());
     // The user's clipboard is saved COMPLETELY and emptied in the same opening, or nothing is done.

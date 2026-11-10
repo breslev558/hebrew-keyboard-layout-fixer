@@ -1133,12 +1133,18 @@ fn start_hotkey(hwnd: HWND, action: Action, delayed: bool) {
     } else {
         (None, None)
     };
+    // 1.8.7: an autocompletion suggestion (Run dialog, Explorer address bar...) is the end of the
+    // text, selected by the program, not by the user: taken away (Delete) by the worker once the
+    // keys are released, only if the last key typed there was a character (not Shift+End, not a
+    // click: then the selection is the user's)
+    let drop_suggestion = action == Action::Layout && crate::platform::input::last_key_was_character() && autocomplete_suffix(fg_at_hotkey as HWND);
     let started = sys_tick();
     let spawned = std::thread::Builder::new().name("f10".into()).spawn(move || {
         log(if s.action == Action::Case { "Caps Lock hotkey pressed" } else { "Hotkey pressed" });
         let fg = fg_at_hotkey as HWND;
         let caret = if fg.is_null() { None } else { target::caret_point(fg) };
         let mut host = WinHost::new(owner, vk, caps_at_hotkey, fg_at_hotkey);
+        host.drop_suggestion = drop_suggestion;
         let mut trace = klf_core::diag::Trace::default();
         let outcome = flow::run_traced(&mut host, &s, &mut trace);
         {
@@ -1157,6 +1163,33 @@ fn start_hotkey(hwnd: HWND, action: Action, delayed: bool) {
     if spawned.is_err() {
         STATE.with(|s| s.busy.store(false, Ordering::SeqCst));
         log("Could not start the worker thread");
+    }
+}
+
+/// 1.8.7: the focused control is the edit box of a combo box (autocompletion) and its selection
+/// runs from inside the text to its very end: a suggestion added by the program.
+pub fn autocomplete_suffix(fg: HWND) -> bool {
+    let focus = target::focus_of(fg);
+    if focus.is_null() || !sys::class_name(focus).eq_ignore_ascii_case("Edit") {
+        return false;
+    }
+    // SAFETY: plain handles; EM_GETSEL and WM_GETTEXTLENGTH are marshalled, with a time limit.
+    unsafe {
+        let parent = GetParent(focus);
+        let pc = sys::class_name(parent);
+        if !(pc.eq_ignore_ascii_case("ComboBox") || pc.eq_ignore_ascii_case("ComboBoxEx32")) {
+            return false;
+        }
+        let (mut a, mut b) = (0u32, 0u32);
+        let mut r: usize = 0;
+        if SendMessageTimeoutW(focus, 0x00B0, &mut a as *mut u32 as WPARAM, &mut b as *mut u32 as LPARAM, SMTO_ABORTIFHUNG, 200, &mut r) == 0 {
+            return false;
+        }
+        let mut len: usize = 0;
+        if SendMessageTimeoutW(focus, WM_GETTEXTLENGTH, 0, 0, SMTO_ABORTIFHUNG, 200, &mut len) == 0 {
+            return false;
+        }
+        a > 0 && b > a && b as usize == len
     }
 }
 
@@ -1488,7 +1521,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             0
         }
         crate::typing::WM_APP_TYPING => {
-            crate::typing::on_message(wparam);
+            crate::typing::on_message_l(wparam, lparam);
             0
         }
         crate::report::WM_APP_REPORT => {

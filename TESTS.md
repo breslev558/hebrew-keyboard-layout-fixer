@@ -68,7 +68,7 @@ Version : ______  PC : ______  Date : ______  Windows : ______  Échelle : _____
 - [ ] Case décochée : plus rien.
 
 ## Réglages imposés par l'administrateur (1.5.0)
-- [ ] des valeurs dans HKLM\SOFTWARE\Policies\NOAM\KeyboardLayoutFixer (en administrateur) sur le PC d'essai : en moins d'une minute, l'indicateur se coupe, les cases imposées sont grisées, « gérés par l'administrateur » dans la ligne d'état, la règle « jeu.exe » cochée et grisée dans le menu.
+- [ ] des valeurs dans HKLM\SOFTWARE\Policies\KeyboardLayoutFixer (en administrateur) sur le PC d'essai : en moins d'une minute, l'indicateur se coupe, les cases imposées sont grisées, « gérés par l'administrateur » dans la ligne d'état, la règle « jeu.exe » cochée et grisée dans le menu.
 - [ ] Un utilisateur standard (compte non administrateur) ne peut pas changer ces réglages.
 - [ ] Valeurs retirées du registre : chacun retrouve ses réglages.
 - [ ] Valeur fausse (ex. PasteDelayMs = 5) : ignorée, signalée dans l'onglet Diagnostic.

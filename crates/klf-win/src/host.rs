@@ -7,6 +7,8 @@ use std::cell::{Cell, RefCell};
 use windows_sys::Win32::Foundation::HWND;
 
 pub struct WinHost {
+    /// 1.8.7: take an autocompletion suggestion away before copying (decided on the UI thread)
+    pub drop_suggestion: bool,
     owner: HWND,
     hotkey_vk: u16,
     snapshot: Option<clipboard::Snapshot>,
@@ -37,6 +39,7 @@ impl WinHost {
     /// `owner`: our hidden window (clipboard owner).
     pub fn new(owner: usize, hotkey_vk: u16, caps_at_hotkey: (Option<bool>, Option<u32>), start_fg: usize) -> Self {
         Self {
+            drop_suggestion: false,
             owner: owner as HWND,
             hotkey_vk,
             snapshot: None,
@@ -217,6 +220,12 @@ impl Host for WinHost {
     }
     fn modifiers_down(&self) -> bool {
         input::modifiers_down()
+    }
+    fn before_copy(&self) {
+        // checked again now (the suggestion may have changed); Delete with no modifier held
+        if self.drop_suggestion && crate::app::autocomplete_suffix(self.target.get()) && input::delete_key() {
+            crate::util::log("Autocompletion suggestion removed before converting");
+        }
     }
     fn send_extend_up(&self) -> bool {
         input::select_up_to_line_start()

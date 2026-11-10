@@ -99,6 +99,11 @@ pub fn select_up_to_line_start() -> bool {
     ])
 }
 
+/// 1.8.7: Delete (takes an autocompletion suggestion away).
+pub fn delete_key() -> bool {
+    send(&[key(VK_DELETE, false, true), key(VK_DELETE, true, true)])
+}
+
 /// 1.8.6: Shift+Left `n` times (the text just pasted selected again).
 pub fn select_back(n: usize) -> bool {
     let mut v = Vec::with_capacity(2 + n * 2);
@@ -315,6 +320,14 @@ pub fn check_hooks() -> bool {
     watch_caps_lock()
 }
 
+/// 1.8.7: the last key the user pressed (the hotkey and modifiers aside) typed a character, and no
+/// click came after it.
+static LAST_CHAR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn last_key_was_character() -> bool {
+    LAST_CHAR.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 pub fn user_activity() -> (u32, u32) {
     use std::sync::atomic::Ordering::SeqCst;
     (USER_KEYS.load(SeqCst), USER_CLICKS.load(SeqCst))
@@ -325,6 +338,7 @@ unsafe extern "system" fn click_hook(code: i32, wp: usize, lp: isize) -> isize {
     LAST_EVENT.store(tick32(), std::sync::atomic::Ordering::Relaxed);
     if code >= 0 && matches!(wp as u32, WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN) {
         USER_CLICKS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        LAST_CHAR.store(false, std::sync::atomic::Ordering::Relaxed);
     }
     // SAFETY: passes the event on unchanged.
     unsafe { CallNextHookEx(std::ptr::null_mut(), code, wp, lp) }
@@ -355,6 +369,14 @@ unsafe extern "system" fn caps_hook(code: i32, wp: usize, lp: isize) -> isize {
             && !matches!(k.vkCode as u16, VK_SHIFT | VK_LSHIFT | VK_RSHIFT | VK_CONTROL | VK_LCONTROL | VK_RCONTROL | VK_MENU | VK_LMENU | VK_RMENU | VK_LWIN | VK_RWIN)
         {
             USER_KEYS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            // a character key (letters, digits, signs, space) without Ctrl/Alt: typing; anything
+            // else (arrows, End, Home, Delete...) or Shift+navigation: not
+            let ch = matches!(k.vkCode, 0x20 | 0x30..=0x39 | 0x41..=0x5A | 0x60..=0x6F | 0xBA..=0xC0 | 0xDB..=0xDF | 0xE2);
+            let ctrl_alt = [VK_CONTROL, VK_MENU].iter().any(|v| {
+                // SAFETY: no pointers.
+                (unsafe { GetAsyncKeyState(*v as i32) } as u16) & 0x8000 != 0
+            });
+            LAST_CHAR.store(ch && !ctrl_alt, std::sync::atomic::Ordering::Relaxed);
         }
     }
     // SAFETY: passes the event on unchanged.

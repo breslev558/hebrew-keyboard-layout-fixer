@@ -90,7 +90,7 @@ Aucun workflow .github/workflows ; zéro exécution. TESTS.md ligne 3 mentionne 
 Ajouter une CI sur push et pull_request : tests du cœur, compilation Windows, fmt/clippy après état de référence, analyse de dépendances, tests PowerShell isolés. Commandes : cargo test --locked -p klf-core ; cargo fmt --all -- --check ; cargo clippy --locked --workspace --all-targets -- -D warnings ; cargo build --locked --release --target x86_64-pc-windows-gnu -p KeyboardLayoutFixer. Documenter MinGW ; éviter la dépendance à des outils locaux non documentés.
 
 A10 — P3 — La release est traçable, mais pas reconstruite indépendamment
-Archive KeyboardLayoutFixer.zip 339 462 octets, SHA-256 32c84d58246c44bacfd821323b911cc64170dd71d96c2bb9d09d97aadd6977b8 ; exe 626 176 octets, SHA-256 bcee0168ff750d11f6d956e690890161b9653f8c16fbcbd2808357092e6f7cd7 ; FileVersion 1.5.3.0 ; ProductVersion 1.5.3-noam ; BUILD-INFO correct ; scripts identiques aux sources ; Authenticode NotSigned.
+Archive KeyboardLayoutFixer.zip 339 462 octets, SHA-256 32c84d58246c44bacfd821323b911cc64170dd71d96c2bb9d09d97aadd6977b8 ; exe 626 176 octets, SHA-256 bcee0168ff750d11f6d956e690890161b9653f8c16fbcbd2808357092e6f7cd7 ; FileVersion 1.5.3.0 ; ProductVersion 1.5.3 ; BUILD-INFO correct ; scripts identiques aux sources ; Authenticode NotSigned.
 Amélioration : publier depuis une CI contrôlée, conserver les logs, décrire les outils, attestation de provenance (GitHub artifact attestations). Présenter la vérification d'origine avant les instructions de contournement de SmartScreen.
 
 A11 — P3 — La localisation française/anglaise/hébraïque est incomplète

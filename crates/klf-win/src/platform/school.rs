@@ -1,4 +1,4 @@
-//! Settings imposed by the administrator: registry key SOFTWARE\Policies\NOAM\KeyboardLayoutFixer,
+//! Settings imposed by the administrator: registry key SOFTWARE\Policies\KeyboardLayoutFixer,
 //! machine (HKLM, the one to use: a standard user cannot write there) then user (HKCU); the machine
 //! wins. Read only. Values: REG_DWORD / REG_SZ / REG_MULTI_SZ with the names of settings.json;
 //! the AppRules and ExcludedProcesses lists also as sub-keys (one REG_SZ value per program).
@@ -9,7 +9,7 @@ use std::ptr::{null, null_mut};
 use windows_sys::Win32::Foundation::ERROR_SUCCESS;
 use windows_sys::Win32::System::Registry::*;
 
-pub const KEY: &str = "SOFTWARE\\Policies\\NOAM\\KeyboardLayoutFixer";
+pub const KEY: &str = "SOFTWARE\\Policies\\KeyboardLayoutFixer";
 
 /// Opens a key for reading (None if absent).
 fn open(root: HKEY, path: &str) -> Option<HKEY> {

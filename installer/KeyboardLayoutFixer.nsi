@@ -56,6 +56,9 @@ LangString DejaMachine ${LANG_HEBREW} "Keyboard Layout Fixer כבר מותקן �
 LangString PasFerme ${LANG_ENGLISH} "The running copy did not close. Close it from its tray icon (right-click > Exit), then try again."
 LangString PasFerme ${LANG_FRENCH} "Le programme en cours d'exécution ne s'est pas fermé. Fermez-le depuis son icône (clic droit > Quitter), puis réessayez."
 LangString PasFerme ${LANG_HEBREW} "העותק הפועל לא נסגר. סגרו אותו מהסמל (לחיצה ימנית > יציאה) ונסו שוב."
+LangString EffacerAussi ${LANG_ENGLISH} "Also delete your settings and the words the program learned (my-words.txt)?"
+LangString EffacerAussi ${LANG_FRENCH} "Effacer aussi vos réglages et les mots que le programme a appris (my-words.txt) ?"
+LangString EffacerAussi ${LANG_HEBREW} "למחוק גם את ההגדרות ואת המילים שהתוכנה למדה (my-words.txt)?"
 
 Var Premiere
 
@@ -164,5 +167,15 @@ Section "Uninstall"
   ${IfNot} ${Errors}
     DeleteRegKey HKCU "${ARP}"
   ${EndIf}
-  ; les réglages (%APPDATA%\KeyboardLayoutFixer) sont gardés
+  ; les réglages (%APPDATA%\KeyboardLayoutFixer) sont gardés, sauf si l'utilisateur demande de
+  ; les effacer aussi (1.8.7 : réglages, mots appris, listes ; jamais en silencieux, non par défaut)
+  ; seulement si le programme est bien parti, pour ce compte, et si le dossier existe vraiment
+  IfSilent garder
+  IfFileExists "$INSTDIR\KeyboardLayoutFixer.exe" garder
+  SetShellVarContext current
+  StrCmp "$APPDATA" "" garder
+  IfFileExists "$APPDATA\KeyboardLayoutFixer\*.*" 0 garder
+  MessageBox MB_YESNO|MB_ICONQUESTION|MB_DEFBUTTON2 "$(EffacerAussi)" IDNO garder
+  RMDir /r "$APPDATA\KeyboardLayoutFixer"
+  garder:
 SectionEnd

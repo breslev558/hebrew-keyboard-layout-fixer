@@ -8,6 +8,17 @@ on:
 permissions:
   contents: read
 jobs:
+  pseudonyme:
+    # 10/11/2026 : le dépôt public ne contient jamais le nom de l'édition interne (les listes de mots
+    # contiennent le mot hébreu courant נועם, elles sont laissées de côté)
+    if: github.repository == 'breslev558/hebrew-keyboard-layout-fixer'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Aucun nom interne dans les fichiers publics
+        run: |
+          if grep -rnIi 'n[o]am' --exclude-dir=.git --exclude-dir=words .; then echo "ECHEC : nom interne trouvé"; exit 1; fi
+          echo "OK : aucun nom interne"
   coeur-et-compilation:
     runs-on: ubuntu-24.04
     timeout-minutes: 30

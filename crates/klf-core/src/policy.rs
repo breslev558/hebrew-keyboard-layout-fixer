@@ -187,7 +187,9 @@ pub fn caps_lock_press_needed(
 /// spreadsheets, terminals, address bars or lists (Up does something else there).
 pub fn paragraph_field(focus_class: &str, exe: &str) -> bool {
     let c = focus_class.to_ascii_lowercase();
-    let known = c == "chrome_renderwidgethostwnd" || c == "chrome_renderwidgethosthwnd" || c == "edit" || c.starts_with("richedit") || c == "_wwg" || c == "mozillawindowclass";
+    // (WinForms boxes are Edit / RichEdit controls with a longer class name)
+    let known = c == "chrome_renderwidgethostwnd" || c == "chrome_renderwidgethosthwnd" || c == "edit" || c.starts_with("richedit") || c == "_wwg" || c == "mozillawindowclass"
+        || c.starts_with("windowsforms10.edit") || c.starts_with("windowsforms10.richedit");
     known && !no_paragraph_extension(exe) && !crate::typing::is_code_editor(exe)
 }
 

@@ -44,6 +44,8 @@ const CTRL_EN: usize = 11;
 const CTRL_HE: usize = 12;
 const GUARD: usize = 13;
 const TIMING: usize = 14;
+const UIA_FREE: usize = 15;
+const UIA_PASSWORD: usize = 16;
 /// a pause longer than this starts a new run
 const PAUSE_MS: u64 = 15_000;
 /// a proposal stays valid this long
@@ -74,6 +76,8 @@ fn qpc() -> (i64, i64) {
 
 /// 1.8.5: last event seen by the typing hooks (GetTickCount, ms)
 static LAST_EVENT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+/// 1.8.7: number of the latest UI Automation question
+static UIA_GENERATION: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 fn dict_ready_fast() -> bool {
     LISTS_READY.load(Ordering::SeqCst)
@@ -229,6 +233,8 @@ thread_local! {
     /// words waiting to be checked (filled by the hook, read by the UI message)
     static PENDING: RefCell<Option<(Vec<String>, bool, usize)>> = const { RefCell::new(None) };
     static PROPOSAL: RefCell<Option<Proposal>> = const { RefCell::new(None) };
+    /// 1.8.7: a proposal waiting for UI Automation's answer (password field or not)
+    static PENDING_SHOW: RefCell<Option<Proposal>> = const { RefCell::new(None) };
     static LAST_FIX: RefCell<Option<LastFix>> = const { RefCell::new(None) };
     static SWALLOW_BACK_UP: Cell<bool> = const { Cell::new(false) };
     static DSHIFT: RefCell<t::DoubleShift> = RefCell::new(t::DoubleShift::default());
@@ -320,6 +326,7 @@ pub fn reset() {
     BUF.with(|b| b.borrow_mut().clear());
     PENDING.with(|p| p.borrow_mut().take());
     PROPOSAL.with(|p| p.borrow_mut().take());
+    PENDING_SHOW.with(|p| p.borrow_mut().take());
     LAST_FIX.with(|p| p.borrow_mut().take());
     DSHIFT.with(|d| *d.borrow_mut() = t::DoubleShift::default());
     TOKEN.with(|b| b.borrow_mut().interrupt()); // "ho" + click + "tel" is not the shortcut "tel"
@@ -526,6 +533,7 @@ fn on_key(vk: u32, sc: u32) -> bool {
     }
     // any other key: the proposal and the words waiting for a check are dropped
     PROPOSAL.with(|p| p.borrow_mut().take());
+    PENDING_SHOW.with(|p| p.borrow_mut().take());
     PENDING.with(|p| p.borrow_mut().take());
     PENDING_REPL.with(|p| p.borrow_mut().take());
     if now.saturating_sub(LAST_KEY.with(|l| l.replace(now))) > PAUSE_MS || BUF_HWND.with(|h| h.replace(fg)) != fg {
@@ -743,7 +751,11 @@ unsafe extern "system" fn mouse_proc(code: i32, w: WPARAM, l: LPARAM) -> LRESULT
 // ---------------------------------------------------------------------------------------------
 // UI thread messages
 
-pub fn on_message(code: WPARAM) {
+/// UI thread messages of this module (`l`: the number of a UI Automation question).
+pub fn on_message_l(code: WPARAM, l: LPARAM) {
+    if matches!(code, UIA_FREE | UIA_PASSWORD) && l as usize != UIA_GENERATION.load(Ordering::SeqCst) {
+        return; // the answer to an older question
+    }
     match code {
         CHECK => check(),
         FIX => fix(),
@@ -777,6 +789,16 @@ pub fn on_message(code: WPARAM) {
         }
         CTRL_EN | CTRL_HE => {} // full-screen game or video: nothing
         GUARD => guard_check(),
+        UIA_FREE => {
+            if let Some(p) = PENDING_SHOW.with(|p| p.borrow_mut().take()) {
+                show_proposal(p);
+            }
+        }
+        UIA_PASSWORD => {
+            if PENDING_SHOW.with(|p| p.borrow_mut().take()).is_some() {
+                log("Typing correction: password field (UI Automation) or no answer, nothing proposed");
+            }
+        }
         TIMING => {
             let n = HOOK_KEYS.swap(0, Ordering::Relaxed);
             let sum = HOOK_SUM_US.swap(0, Ordering::Relaxed);
@@ -827,6 +849,37 @@ fn check() {
     let pairs: Vec<(String, String)> = words.iter().map(|w| (w.clone(), klf_core::convert::convert_with(&map, w, klf_core::settings::MixedTextMode::ToggleAll, true))).collect();
     let Some(s) = t::suggest_any(&pairs, hebrew, dict) else { return };
     drop(guard);
+    // 1.8.7: in a browser or an Electron app, UI Automation tells whether the field is a password
+    // box (they do not use ES_PASSWORD); asked on its own thread, the proposal waits for the answer
+    if crate::platform::uia::needs_uia(&target::info(fg).focus_class) {
+        PENDING_SHOW.with(|p| *p.borrow_mut() = Some(Proposal { s, hwnd: fg as usize, latin_hkl, at: tick(), words }));
+        // each question has its number: an old answer never shows a newer proposal
+        let generation = UIA_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+        let owner = app::main_window() as usize;
+        let _ = std::thread::Builder::new().name("klf-uia-wait".into()).spawn(move || {
+            let (tx, rx) = std::sync::mpsc::channel();
+            crate::platform::uia::focused_is_password(tx);
+            // no answer within 300 ms: maybe a password box, nothing proposed
+            let code = match rx.recv_timeout(std::time::Duration::from_millis(300)) {
+                Ok(Some(false)) => UIA_FREE,
+                _ => UIA_PASSWORD,
+            };
+            // SAFETY: posting a message without pointers to our own window.
+            unsafe { PostMessageW(owner as HWND, WM_APP_TYPING, code, generation as LPARAM) };
+        });
+        return;
+    }
+    show_proposal(Proposal { s, hwnd: fg as usize, latin_hkl, at: tick(), words });
+}
+
+/// The proposal bubble (and, for a word taught with F10, the fix at once).
+fn show_proposal(p: Proposal) {
+    let fg = target::foreground();
+    if fg as usize != p.hwnd || !BUF.with(|b| b.borrow().ends_with_words(&p.words)) {
+        return; // another window, or typing went on meanwhile
+    }
+    let Proposal { s, latin_hkl, words, .. } = p;
+    log("Typing correction: proposal shown");
     let shown = if s.auto { s.text.trim_end().to_string() } else { format!("{}   Tab ↹", s.text.trim_end()) };
     crate::bubble::show_near_caret(&shown, s.to_hebrew, target::caret_point(fg), fg as usize);
     if app::settings().play_sound && !s.auto {

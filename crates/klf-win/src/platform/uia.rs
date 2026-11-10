@@ -131,7 +131,8 @@ fn ask_selection_empty(automation: *mut c_void) -> Option<bool> {
             release_arr(arr);
             return None;
         }
-        // no range at all: unknown (not « nothing selected »)) } else { None };
+        // no range at all: unknown, not « nothing selected » (audit Fable)
+        let mut empty = if n > 0 { Some(true) } else { None };
         for i in 0..n.min(16) {
             let mut r: *mut c_void = std::ptr::null_mut();
             let get_el: GetElement = method(arr, 4);

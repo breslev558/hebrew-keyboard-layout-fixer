@@ -137,7 +137,8 @@ pub fn supported(h: u32) -> bool {
 
 pub fn choose(active: Option<u32>) -> Choice {
     let installed = installed();
-    // what a layout is: by its exact value, else by its letters
+    // what a layout is: by its exact value, else by its letters (UK, US-International
+    // and Hebrew SI-1452 worked before 1.4.0 and must keep working)
     let kind = layout_kind;
     let first_latin = || {
         // 1.8.6: the Latin layout chosen in the settings, else the last one used, else a layout

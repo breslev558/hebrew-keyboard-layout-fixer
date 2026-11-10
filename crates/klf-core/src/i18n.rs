@@ -498,7 +498,7 @@ pub fn text(lang: Lang, m: Msg) -> &'static str {
         (ButtonImport, Fr) => "Importer…",
         (ButtonImport, En) => "Import…",
         (ButtonUndoImport, He) => "שחזר הגדרות קודמות",
-        (ButtonUndoImport, Fr) => "Rétablir les paramètres précédents",
+        (ButtonUndoImport, Fr) => "Réglages précédents",
         (ButtonUndoImport, En) => "Restore previous settings",
         (ImportConfirm, He) => "לייבא את ההגדרות האלה? ההגדרות הנוכחיות יישמרו בעותק (עותק ישן יותר יוחלף).",
         (ImportConfirm, Fr) => "Importer ces paramètres ? Les paramètres actuels sont gardés dans une copie (une copie plus ancienne est remplacée).",

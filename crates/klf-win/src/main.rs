@@ -1,4 +1,4 @@
-//! Keyboard Layout Fixer — Rust 1.8.7. Fixes text typed with the wrong keyboard layout
+//! Keyboard Layout Fixer — Rust 1.8.8. Fixes text typed with the wrong keyboard layout
 //! (Hebrew <-> English) with one key (F10). Based on RavidSaadia/Keyboard_Layout_Fixer (MIT).
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
@@ -62,6 +62,7 @@ fn main() {
     util::log(&format!("Application starting v{} (Rust)", klf_core::VERSION));
     let s = app::load_settings();
     app::STATE.with(|st| *st.settings.borrow_mut() = s);
+    app::share_settings();
     // what the administrator imposes (registry), before the keys are registered
     app::reload_policy();
 

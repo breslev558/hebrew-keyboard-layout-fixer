@@ -84,7 +84,7 @@ pub fn restore_parked(owner: usize) -> Option<RestoreResult> {
     }
     let mut p = PARKED.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let (snap, st, at) = p.take()?;
-    let r = clipboard::restore(owner as HWND, &snap, &st);
+    let r = clipboard::restore_on_request(owner as HWND, &snap);
     if r == RestoreResult::Failed {
         *p = Some((snap, st, at)); // still busy: kept for another try
     }
@@ -183,6 +183,9 @@ impl Host for WinHost {
     }
     fn clipboard_park(&mut self, st: &ClipState) {
         if let Some(snap) = self.snapshot.take() {
+            if snap.is_empty() {
+                return; // 1.8.8: an empty clipboard is not kept (a click would only empty the current one)
+            }
             if snap.secret {
                 // a password manager's copy is never kept for later (it would come back after the
                 // manager cleared it)

@@ -195,13 +195,23 @@ pub fn paragraph_field(focus_class: &str, exe: &str) -> bool {
 
 /// 1.8.5: programs where F10 without a selection never extends to the whole paragraph (Shift+Up
 /// would leave the cell being edited in Excel, or do something else in a terminal).
+/// 1.8.8: cmd / PowerShell / conhost are no longer listed: their console windows never reach this
+/// test (handled earlier by their window class), while a window made by a PowerShell script
+/// (WinForms text box) is a real text field (this is what the Windows test showed).
 pub fn no_paragraph_extension(exe: &str) -> bool {
-    matches!(exe.to_ascii_lowercase().as_str(), "excel.exe" | "scalc.exe" | "soffice.bin" | "windowsterminal.exe" | "wt.exe" | "conhost.exe" | "cmd.exe" | "powershell.exe" | "pwsh.exe" | "mintty.exe" | "putty.exe")
+    matches!(exe.to_ascii_lowercase().as_str(), "excel.exe" | "scalc.exe" | "soffice.bin" | "windowsterminal.exe" | "wt.exe" | "mintty.exe" | "putty.exe")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_powershell_script_window_is_a_text_field() {
+        assert!(paragraph_field("WindowsForms10.EDIT.app.0.141b42a_r6_ad1", "powershell.exe"));
+        assert!(!paragraph_field("WindowsForms10.EDIT.app.0.141b42a_r6_ad1", "excel.exe"));
+        assert!(!paragraph_field("ConsoleWindowClass", "powershell.exe"), "a console is never a paragraph field");
+    }
 
     #[test]
     fn consoles() {

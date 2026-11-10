@@ -93,7 +93,27 @@ pub fn personal_path() -> Option<std::path::PathBuf> {
 }
 
 /// Reads the personal file again if it changed (cheap: one date check).
+/// 1.8.8: we just wrote my-words.txt: read again at once (not after the 5 s pause).
+fn personal_written() {
+    *PERSONAL_AT.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    PERSONAL_FORCE.store(true, Ordering::SeqCst);
+    refresh_personal();
+}
+
+/// 1.8.8: the next `refresh_personal` reads the file whatever the time since the last look.
+static PERSONAL_FORCE: AtomicBool = AtomicBool::new(true);
+
 fn refresh_personal() {
+    // 1.8.8: the file date is looked at most every 5 s (this runs on the hooks' thread, and the
+    // profile may be on a slow disk or network, audit Fable); a change made by us is seen at once
+    static CHECKED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let now = tick();
+    let last_check = CHECKED.load(Ordering::Relaxed);
+    let forced = PERSONAL_FORCE.swap(false, Ordering::SeqCst);
+    if !forced && last_check != 0 && now.saturating_sub(last_check) < 5_000 {
+        return;
+    }
+    CHECKED.store(now, Ordering::Relaxed);
     let Some(p) = personal_path() else { return };
     let meta = std::fs::metadata(&p).ok();
     let at = meta.as_ref().and_then(|m| m.modified().ok());
@@ -133,6 +153,24 @@ fn decode_text(b: &[u8]) -> String {
     }
 }
 
+/// 1.8.8: the whole personal file rewritten through a temporary file (a crash or a power cut never
+/// leaves it cut, audit Fable).
+fn write_whole(p: &std::path::Path, text: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let tmp = p.with_extension("txt.write.tmp");
+    let r = (|| {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(text.as_bytes())?;
+        f.sync_all()?;
+        drop(f);
+        std::fs::rename(&tmp, p)
+    })();
+    if r.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    r
+}
+
 /// Adds lines to the personal file (UTF-8; a line break first if the file does not end with one).
 /// 1.8.5: a quick second F10 put the original back: what the first one taught ("+word") is
 /// taken back out of my-words.txt (a round trip teaches nothing).
@@ -149,9 +187,9 @@ pub fn forget_learned(typed: &str) {
         return;
     }
     let kept: Vec<&str> = text.lines().filter(|l| !l.trim().eq_ignore_ascii_case(&line)).collect();
-    if std::fs::write(&p, kept.join("\r\n") + "\r\n").is_ok() {
+    if write_whole(&p, &(kept.join("\r\n") + "\r\n")).is_ok() {
         log("F10 round trip: the word learned by the first F10 was taken back");
-        refresh_personal();
+        personal_written();
     }
 }
 
@@ -178,7 +216,7 @@ fn append_personal(lines: &[String]) {
     // a file saved by Notepad as UTF-16 is rewritten in UTF-8 (the program reads both)
     let utf16 = current.starts_with(&[0xFF, 0xFE]) || current.starts_with(&[0xFE, 0xFF]);
     let result = if utf16 {
-        std::fs::write(&p, format!("{}{add}", known.trim_end_matches(['\r', '\n']).to_string() + "\r\n"))
+        write_whole(&p, &format!("{}{add}", known.trim_end_matches(['\r', '\n']).to_string() + "\r\n"))
     } else {
         use std::io::Write;
         std::fs::OpenOptions::new().create(true).append(true).open(&p).and_then(|mut f| f.write_all(add.as_bytes()))
@@ -186,7 +224,7 @@ fn append_personal(lines: &[String]) {
     if result.is_err() {
         log("Typing correction: my-words.txt could not be written");
     }
-    refresh_personal();
+    personal_written();
 }
 
 /// Tray menu "My words…": opens the personal file in Notepad (created with an explanation).
@@ -267,6 +305,9 @@ thread_local! {
     static VERIFY_STATE: RefCell<Option<VerifyState>> = const { RefCell::new(None) };
     /// user keys and clicks counted when the fix was typed (any since: no check, never undone)
     static VERIFY_KEYS: Cell<(u32, u32)> = const { Cell::new((0, 0)) };
+    /// 1.8.8: the text read at the first check, when it was not the fix: it must read the same a
+    /// moment later (a slow program may still be typing) before anything is rewritten
+    static VERIFY_SEEN: RefCell<Option<Vec<u16>>> = const { RefCell::new(None) };
     static MAPS_ALTGR: RefCell<HashMap<u32, HashMap<u32, char>>> = RefCell::new(HashMap::new());
 
     static WANT_DSHIFT: Cell<bool> = const { Cell::new(false) };
@@ -316,6 +357,12 @@ pub fn apply() {
     }
     if typing && !dict_ready() {
         load_lists(); // the hooks start for double Shift meanwhile; the lists come later
+    }
+    // 1.8.8: during the safety brake (15 min) a change of setting does not put the slow hooks back;
+    // `check_hooks` calls this again when the brake is over (audit Fable)
+    if BRAKED_AT.load(Ordering::SeqCst) != 0 {
+        app::refresh_dormant(None);
+        return;
     }
     start();
     app::refresh_dormant(None);
@@ -409,19 +456,27 @@ fn load_lists() {
     if LOADING.swap(true, Ordering::SeqCst) {
         return;
     }
-    let _ = std::thread::Builder::new().name("typing-lists".into()).spawn(|| {
+    // 1.8.8: the window is read HERE (UI thread): on the new thread `main_window()` is empty and
+    // the answer was posted nowhere (audit Fable)
+    let owner = app::main_window() as usize;
+    let started = std::thread::Builder::new().name("typing-lists".into()).spawn(move || {
         let _guard = LoadingGuard;
         let ok = match read_or_download() {
             Some(d) => {
                 *DICT.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(d);
                 LISTS_READY.store(true, Ordering::SeqCst);
                 *PERSONAL_AT.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+                PERSONAL_FORCE.store(true, Ordering::SeqCst);
                 true
             }
             None => false,
         };
-        post(if ok { READY } else { FAILED });
+        // SAFETY: posting a message without pointers to our own window.
+        unsafe { PostMessageW(owner as HWND, WM_APP_TYPING, if ok { READY } else { FAILED }, 0) };
     });
+    if started.is_err() {
+        LOADING.store(false, Ordering::SeqCst);
+    }
 }
 
 /// The manifest is signed; each list must match its SHA-256 and size in it.
@@ -838,9 +893,9 @@ fn check() {
         return; // another window, or games / presentations / full-screen videos: never
     }
     // the window is checked BEFORE the lists are locked (target::info may pump messages)
-    if !window_ok(fg, true) {
+    let Some(info) = window_info_ok(fg, true) else {
         return;
-    }
+    };
     refresh_personal();
     let guard = DICT.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let Some(dict) = guard.as_ref() else { return };
@@ -851,7 +906,7 @@ fn check() {
     drop(guard);
     // 1.8.7: in a browser or an Electron app, UI Automation tells whether the field is a password
     // box (they do not use ES_PASSWORD); asked on its own thread, the proposal waits for the answer
-    if crate::platform::uia::needs_uia(&target::info(fg).focus_class) {
+    if crate::platform::uia::needs_uia(&info.focus_class) {
         PENDING_SHOW.with(|p| *p.borrow_mut() = Some(Proposal { s, hwnd: fg as usize, latin_hkl, at: tick(), words }));
         // each question has its number: an old answer never shows a newer proposal
         let generation = UIA_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
@@ -920,14 +975,22 @@ fn text_before_caret(expected: &str, word_start: bool) -> bool {
     // SAFETY: EM_GETSEL / WM_GETTEXTLENGTH / WM_GETTEXT on an Edit control (marshalled by Windows
     // across processes); the buffer size is passed.
     unsafe {
+        // 1.8.8: never a plain SendMessage from this thread (it carries the hooks): a program that
+        // does not answer within 200 ms is not waited for, and nothing is erased (audit Fable)
+        let ask = |msg: u32, w: WPARAM, l: LPARAM| -> Option<usize> {
+            let mut r: usize = 0;
+            (SendMessageTimeoutW(focus, msg, w, l, SMTO_ABORTIFHUNG | SMTO_BLOCK, 200, &mut r) != 0).then_some(r)
+        };
         let (mut start, mut end) = (0u32, 0u32);
-        SendMessageW(focus, 0x00B0, &mut start as *mut u32 as WPARAM, &mut end as *mut u32 as LPARAM); // EM_GETSEL
-        let len = SendMessageW(focus, WM_GETTEXTLENGTH, 0, 0).max(0) as usize;
+        if ask(0x00B0, &mut start as *mut u32 as WPARAM, &mut end as *mut u32 as LPARAM).is_none() {
+            return false; // EM_GETSEL
+        }
+        let Some(len) = ask(WM_GETTEXTLENGTH, 0, 0) else { return false };
         if start != end || len > 1_000_000 || end as usize > len {
             return false;
         }
         let mut buf = vec![0u16; len + 1];
-        let n = SendMessageW(focus, WM_GETTEXT, buf.len(), buf.as_mut_ptr() as LPARAM).max(0) as usize;
+        let Some(n) = ask(WM_GETTEXT, buf.len(), buf.as_mut_ptr() as LPARAM) else { return false };
         let before = String::from_utf16_lossy(&buf[..(end as usize).min(n)]);
         let exp: Vec<u16> = wide(expected);
         let exp = String::from_utf16_lossy(&exp[..exp.len().saturating_sub(1)]);
@@ -968,6 +1031,7 @@ fn fix() {
     let owner = app::main_window() as usize;
     let verify = check.is_some();
     VERIFY_STATE.with(|v| *v.borrow_mut() = check);
+    VERIFY_SEEN.with(|v| v.borrow_mut().take());
     // typed from a worker thread (the hooks live on this one and must never wait); the check
     // comes 250 ms after the last character was sent
     input::replace_paced_then(p.s.erase, p.s.text.clone(), move || {
@@ -1070,7 +1134,7 @@ fn learn_twice(word: &str) {
         std::fs::rename(&tmp, &p)
     })();
     if written.is_ok() {
-        refresh_personal();
+        personal_written();
     } else {
         let _ = std::fs::remove_file(&tmp);
         log("Typing correction: my-words.txt could not be written");
@@ -1121,7 +1185,17 @@ pub fn left_run_dialog(fg: HWND) {
 /// console, not a program the user or the school excluded, and (for layout fixes) not a code
 /// editor. Read at the moment of acting, for every word.
 fn window_ok(fg: HWND, layout_fix: bool) -> bool {
+    window_info_ok(fg, layout_fix).is_some()
+}
+
+/// 1.8.8: `window_ok` that also gives back what it read (one `target::info` per word, not two:
+/// each can wait up to 250 ms for a slow program, on the hooks' thread, audit Fable).
+fn window_info_ok(fg: HWND, layout_fix: bool) -> Option<klf_core::flow::TargetInfo> {
     let info = target::info(fg);
+    window_info_check(&info, layout_fix).then_some(info)
+}
+
+fn window_info_check(info: &klf_core::flow::TargetInfo, layout_fix: bool) -> bool {
     // 1.8.4: a program whose name cannot be read is not known to be safe
     if info.exe_name.is_empty() {
         return false;
@@ -1260,8 +1334,29 @@ pub fn one_language_path() -> Option<std::path::PathBuf> {
 
 /// The user's list, or the default one (terminals in English) while there is no file.
 fn one_language_list() -> HashMap<String, bool> {
-    let text = one_language_path().and_then(|p| std::fs::read(p).ok()).filter(|b| b.len() <= 64 * 1024).map(|b| decode_text(&b));
-    t::parse_one_language(text.as_deref().unwrap_or(t::ONE_LANGUAGE_DEFAULT))
+    // 1.8.8: kept in memory, the file read again only when its date changed, looked at most every
+    // 5 s (called at each change of window, on the hooks' thread, audit Fable)
+    type Cache = Option<(u64, Option<std::time::SystemTime>, HashMap<String, bool>)>;
+    static CACHE: std::sync::Mutex<Cache> = std::sync::Mutex::new(None);
+    let mut c = CACHE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let now = tick();
+    if let Some((checked, _, list)) = c.as_ref() {
+        if now.saturating_sub(*checked) < 5_000 {
+            return list.clone();
+        }
+    }
+    let path = one_language_path();
+    let at = path.as_ref().and_then(|p| std::fs::metadata(p).ok()).and_then(|m| m.modified().ok());
+    if let Some((checked, seen, _)) = c.as_mut() {
+        if *seen == at {
+            *checked = now;
+            return c.as_ref().map(|x| x.2.clone()).unwrap_or_default();
+        }
+    }
+    let text = path.and_then(|p| std::fs::read(p).ok()).filter(|b| b.len() <= 64 * 1024).map(|b| decode_text(&b));
+    let list = t::parse_one_language(text.as_deref().unwrap_or(t::ONE_LANGUAGE_DEFAULT));
+    *c = Some((now, at, list.clone()));
+    list
 }
 
 pub fn open_one_language() {
@@ -1468,14 +1563,45 @@ fn verify_fix() {
         log("Typing correction: text changed around the fix, left as it is");
         return;
     }
+    // 1.8.8: read twice, 200 ms apart, and only a text that stays the same is rewritten (audit Fable)
+    let seen = VERIFY_SEEN.with(|v| v.borrow_mut().take());
+    match seen {
+        None => {
+            VERIFY_SEEN.with(|v| *v.borrow_mut() = Some(units));
+            VERIFY_STATE.with(|v| *v.borrow_mut() = Some((focus, before_len, before_tail, typed, fixed)));
+            let owner = app::main_window() as usize;
+            let _ = std::thread::Builder::new().name("klf-verify".into()).spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(200));
+                // SAFETY: posting a message without pointers to our own window.
+                unsafe { PostMessageW(owner as HWND, WM_APP_TYPING, VERIFY, 0) };
+            });
+            return;
+        }
+        Some(first) if first != units => {
+            log("Typing correction: the text was still changing after the fix, left as it is");
+            return;
+        }
+        Some(_) => {}
+    }
     let start = before_len;
     let end = units.len();
     let w = wide(&typed);
     // SAFETY: EM_SETSEL / EM_REPLACESEL on an Edit control; the string is NUL-terminated and lives
     // for the call.
+    // 1.8.8: with a time limit (this thread carries the hooks); no answer to EM_SETSEL = nothing
+    // replaced
     unsafe {
-        SendMessageW(focus as HWND, 0x00B1, start, end as LPARAM); // EM_SETSEL
-        SendMessageW(focus as HWND, 0x00C2, 1, w.as_ptr() as LPARAM); // EM_REPLACESEL, undoable
+        let mut r: usize = 0;
+        if SendMessageTimeoutW(focus as HWND, 0x00B1, start, end as LPARAM, SMTO_ABORTIFHUNG | SMTO_BLOCK, 200, &mut r) == 0 {
+            return; // EM_SETSEL
+        }
+        if SendMessageTimeoutW(focus as HWND, 0x00C2, 1, w.as_ptr() as LPARAM, SMTO_ABORTIFHUNG | SMTO_BLOCK, 200, &mut r) == 0 {
+            // EM_REPLACESEL not done in time: the range must not stay selected (the next key would
+            // erase it), and nothing is announced
+            SendMessageTimeoutW(focus as HWND, 0x00B1, end, end as LPARAM, SMTO_ABORTIFHUNG | SMTO_BLOCK, 200, &mut r);
+            log("Typing correction: the words as typed could not be put back (program too slow)");
+            return;
+        }
     }
     LAST_FIX.with(|f| f.borrow_mut().take());
     log("Typing correction: the result was not the fix (autocompletion?), the words as typed were put back");

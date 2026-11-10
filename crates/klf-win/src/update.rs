@@ -305,12 +305,24 @@ pub fn install(r: &Release) -> Result<(), Failure> {
     if exe.len() as u64 != r.exe_size || !got.eq_ignore_ascii_case(&announced) {
         return Err(format!("download refused (size {} / {}, or SHA-256 different)", exe.len(), r.exe_size).into());
     }
+    // 1.8.8: an exe for the other kind of PC (x64 / ARM64) would never start: refused here
+    if u::pe_machine(&exe) != Some(u::own_machine()) {
+        return Err(format!("download refused (made for another kind of PC: {:?})", u::pe_machine(&exe)).into());
+    }
     let cur = crate::platform::sys::exe_path();
     let new = format!("{cur}.new");
     let old = format!("{cur}.old");
     // a local file problem (disk full, antivirus holding the file a moment) is tried again at the
     // next check, never frozen for 7 days like a refused file
-    std::fs::write(&new, &exe).map_err(|e| net(&format!("cannot write the new file: {e}")))?;
+    // 1.8.8: written to the disk for good (sync) before the swap: a power cut right after never
+    // leaves a cut exe in place (audit Fable)
+    (|| -> std::io::Result<()> {
+        use std::io::Write;
+        let mut f = std::fs::File::create(&new)?;
+        f.write_all(&exe)?;
+        f.sync_all()
+    })()
+    .map_err(|e| net(&format!("cannot write the new file: {e}")))?;
     let fv = file_version(&new);
     if !u::download_ok(r, exe.len() as u64, &got, &announced, fv) {
         let _ = std::fs::remove_file(&new);

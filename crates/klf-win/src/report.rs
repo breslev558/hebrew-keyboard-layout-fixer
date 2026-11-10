@@ -125,7 +125,7 @@ fn send(hwnd: HWND, body: String, tell: bool) {
         return; // the running thread takes it
     }
     let owner = hwnd as usize;
-    let _ = std::thread::Builder::new().name("report".into()).spawn(move || loop {
+    let started = std::thread::Builder::new().name("report".into()).spawn(move || loop {
         let next = {
             let mut q = QUEUE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             if q.is_empty() {
@@ -159,6 +159,9 @@ fn send(hwnd: HWND, body: String, tell: bool) {
             unsafe { PostMessageW(owner as HWND, WM_APP_REPORT, code, 0) };
         }
     });
+    if started.is_err() {
+        SENDING.store(false, Ordering::SeqCst); // 1.8.8: never stuck at « sending »
+    }
 }
 
 pub fn on_result(code: WPARAM) {

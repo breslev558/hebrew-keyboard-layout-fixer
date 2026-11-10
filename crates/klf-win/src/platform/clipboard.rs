@@ -46,6 +46,13 @@ pub struct Snapshot {
     pub secret: bool,
 }
 
+impl Snapshot {
+    /// The user's clipboard was empty.
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+}
+
 /// Opens the clipboard; closed when dropped. Retries happen BEFORE opening.
 struct Open;
 
@@ -546,8 +553,18 @@ pub fn publish(owner: HWND, text: &str, st: &ClipState) -> PublishResult {
 /// Right before Ctrl+V: is our converted text still in the clipboard? (audit A2)
 pub fn is_still_ours(owner: HWND, st: &ClipState) -> StillOurs {
     match Open::new(owner, 10) {
-        Some(_open) if still_ours(st, &observe(owner)) => StillOurs::Yes,
-        Some(_open) => StillOurs::No,
+        Some(_open) => {
+            let now = observe(owner);
+            if still_ours(st, &now) {
+                StillOurs::Yes
+            } else if now.owner_is_us && now.text.is_none() && !now.foreign_formats {
+                // 1.8.8: still ours but the text could not be read: like busy (nothing pasted, the
+                // user's clipboard is put back), not a new copy (audit Fable)
+                StillOurs::Busy
+            } else {
+                StillOurs::No
+            }
+        }
         // busy is NOT a new copy: the saved clipboard must not be dropped
         None => StillOurs::Busy,
     }
@@ -556,6 +573,15 @@ pub fn is_still_ours(owner: HWND, st: &ClipState) -> StillOurs {
 /// Puts the snapshot back, only if what is in the clipboard now is ours (or the application's
 /// copy made for us): a new copy of the user is never overwritten (checked in the same opening).
 pub fn restore(owner: HWND, snap: &Snapshot, st: &ClipState) -> RestoreResult {
+    restore_inner(owner, snap, Some(st))
+}
+
+/// 1.8.8: the user ASKED for the kept copy (tray menu): put back whatever is in the clipboard now.
+pub fn restore_on_request(owner: HWND, snap: &Snapshot) -> RestoreResult {
+    restore_inner(owner, snap, None)
+}
+
+fn restore_inner(owner: HWND, snap: &Snapshot, st: Option<&ClipState>) -> RestoreResult {
     // no clone of the snapshot: the items are prepared straight from it
     let marks = mark_items();
     let prepared = if snap.items.is_empty() {
@@ -571,7 +597,7 @@ pub fn restore(owner: HWND, snap: &Snapshot, st: &ClipState) -> RestoreResult {
         free_all(&prepared);
         return RestoreResult::Failed;
     };
-    if !may_restore(st, &observe(owner)) {
+    if st.is_some_and(|st| !may_restore(st, &observe(owner))) {
         free_all(&prepared);
         return RestoreResult::KeptUserCopy;
     }

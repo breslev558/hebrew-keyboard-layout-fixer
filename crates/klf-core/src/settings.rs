@@ -157,7 +157,7 @@ pub struct AppSettings {
     pub welcome_done: bool,
     // --- new in 1.6.1 : anonymous problem reports (public install only) ---
     /// 0 = ask after a real error (default), 1 = always send without asking, 2 = never ask
-    #[serde(rename = "ReportMode", default)]
+    #[serde(rename = "ReportMode", default, deserialize_with = "de_report_mode")]
     pub report_mode: u32,
     // --- new in 1.8.0 : correction while typing (public install only, off by default) ---
     #[serde(rename = "TypingSuggestions", deserialize_with = "de_bool_false")]
@@ -195,9 +195,9 @@ pub struct AppSettings {
     #[serde(rename = "CheckUpdates", deserialize_with = "de_bool_true")]
     pub check_updates: bool,
     /// a version refused or failed is not offered again for 7 days
-    #[serde(rename = "UpdateSkipTag", default)]
+    #[serde(rename = "UpdateSkipTag", default, deserialize_with = "de_string")]
     pub update_skip_tag: String,
-    #[serde(rename = "UpdateSkipAt", default)]
+    #[serde(rename = "UpdateSkipAt", default, deserialize_with = "de_u64")]
     pub update_skip_at: u64,
     // --- new in 1.5.2 ---
     /// Where the bubble appears: BUBBLE_TOP (default), BUBBLE_BOTTOM or BUBBLE_CARET.
@@ -568,6 +568,22 @@ fn de_bool_false<'de, D: Deserializer<'de>>(d: D) -> Result<bool, D::Error> {
     Ok(de_bool(de_value(d)?, false))
 }
 
+/// 1.8.8: 0, 1 or 2; anything else = 0 (ask) instead of losing the whole file (audit Fable).
+fn de_report_mode<'de, D: Deserializer<'de>>(d: D) -> Result<u32, D::Error> {
+    let v = de_value(d)?;
+    Ok(v.as_u64().filter(|n| *n <= 2).map(|n| n as u32).unwrap_or(0))
+}
+
+fn de_string<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    let v = de_value(d)?;
+    Ok(v.as_str().map(str::to_string).unwrap_or_default())
+}
+
+fn de_u64<'de, D: Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
+    let v = de_value(d)?;
+    Ok(v.as_u64().unwrap_or(0))
+}
+
 /// A layout handle: a number, or a text "0x00000409" / "00000409"; anything else = 0 (the other
 /// settings are never lost because of it).
 fn de_hkl<'de, D: Deserializer<'de>>(d: D) -> Result<u32, D::Error> {
@@ -824,5 +840,17 @@ mod tests {
         assert!(!again.switch_language_after_convert, "and stays off after saving");
         let (s, _) = AppSettings::from_json(r#"{"SettingsVersion":4}"#);
         assert!(s.switch_language_after_convert, "missing value: the default");
+    }
+
+    #[test]
+    fn wrong_types_in_three_late_fields_keep_the_rest() {
+        for bad in [r#""1""#, "-1", "null", "7", r#"{"a":1}"#] {
+            let j = format!(r#"{{"ExcludedProcesses":["game.exe"],"ReportMode":{bad},"UpdateSkipTag":{bad},"UpdateSkipAt":{bad},"SettingsVersion":4}}"#);
+            let (s, _) = AppSettings::from_json(&j);
+            assert_eq!(s.excluded_processes, vec!["game.exe".to_string()], "{bad}");
+            assert!(s.report_mode <= 2, "{bad}");
+        }
+        let (s, _) = AppSettings::from_json(r#"{"ReportMode":2,"UpdateSkipTag":"v1.8.7","UpdateSkipAt":5,"SettingsVersion":4}"#);
+        assert_eq!((s.report_mode, s.update_skip_tag.as_str(), s.update_skip_at), (2, "v1.8.7", 5));
     }
 }

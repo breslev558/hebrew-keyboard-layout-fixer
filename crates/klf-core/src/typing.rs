@@ -149,7 +149,8 @@ pub fn day_text(days: u32) -> String {
 pub fn day_number(t: &str) -> Option<u32> {
     let mut p = t.split('-');
     let (y, m, d): (i64, i64, i64) = (p.next()?.parse().ok()?, p.next()?.parse().ok()?, p.next()?.parse().ok()?);
-    if !(1..=12).contains(&m) || !(1..=31).contains(&d) || p.next().is_some() {
+    // 1.8.8: a huge year from a hand-edited file must not overflow (audit Fable)
+    if !(1970..=9999).contains(&y) || !(1..=12).contains(&m) || !(1..=31).contains(&d) || p.next().is_some() {
         return None;
     }
     let y = if m <= 2 { y - 1 } else { y };
@@ -710,11 +711,17 @@ impl Buffer {
             return;
         }
         if self.hebrew.is_some_and(|h| h != hebrew) {
-            self.clear(); // the layout changed: a new run starts
+            if !self.current.is_empty() {
+                // 1.8.8: changed in the middle of a word: what follows is only a piece of that
+                // word, never judged as a whole word (audit Fable)
+                self.invalidate();
+                return;
+            }
+            self.clear(); // the layout changed between words: a new run starts
         }
         self.hebrew = Some(hebrew);
         if self.current.chars().count() >= MAX_WORD_CHARS {
-            self.clear();
+            self.invalidate(); // 1.8.8: the end of a too long word is not a word either
             return;
         }
         self.current.push(c);
@@ -724,8 +731,9 @@ impl Buffer {
             return;
         }
         if self.current.pop().is_none() {
-            // back into the previous word: simpler and safer to start again
-            self.clear();
+            // back into the previous word: what is typed next is only a piece of it (1.8.8:
+            // never judged as a whole word until the next space, audit Fable)
+            self.invalidate();
         }
     }
     /// 1.8.5: the words of the sentence being typed, the current one included (for the chat
@@ -1421,6 +1429,8 @@ mod cases {
         assert_eq!(day_text(0), "1970-01-01");
         assert_eq!(day_number("2026-11-10"), Some(20_767));
         assert_eq!(day_text(20_767), "2026-11-10");
+        assert_eq!(day_number("99999999999999999-01-01"), None, "1.8.8: no overflow");
+        assert_eq!(day_number("1969-12-31"), None);
         let t1 = learn_step("", "akuo", 20_767).unwrap();
         assert_eq!(t1, "?akuo 2026-11-10\r\n");
         assert!(parse_personal_full(&t1).2.is_empty(), "seen once: not learned");

@@ -174,6 +174,26 @@ pub fn download_ok(r: &Release, size: u64, sha_hex: &str, announced: &str, file_
     size == r.exe_size && size <= MAX_EXE_BYTES && !announced.is_empty() && sha_hex.eq_ignore_ascii_case(announced) && file_version == Some(r.version)
 }
 
+/// 1.8.8: the machine type written in a Windows exe (PE header), e.g. 0x8664 x64, 0xAA64 ARM64.
+/// The signed description does not name the architecture: an exe for the other kind of PC is
+/// refused before it replaces the program (audit Fable).
+pub fn pe_machine(exe: &[u8]) -> Option<u16> {
+    if exe.get(0..2)? != b"MZ" {
+        return None;
+    }
+    let off = u32::from_le_bytes(exe.get(0x3C..0x40)?.try_into().ok()?) as usize;
+    if exe.get(off..off.checked_add(4)?)? != b"PE\0\0" {
+        return None;
+    }
+    let m = exe.get(off + 4..off + 6)?;
+    Some(u16::from_le_bytes([m[0], m[1]]))
+}
+
+/// The machine type of this build.
+pub const fn own_machine() -> u16 {
+    if cfg!(target_arch = "aarch64") { 0xAA64 } else if cfg!(target_arch = "x86") { 0x014C } else { 0x8664 }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -280,5 +300,20 @@ mod tests {
         assert_eq!(parse_sig(&"ab".repeat(64)).unwrap()[0], 0xab);
         assert!(parse_sig("abc").is_none());
         assert!(parse_sig(&"zz".repeat(64)).is_none());
+    }
+
+    #[test]
+    fn pe_machine_reads_the_header() {
+        let mut exe = vec![0u8; 0x100];
+        exe[0..2].copy_from_slice(b"MZ");
+        exe[0x3C..0x40].copy_from_slice(&0x80u32.to_le_bytes());
+        exe[0x80..0x84].copy_from_slice(b"PE\0\0");
+        exe[0x84..0x86].copy_from_slice(&0xAA64u16.to_le_bytes());
+        assert_eq!(pe_machine(&exe), Some(0xAA64));
+        exe[0x3C..0x40].copy_from_slice(&0xFFFF_FFF0u32.to_le_bytes());
+        assert_eq!(pe_machine(&exe), None, "offset outside the file");
+        assert_eq!(pe_machine(b"MZ"), None);
+        assert_eq!(pe_machine(b"not an exe at all, longer than sixty-four bytes......................"), None);
+        assert!(matches!(own_machine(), 0x8664 | 0xAA64 | 0x014C));
     }
 }

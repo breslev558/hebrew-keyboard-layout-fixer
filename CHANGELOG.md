@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.8.8 (November 2026)
+A full review of the whole code (not only the changes) found these; all fixed:
+- The **automatic update check never ran** since 1.5.5 (two timers shared the same number); "Check for updates" in the menu worked. The build now refuses two timers with the same number.
+- With 3 keyboard layouts, F10 now really uses the Latin layout chosen in the settings (it always used the last one).
+- F10 without a selection that converts nothing (numbers only, several lines, clipboard busy...) no longer leaves the line selected: before, the next key typed erased it.
+- A selection the application does not copy is never extended to the start of the line.
+- When another program rewrites the clipboard during F10 (remote desktop, clipboard tools), your previous copy is no longer lost: "Restore the previous clipboard" in the menu puts it back for a few minutes.
+- F10 without a selection also takes the whole paragraph in windows made by PowerShell scripts (WinForms text boxes).
+- Fix while typing never waits for a frozen program (at most 200 ms), reads the window once per word, reads its files at most every 5 s, and rewrites a fix only if the text stays the same twice.
+- An update is refused if the downloaded program is made for another kind of PC (x64 / ARM64), and it is written to disk for good before it replaces the program.
+- An unreadable settings file is never replaced by the defaults; wrong values in three late settings no longer reset the whole file; a huge date in my-words.txt is refused.
+- A message posted by another program can no longer make the program quit; update and report sending can no longer stay "busy"; the safety brake is kept when a setting changes; my-words.txt is always rewritten through a temporary file; a word typed after a Backspace into the previous word, a layout change or a very long word is never judged as a whole word.
+
 ## 1.8.7 (November 2026)
 - Fix while typing never proposes anything in a **password field of a web page or an Electron app**: the program asks Windows' UI Automation (on a thread of its own, at most 300 ms; no answer = nothing proposed). Before, only standard Windows password boxes were recognised.
 - F10 in a box with **autocompletion** (Run dialog, Explorer address bar): the suggested end selected by Windows is taken away first, so that F10 converts what you typed, not the suggestion. Only when the last key you pressed there typed a character (a selection you made yourself is kept).

@@ -27,7 +27,22 @@ pub const WM_APP_SETTINGS: u32 = WM_APP + 3;
 const WM_APP_PENDING: u32 = WM_APP + 4;
 /// update (1.5.5): wparam 1 = a new version was found, 2 = installed (quit), 3 = failed
 const WM_APP_UPDATE: u32 = WM_APP + 5;
-const TIMER_UPDATE: usize = 5;
+// 1.8.8: was 5, the same id as indicator::TIMER_TICK, so the automatic update check never ran.
+const TIMER_UPDATE: usize = 10;
+/// 1.8.8: every timer of the main window must have its own id (checked when compiling).
+const _: () = {
+    let ids = [TIMER_RETRY, TIMER_TRAY, TIMER_PAUSE_END, TIMER_POLICY, TIMER_UPDATE, TIMER_HOOKS,
+               crate::indicator::TIMER_TICK, crate::indicator::TIMER_SOON, crate::indicator::TIMER_CAPS];
+    let mut i = 0;
+    while i < ids.len() {
+        let mut j = i + 1;
+        while j < ids.len() {
+            assert!(ids[i] != ids[j], "two timers of the main window share an id");
+            j += 1;
+        }
+        i += 1;
+    }
+};
 /// 1.6.0: first-run welcome (shown once the message loop runs)
 const WM_APP_WELCOME: u32 = WM_APP + 6;
 
@@ -210,6 +225,11 @@ pub fn settings() -> AppSettings {
     STATE.with(|s| klf_core::school::effective(&s.settings.borrow(), &s.policy.borrow()).0)
 }
 
+/// 1.8.8: the values other threads need are copied where they can read them (UI thread only).
+pub fn share_settings() {
+    crate::platform::layouts::PREFERRED_LATIN.store(settings().preferred_latin_layout, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// The user's own settings (what settings.json holds and the settings window saves).
 pub fn user_settings() -> AppSettings {
     STATE.with(|s| s.settings.borrow().clone())
@@ -240,6 +260,7 @@ pub fn reload_policy() -> bool {
     let hwnd = STATE.with(|s| s.hwnd.get());
     let before = settings();
     STATE.with(|s| *s.policy.borrow_mut() = p);
+    share_settings();
     let after = settings();
     if !hwnd.is_null() {
         let keys_changed = (before.hotkey_modifiers, before.hotkey_key, before.case_hotkey_modifiers, before.case_hotkey_key) != (after.hotkey_modifiers, after.hotkey_key, after.case_hotkey_modifiers, after.case_hotkey_key);
@@ -317,6 +338,11 @@ pub fn load_settings() -> AppSettings {
             let s = AppSettings::default();
             if !path.exists() {
                 save_settings(&s);
+            } else {
+                // 1.8.8: there but not readable (locked, not UTF-8): the user's file must never be
+                // overwritten by the defaults at the first click (audit Fable)
+                log("settings.json could not be read: defaults used, file left as it is");
+                SETTINGS_UNREADABLE.store(true, Ordering::SeqCst);
             }
             s
         }
@@ -361,10 +387,28 @@ static SETTINGS_UNREADABLE: AtomicBool = AtomicBool::new(false);
 pub fn save_settings(s: &AppSettings) -> bool {
     use std::io::Write;
     let Some(path) = settings_path() else { return false };
+    // 1.8.8: unreadable at start but readable now (an antivirus held it a moment): the user's
+    // settings are taken back instead of being replaced by the defaults
+    if SETTINGS_UNREADABLE.load(Ordering::SeqCst) {
+        if let Ok(t) = std::fs::read_to_string(&path) {
+            let (file, ok) = AppSettings::from_json(&t);
+            if ok {
+                SETTINGS_UNREADABLE.store(false, Ordering::SeqCst);
+                log("settings.json readable again: the user's settings are taken back, this change is not saved");
+                apply_settings(file);
+                return false;
+            }
+        }
+    }
     if SETTINGS_UNREADABLE.swap(false, Ordering::SeqCst) {
         let keep = path.with_extension("json.unreadable.bak");
         if std::fs::copy(&path, &keep).is_ok() {
             log("settings.json was unreadable: a copy is kept as settings.json.unreadable.bak");
+        } else if path.exists() {
+            // 1.8.8: no copy could be made (file still locked): it is not replaced either
+            SETTINGS_UNREADABLE.store(true, Ordering::SeqCst);
+            log("settings.json unreadable and no copy possible: not replaced");
+            return false;
         }
     }
     let tmp = path.with_extension("json.tmp");
@@ -389,6 +433,7 @@ pub fn save_settings(s: &AppSettings) -> bool {
 /// top; hotkey re-registered, indicator and tray updated.
 pub fn apply_settings(new: AppSettings) {
     STATE.with(|s| *s.settings.borrow_mut() = new);
+    share_settings();
     if hotkey_state() != HotkeyState::Paused {
         unregister_hotkey();
         register_hotkey();
@@ -1208,7 +1253,7 @@ fn start_update_check(hwnd: HWND) {
         return;
     }
     let owner = hwnd as usize;
-    let _ = std::thread::Builder::new().name("update-check".into()).spawn(move || {
+    let started = std::thread::Builder::new().name("update-check".into()).spawn(move || {
         let found = crate::update::check(&s.update_skip_tag, s.update_skip_at);
         UPDATE_BUSY.store(false, Ordering::SeqCst);
         if let Some(r) = found {
@@ -1218,6 +1263,9 @@ fn start_update_check(hwnd: HWND) {
             unsafe { PostMessageW(owner as HWND, WM_APP_UPDATE, 1, 0) };
         }
     });
+    if started.is_err() {
+        UPDATE_BUSY.store(false, Ordering::SeqCst); // 1.8.8: never stuck at « busy »
+    }
 }
 
 /// Installs the offered update (tray menu click): download + checks + swap on a worker thread.
@@ -1229,9 +1277,12 @@ fn start_update_install(hwnd: HWND) {
     let l = lang();
     bubble::show(text(l, Msg::UpdateInstalling), l.is_rtl(), None, 0, false);
     let owner = hwnd as usize;
-    let _ = std::thread::Builder::new().name("update-install".into()).spawn(move || {
+    let started = std::thread::Builder::new().name("update-install".into()).spawn(move || {
         let code = match crate::update::install(&r) {
-            Ok(()) => 2,
+            Ok(()) => {
+                UPDATE_INSTALLED.store(true, Ordering::SeqCst);
+                2
+            }
             Err(crate::update::Failure::Network(e)) => {
                 log(&format!("Update {}: network problem, tried again later: {e}", r.tag));
                 UPDATE_BUSY.store(false, Ordering::SeqCst);
@@ -1247,7 +1298,14 @@ fn start_update_install(hwnd: HWND) {
         // SAFETY: posting a message without pointers.
         unsafe { PostMessageW(owner as HWND, WM_APP_UPDATE, code, 0) };
     });
+    if started.is_err() {
+        UPDATE_BUSY.store(false, Ordering::SeqCst); // 1.8.8: never stuck at « busy »
+        bubble::show(text(l, Msg::UpdateFailed), l.is_rtl(), None, 0, false);
+    }
 }
+
+/// 1.8.8: set by the install thread once the new copy is in place.
+static UPDATE_INSTALLED: AtomicBool = AtomicBool::new(false);
 
 fn on_update_message(hwnd: HWND, code: WPARAM) {
     let l = lang();
@@ -1258,11 +1316,17 @@ fn on_update_message(hwnd: HWND, code: WPARAM) {
                 bubble::show(&text(l, Msg::UpdateAvailable).replace("{version}", &v), l.is_rtl(), None, 0, true);
             }
         }
-        2 => request_exit(hwnd), // the new copy is waiting for us to quit (--update)
+        // the new copy is waiting for us to quit (--update); 1.8.8: only if WE installed it (another
+        // program of the session could post this message, audit Fable)
+        2 if UPDATE_INSTALLED.load(Ordering::SeqCst) => request_exit(hwnd),
+        2 => {}
         4 => bubble::show(text(l, Msg::UpdateFailed), l.is_rtl(), None, 0, false), // network: offered again later
         _ => {
             // the failed version is not offered again for 7 days (no loop)
             let tag = std::mem::take(&mut *UPDATE_ERROR.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
+            if tag.is_empty() {
+                return; // 1.8.8: no failure of ours behind this message
+            }
             *crate::update::OFFER.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
             let mut s = user_settings();
             s.update_skip_tag = tag;

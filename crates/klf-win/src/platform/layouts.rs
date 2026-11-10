@@ -95,6 +95,9 @@ pub enum Choice {
 
 /// 1.8.6: the last Latin layout seen active (with 3 layouts or more, Hebrew is converted to it).
 static LAST_LATIN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+/// 1.8.8: the Latin layout chosen in the settings, copied here by the UI thread: F10 works on its
+/// own thread, where `app::settings()` (thread-local) only gives the defaults (audit Fable).
+pub static PREFERRED_LATIN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 /// Notes the active layout of a window (called when a program comes to the front).
 pub fn note_active(hkl: Option<u32>) {
@@ -130,7 +133,7 @@ pub fn choose(active: Option<u32>) -> Choice {
     let first_latin = || {
         // 1.8.6: the Latin layout chosen in the settings, else the last one used, else a layout
         // supported by name first, then any Latin layout (US table)
-        let fixed = crate::app::settings().preferred_latin_layout;
+        let fixed = PREFERRED_LATIN.load(std::sync::atomic::Ordering::Relaxed);
         let last = LAST_LATIN.load(std::sync::atomic::Ordering::Relaxed);
         [fixed, last].into_iter().find(|h| *h != 0 && installed.contains(h) && matches!(kind(*h), LayoutKind::Latin(_)))
             .or_else(|| installed.iter().copied().find(|h| matches!(classify_hkl(*h), LayoutKind::Latin(_))))

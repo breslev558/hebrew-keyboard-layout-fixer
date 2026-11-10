@@ -118,6 +118,20 @@ pub struct ClipState {
     pub converted: Option<String>,
     /// someone copied something new before we replaced it: nothing pasted, nothing restored
     pub new_copy_seen: bool,
+    /// 1.8.8: a selection made by US (Shift+Home, last word) is still there; any stop without a
+    /// paste collapses it, so that the next key typed does not erase the line (audit Fable)
+    pub our_selection: bool,
+}
+
+/// 1.8.8: collapses a selection we made, once (Right arrow), and only while nothing moved (same
+/// window and field, the user not moving): otherwise no key is sent at all.
+fn collapse_ours(host: &mut dyn Host, st: &mut ClipState, target: usize) {
+    if st.our_selection {
+        st.our_selection = false;
+        if host.foreground() == target && host.focus_unchanged() && !host.user_moving() {
+            host.send_collapse();
+        }
+    }
 }
 
 /// The clipboard still holds the application's copy made for our Ctrl+C: same sequence
@@ -453,8 +467,10 @@ pub fn run_traced(host: &mut dyn Host, s: &AppSettings, trace: &mut Trace) -> Ou
     // ALWAYS: put the user's clipboard back, unless they copied something new meanwhile
     let mut log = outcome.log;
     if st.new_copy_seen {
-        log.push_str(" | new copy during conversion: kept, nothing restored");
-        host.clipboard_forget();
+        log.push_str(" | new copy during conversion: kept, nothing restored (previous copy kept in memory for the tray menu)");
+        // 1.8.8: a clipboard manager may rewrite the clipboard right after our Ctrl+C: the user's
+        // previous copy stays available a few minutes from the tray menu instead of being lost
+        host.clipboard_park(&st);
         return Outcome { msg: outcome.msg, log, preview: outcome.preview };
     }
     // a busy clipboard is retried (provenance checked again each time); a failure is SAID (audit B2)
@@ -557,7 +573,24 @@ fn note_capture(st: &mut ClipState, cap: &Capture) {
     st.formats_cap = Some(cap.formats.clone());
 }
 
+/// 1.8.8: any stop after Shift+Home (or "last word") without a paste collapses that selection,
+/// if the window and field are the same and the user is not moving.
 fn convert_window(
+    host: &mut dyn Host,
+    s: &AppSettings,
+    map: &KeyMap,
+    target: usize,
+    info: &TargetInfo,
+    st: &mut ClipState,
+    trace: &mut Trace,
+) -> Outcome {
+    let o = convert_window_inner(host, s, map, target, info, st, trace);
+    // (`our_selection` is cleared once Ctrl+V is sent: the paste replaced it)
+    collapse_ours(host, st, target);
+    o
+}
+
+fn convert_window_inner(
     host: &mut dyn Host,
     s: &AppSettings,
     map: &KeyMap,
@@ -585,6 +618,11 @@ fn convert_window(
             }
             Copy::NoText => return Outcome::say(Msg::NothingToConvert, NO_TEXT_LOG),
             Copy::Stopped(o) => return o,
+            // 1.8.8: a selection is known but the application did not copy it: Shift+Home would
+            // EXTEND the user's selection and paste another text than the one chosen
+            Copy::NoChange if selection == Selection::NonEmpty => {
+                return Outcome::say(Msg::NothingToConvert, "Selection seen but no copy after Ctrl+C, nothing done")
+            }
             Copy::NoChange => {}
         }
     }
@@ -604,6 +642,9 @@ fn convert_window(
         }
         match copy_selection(host, target, st) {
             Copy::Text(t) => {
+                // something was selected by Shift+Home (an empty line or the caret at its start
+                // selects nothing: then no Right arrow is ever sent)
+                st.our_selection = true;
                 let multi = policy::contains_line_break(&t);
                 st.captured = Some(t);
                 if multi {
@@ -691,6 +732,7 @@ fn convert_window(
         }
         return Outcome::say(Msg::KeysBlocked, "Ctrl+V not sent, NOT pasted");
     }
+    st.our_selection = false; // replaced by the paste: never collapsed afterwards
     if s.action == Action::Layout {
         host.pasted(text, &out, false);
     }
@@ -727,7 +769,7 @@ fn extend_to_paragraph(host: &mut dyn Host, target: usize, st: &mut ClipState, s
     // land elsewhere: right-to-left lines, indents, "smart Home"); otherwise nothing is pasted
     let step_back = |host: &mut dyn Host, st: &mut ClipState, before: String| -> Result<(), Outcome> {
         if !host.send_shrink_down() {
-            host.send_collapse();
+            collapse_ours(host, st, target);
             return Err(Outcome::say(Msg::KeysBlocked, "Shift+Down not sent, stopped"));
         }
         match copy_selection(host, target, st) {
@@ -736,11 +778,11 @@ fn extend_to_paragraph(host: &mut dyn Host, target: usize, st: &mut ClipState, s
                 Ok(())
             }
             Copy::Stopped(o) => {
-                host.send_collapse();
+                collapse_ours(host, st, target);
                 Err(o)
             }
             _ => {
-                host.send_collapse();
+                collapse_ours(host, st, target);
                 Err(Outcome::say(Msg::SelectText, "Paragraph: the selection could not be put back exactly, nothing pasted"))
             }
         }
@@ -749,7 +791,7 @@ fn extend_to_paragraph(host: &mut dyn Host, target: usize, st: &mut ClipState, s
         let before = st.captured.clone().unwrap_or_default();
         // a key typed or a click, a move, too long: stop where we are (the text selected now is `before`)
         if host.foreground() != target || !host.focus_unchanged() || host.user_moving() || host.user_activity() != activity {
-            host.send_collapse();
+            collapse_ours(host, st, target);
             return Err(Outcome::say(Msg::WindowChanged, "Target window or field changed, stopped"));
         }
         if host.now_ms().saturating_sub(started) > PARAGRAPH_MS {
@@ -772,7 +814,7 @@ fn extend_to_paragraph(host: &mut dyn Host, target: usize, st: &mut ClipState, s
             // the copy failed after the selection moved: back one step and checked
             Copy::NoChange | Copy::NoText => return step_back(host, st, before),
             Copy::Stopped(o) => {
-                host.send_collapse();
+                collapse_ours(host, st, target);
                 return Err(o);
             }
         }
@@ -2094,6 +2136,62 @@ mod tests {
         m.line = Some("akuo".into());
         run(&mut m, &settings());
         assert!(!m.events.borrow().iter().any(|e| e.starts_with("select-back")));
+    }
+
+    // ---- 1.8.8 : a selection we made never stays after a stop (audit Fable) ----
+
+    #[test]
+    fn our_shift_home_selection_is_collapsed_after_a_stop() {
+        let count = |m: &Mock| m.events.borrow().iter().filter(|e| *e == "collapse").count();
+        // nothing to convert on the line: it must not stay selected (the next key would erase it)
+        let mut m = Mock::new();
+        *m.selected.borrow_mut() = None;
+        m.line = Some("2026 12345".into());
+        let o = run(&mut m, &settings());
+        assert_eq!(o.msg, Some(Msg::NothingToConvert), "{}", o.log);
+        assert_eq!(count(&m), 1, "collapsed once");
+        assert!(m.pasted.borrow().is_none());
+        // converted: replaced by the paste, nothing collapsed
+        let mut m = Mock::new();
+        *m.selected.borrow_mut() = None;
+        m.line = Some("akuo".into());
+        let o = run(&mut m, &settings());
+        assert_eq!(o.msg, Some(Msg::Converted), "{}", o.log);
+        assert_eq!(count(&m), 0);
+        // several lines selected: collapsed too
+        let mut m = Mock::new();
+        *m.selected.borrow_mut() = None;
+        m.line = Some("akuo\r\nnv".into());
+        run(&mut m, &settings());
+        assert_eq!(count(&m), 1);
+        // the user moved meanwhile: never a key sent into what they are doing
+        let mut m = Mock::new();
+        *m.selected.borrow_mut() = None;
+        m.line = Some("2026".into());
+        m.moving.set(true);
+        run(&mut m, &settings());
+        assert_eq!(count(&m), 0);
+        // an empty line (Shift+Home selects nothing): no Right arrow, the caret stays put
+        let mut m = Mock::new();
+        *m.selected.borrow_mut() = None;
+        m.line = None;
+        run(&mut m, &settings());
+        assert_eq!(count(&m), 0);
+        // the user's own selection (Ctrl+C worked): never collapsed by us
+        let mut m = Mock::new();
+        *m.selected.borrow_mut() = Some("2026".into());
+        run(&mut m, &settings());
+        assert_eq!(count(&m), 0);
+    }
+
+    #[test]
+    fn a_known_selection_that_is_not_copied_is_never_extended() {
+        let mut m = Mock::new();
+        m.info.selection = Some(Selection::NonEmpty);
+        *m.selected.borrow_mut() = None; // the application copies nothing for Ctrl+C
+        let o = run(&mut m, &settings());
+        assert_eq!(o.msg, Some(Msg::NothingToConvert), "{}", o.log);
+        assert!(!m.happened("shifthome"), "Shift+Home would extend the user's selection");
     }
 
     // ---- 1.8.5 : no selection = the whole paragraph, in a field that wraps ----

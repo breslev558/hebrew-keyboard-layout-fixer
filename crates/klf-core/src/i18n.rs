@@ -188,6 +188,10 @@ pub enum Msg {
     MenuReplacements,
     MenuReplacementsFile,
     ReplacementsHelp,
+    ButtonCheckUpdate,
+    UpdateUpToDate,
+    UpdateCheckFailed,
+    UpdatesManaged,
 }
 
 pub const ALL_MSGS: &[Msg] = &[
@@ -200,7 +204,7 @@ pub const ALL_MSGS: &[Msg] = &[
     Msg::ButtonResume, Msg::LabelHotkey, Msg::LabelDirection, Msg::DirectionAuto, Msg::DirectionToHebrew,
     Msg::DirectionToEnglish, Msg::LabelTry, Msg::LabelResult, Msg::CheckSwitchLanguage, Msg::CheckBubble, Msg::BubbleTop, Msg::BubbleBottom, Msg::BubbleCaret,
     Msg::CheckSound, Msg::CheckConsole, Msg::CheckAutostart, Msg::AutostartManaged, Msg::LabelLanguage,
-    Msg::LanguageAuto, Msg::ButtonSave, Msg::ButtonClose, Msg::ButtonAbout, Msg::HotkeyInvalid, Msg::SaveFailed, Msg::AutostartFailed, Msg::AboutText, Msg::IndicatorCapsOn, Msg::IndicatorCapsOff, Msg::CheckIndicator, Msg::SchoolManaged, Msg::ButtonExport, Msg::ButtonImport, Msg::ButtonUndoImport, Msg::ImportConfirm, Msg::ImportNothing, Msg::ImportFailed, Msg::ImportTooBig, Msg::ImportNotJson, Msg::ImportUnknownFormat, Msg::ImportNewerFormat, Msg::ImportUnreadable, Msg::MenuRestoreClipboard, Msg::MenuCheckUpdates, Msg::MenuPreview, Msg::WelcomeTitle, Msg::WelcomeText, Msg::WelcomeTry, Msg::WelcomeClose, Msg::WelcomeNoMore, Msg::MenuInstallUpdate, Msg::UpdateAvailable, Msg::UpdateInstalling, Msg::UpdateFailed, Msg::ClipboardRestoredLater, Msg::ClipboardNotRestoredNewCopy, Msg::ImportDone, Msg::ExportDone, Msg::UndoConfirm, Msg::UndoNone, Msg::CheckLastWord, Msg::TabSimple, Msg::TabAdvanced, Msg::TabDiagnostic, Msg::LabelHotkeyLayout, Msg::LabelHotkeyCase, Msg::LabelWorkshop, Msg::WorkFollow, Msg::WorkToLatin, Msg::WorkToHebrew, Msg::WorkCase, Msg::ButtonCopyResult, Msg::LabelText, Msg::CheckCareful, Msg::CheckCapsOff, Msg::LabelLimit, Msg::LabelDelay, Msg::LabelExcluded, Msg::NumberInvalid, Msg::DiagNone, Msg::DiagLast, Msg::ButtonCopyDiag, Msg::ButtonRefresh, Msg::DiagCopied, Msg::CopyFailed, Msg::LayoutsLine, Msg::MenuReports, Msg::MenuReportProblem, Msg::MenuSendReport, Msg::MenuReportAlways, Msg::MenuReportNever, Msg::ReportAskTitle, Msg::ReportAskText, Msg::ReportSent, Msg::ReportFailed, Msg::ReportDialogText, Msg::ReportPreviewLabel, Msg::ReportSend, Msg::ReportCancel, Msg::MenuTyping, Msg::TypingReady, Msg::TypingFailed, Msg::MenuTypingWords, Msg::TypingUndone, Msg::TypingWordsHelp, Msg::MenuDoubleShift, Msg::MenuTypingSound, Msg::QuickBrake, Msg::HookBrake, Msg::MenuCtrlTap, Msg::MenuMessengerGuard, Msg::MessengerWarning, Msg::MenuOneLanguage, Msg::MenuOneLanguageFile, Msg::OneLanguageHelp, Msg::TypingRestored, Msg::HookLost, Msg::MenuF10WrongWords, Msg::DormantFullscreen, Msg::DormantExcluded, Msg::DormantCodeEditor, Msg::DormantSensitive, Msg::MenuReplacements, Msg::MenuReplacementsFile, Msg::ReplacementsHelp,
+    Msg::LanguageAuto, Msg::ButtonSave, Msg::ButtonClose, Msg::ButtonAbout, Msg::HotkeyInvalid, Msg::SaveFailed, Msg::AutostartFailed, Msg::AboutText, Msg::IndicatorCapsOn, Msg::IndicatorCapsOff, Msg::CheckIndicator, Msg::SchoolManaged, Msg::ButtonExport, Msg::ButtonImport, Msg::ButtonUndoImport, Msg::ImportConfirm, Msg::ImportNothing, Msg::ImportFailed, Msg::ImportTooBig, Msg::ImportNotJson, Msg::ImportUnknownFormat, Msg::ImportNewerFormat, Msg::ImportUnreadable, Msg::MenuRestoreClipboard, Msg::MenuCheckUpdates, Msg::MenuPreview, Msg::WelcomeTitle, Msg::WelcomeText, Msg::WelcomeTry, Msg::WelcomeClose, Msg::WelcomeNoMore, Msg::MenuInstallUpdate, Msg::UpdateAvailable, Msg::UpdateInstalling, Msg::UpdateFailed, Msg::ClipboardRestoredLater, Msg::ClipboardNotRestoredNewCopy, Msg::ImportDone, Msg::ExportDone, Msg::UndoConfirm, Msg::UndoNone, Msg::CheckLastWord, Msg::TabSimple, Msg::TabAdvanced, Msg::TabDiagnostic, Msg::LabelHotkeyLayout, Msg::LabelHotkeyCase, Msg::LabelWorkshop, Msg::WorkFollow, Msg::WorkToLatin, Msg::WorkToHebrew, Msg::WorkCase, Msg::ButtonCopyResult, Msg::LabelText, Msg::CheckCareful, Msg::CheckCapsOff, Msg::LabelLimit, Msg::LabelDelay, Msg::LabelExcluded, Msg::NumberInvalid, Msg::DiagNone, Msg::DiagLast, Msg::ButtonCopyDiag, Msg::ButtonRefresh, Msg::DiagCopied, Msg::CopyFailed, Msg::LayoutsLine, Msg::MenuReports, Msg::MenuReportProblem, Msg::MenuSendReport, Msg::MenuReportAlways, Msg::MenuReportNever, Msg::ReportAskTitle, Msg::ReportAskText, Msg::ReportSent, Msg::ReportFailed, Msg::ReportDialogText, Msg::ReportPreviewLabel, Msg::ReportSend, Msg::ReportCancel, Msg::MenuTyping, Msg::TypingReady, Msg::TypingFailed, Msg::MenuTypingWords, Msg::TypingUndone, Msg::TypingWordsHelp, Msg::MenuDoubleShift, Msg::MenuTypingSound, Msg::QuickBrake, Msg::HookBrake, Msg::MenuCtrlTap, Msg::MenuMessengerGuard, Msg::MessengerWarning, Msg::MenuOneLanguage, Msg::MenuOneLanguageFile, Msg::OneLanguageHelp, Msg::TypingRestored, Msg::HookLost, Msg::MenuF10WrongWords, Msg::DormantFullscreen, Msg::DormantExcluded, Msg::DormantCodeEditor, Msg::DormantSensitive, Msg::MenuReplacements, Msg::MenuReplacementsFile, Msg::ReplacementsHelp, Msg::ButtonCheckUpdate, Msg::UpdateUpToDate, Msg::UpdateCheckFailed, Msg::UpdatesManaged,
 ];
 
 /// `{key}` in a text is replaced by the hotkey name (e.g. F10).
@@ -691,6 +695,19 @@ pub fn text(lang: Lang, m: Msg) -> &'static str {
         (ReplacementsHelp, He) => "שורה אחת לכל החלפה: קיצור = טקסט. למשל: @@ = name@example.com . ההחלפה נעשית אחרי רווח; Backspace מיד אחריה מבטל.",
         (ReplacementsHelp, Fr) => "Une ligne par remplacement : abréviation = texte. Exemple : @@ = nom@exemple.com . Remplacé après une espace ; Retour arrière juste après annule.",
         (ReplacementsHelp, En) => "One line per replacement: shortcut = text. Example: @@ = name@example.com . Replaced after a space; Backspace right after undoes it.",
+        // 1.8.9: "Check for updates" button (About and settings window)
+        (ButtonCheckUpdate, He) => "חיפוש עדכון",
+        (ButtonCheckUpdate, Fr) => "Rechercher une mise à jour",
+        (ButtonCheckUpdate, En) => "Check for updates",
+        (UpdateUpToDate, He) => "יש לך את הגרסה האחרונה ({version}).\u{200F}",
+        (UpdateUpToDate, Fr) => "Vous avez la dernière version ({version}).",
+        (UpdateUpToDate, En) => "You have the latest version ({version}).",
+        (UpdateCheckFailed, He) => "לא ניתן לבדוק אם יש עדכון (אין חיבור לאינטרנט?).",
+        (UpdateCheckFailed, Fr) => "Impossible de vérifier s'il y a une mise à jour (pas de connexion Internet ?).",
+        (UpdateCheckFailed, En) => "Could not check for an update (no Internet connection?).",
+        (UpdatesManaged, He) => "גרסה {version}. העדכונים מנוהלים על ידי מנהל המערכת.\u{200F}",
+        (UpdatesManaged, Fr) => "Version {version}. Les mises à jour sont gérées par l'administrateur.",
+        (UpdatesManaged, En) => "Version {version}. Updates are managed by the administrator.",
         (AboutText, He) => "מתקן שפת מקלדת – גרסה {version}\u{200F}\n\nמתקן טקסט שהוקלד בשפת מקלדת שגויה (עברית ⇄ אנגלית) בלחיצה על {key}.\u{200F}\nמקש נוסף (F9 כברירת מחדל) מתקן טקסט שהוקלד כש-Caps Lock היה דולק.\nשום דבר ממה שמקלידים לא נשלח ולא נשמר.\n\nמבוסס על Keyboard Layout Fixer מאת Ravid Saadia (רישיון MIT).\u{200F}",
         (AboutText, Fr) => "Correcteur de clavier – version {version}\n\nCorrige un texte tapé avec le mauvais clavier (hébreu ⇄ anglais) avec {key}.\nUne 2e touche (F9 par défaut) corrige un texte tapé avec Verr. Maj allumé.\nRien de ce que vous tapez n'est envoyé ni enregistré.\n\nD'après Keyboard Layout Fixer de Ravid Saadia (licence MIT).",
         (AboutText, En) => "Keyboard Layout Fixer – version {version}\n\nFixes text typed with the wrong keyboard layout (Hebrew ⇄ English) with {key}.\nA second key (F9 by default) fixes text typed with Caps Lock on.\nNothing you type is sent or recorded.\n\nBased on Keyboard Layout Fixer by Ravid Saadia (MIT license).",

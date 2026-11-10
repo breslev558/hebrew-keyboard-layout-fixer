@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.8.9 (November 2026)
+- **Check for updates** button in the About box and on the Diagnostic page of the settings: it checks at once and, if there is a newer version, installs it (same signature checks). Otherwise it says "You have the latest version". On a PC managed by an administrator it only shows the version: updates are managed there.
+- F10 pressed many times in a row: **every press works**, even 20 in a row (the 1.8.6 brake after 8 presses in 10 s is removed; a key held down still counts once).
+- Hebrew settings window: the diagnostic text, the excluded programs and the numbers are really written left to right now (1.8.5 tried, but the boxes kept the right-to-left mirroring).
+- The list of keyboards on the Diagnostic page gives the same verdict as F10 (a Hebrew variant F10 accepts was marked ✗), and each layout keeps its sign in Hebrew.
+- Windows test: 21 quick F10 presses must all be applied; the Diagnostic page and the About box are photographed in Hebrew, French and English.
+
 ## 1.8.8 (November 2026)
 A full review of the whole code (not only the changes) found these; all fixed:
 - The **automatic update check never ran** since 1.5.5 (two timers shared the same number); "Check for updates" in the menu worked. The build now refuses two timers with the same number.

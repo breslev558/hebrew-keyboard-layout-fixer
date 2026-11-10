@@ -2,7 +2,7 @@
 # Essai Windows (CI) 1.8.5, après bout-en-bout.ps1 (programme installé, en marche) :
 #  1) F10 sans sélection dans une zone multi-ligne ÉTROITE qui passe à la ligne toute seule : tout le
 #     paragraphe doit être corrigé, pas seulement la dernière ligne affichée ;
-#  2) captures de la fenêtre de réglages (3 onglets) en hébreu, français et anglais (artefact « captures »).
+#  2) captures de la fenêtre de réglages (3 onglets) et de À propos en hébreu, français et anglais (artefact « captures »).
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 Add-Type @'
@@ -27,6 +27,20 @@ public static class V {
   [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+  [DllImport("user32.dll")] public static extern IntPtr GetDlgItem(IntPtr h, int id);
+  [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
+  public delegate bool EnumProc(IntPtr h, IntPtr l);
+  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc f, IntPtr l);
+  [DllImport("user32.dll")] public static extern IntPtr GetWindow(IntPtr h, uint cmd);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr h, StringBuilder s, int n);
+  // the visible dialog box (#32770) owned by `owner` (the About box opened from the settings window)
+  public static IntPtr OwnedDialog(IntPtr owner) {
+    IntPtr found = IntPtr.Zero;
+    EnumWindows((h, l) => { var sb = new StringBuilder(64); GetClassName(h, sb, 64);
+      if (sb.ToString() == "#32770" && IsWindowVisible(h) && GetWindow(h, 4) == owner) { found = h; return false; } return true; }, IntPtr.Zero);
+    return found;
+  }
 }
 '@
 function Fail($m) { Write-Host "ECHEC : $m"; exit 1 }
@@ -125,14 +139,33 @@ foreach ($lg in 'he', 'fr', 'en') {
   if ($w -eq [IntPtr]::Zero) { $p = Get-Process KeyboardLayoutFixer -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1; if ($p) { $w = $p.MainWindowHandle } }
   if ($w -eq [IntPtr]::Zero) { Fail "fenêtre de réglages introuvable ($lg)" }
   [void][V]::Front($w); Start-Sleep 1
-  for ($tab = 1; $tab -le 3; $tab++) {
-    $r = New-Object V+RECT; [void][V]::GetWindowRect($w, [ref]$r)
+  function Photo($hw, $nom) {
+    $r = New-Object V+RECT; [void][V]::GetWindowRect($hw, [ref]$r)
     $bmp = New-Object Drawing.Bitmap ($r.R - $r.L), ($r.B - $r.T)
     $g = [Drawing.Graphics]::FromImage($bmp); $g.CopyFromScreen($r.L, $r.T, 0, 0, $bmp.Size); $g.Dispose()
-    $bmp.Save((Join-Path $out "reglages-$lg-onglet$tab.png"), [Drawing.Imaging.ImageFormat]::Png); $bmp.Dispose()
-    [V]::keybd_event(0x11, 0, 0, [UIntPtr]::Zero); [V]::Key(0x09); [V]::keybd_event(0x11, 0, 2, [UIntPtr]::Zero)   # Ctrl+Tab
-    Start-Sleep -Milliseconds 700
+    $bmp.Save((Join-Path $out $nom), [Drawing.Imaging.ImageFormat]::Png); $bmp.Dispose()
   }
-  "OK    captures des réglages ($lg)"
+  # 1.8.9: each page chosen DIRECTLY on the tab control (TCM_SETCURFOCUS selects it and tells the
+  # window, like a click); the old Ctrl+Tab never reached the 3rd page (Diagnostic)
+  $tc = [V]::GetDlgItem($w, 240)
+  if ($tc -eq [IntPtr]::Zero) { Fail "onglets introuvables ($lg)" }
+  for ($tab = 1; $tab -le 3; $tab++) {
+    [void][V]::SendMessage($tc, 0x1330, [IntPtr]($tab - 1), [IntPtr]::Zero)   # TCM_SETCURFOCUS
+    Start-Sleep -Milliseconds 700
+    $cur = [int][V]::SendMessage($tc, 0x130B, [IntPtr]::Zero, [IntPtr]::Zero)  # TCM_GETCURSEL
+    if ($cur -ne ($tab - 1)) { Fail "onglet $tab non affiché ($lg)" }
+    Photo $w "reglages-$lg-onglet$tab.png"
+  }
+  # 1.8.9: the About box (with its "Check for updates" button), opened by its button (posted: the
+  # box is modal), photographed, then closed
+  [void][V]::PostMessage($w, 0x0111, [IntPtr]213, [V]::GetDlgItem($w, 213))   # WM_COMMAND (button 213, BN_CLICKED)
+  $d = [IntPtr]::Zero; $t = 0
+  while ($d -eq [IntPtr]::Zero) { Start-Sleep -Milliseconds 300; $d = [V]::OwnedDialog($w); if (++$t -gt 20) { break } }
+  if ($d -eq [IntPtr]::Zero) { Fail "fenêtre À propos introuvable ($lg)" }
+  Start-Sleep -Milliseconds 500
+  Photo $d "a-propos-$lg.png"
+  [void][V]::PostMessage($d, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)   # WM_CLOSE
+  Start-Sleep -Milliseconds 500
+  "OK    captures des réglages et de À propos ($lg)"
 }
 exit 0

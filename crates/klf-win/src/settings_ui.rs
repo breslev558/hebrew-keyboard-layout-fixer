@@ -70,13 +70,30 @@ const ID_INDICATOR: i32 = 259;
 const ID_EXPORT: i32 = 260;
 const ID_IMPORT: i32 = 261;
 const ID_UNDO_IMPORT: i32 = 262;
+/// 1.8.9: "Check for updates" (Diagnostic page)
+const ID_CHECK_UPDATE: i32 = 264;
+
+/// 1.8.9: every control of the window has its own id (checked when compiling; 1.8.9 first gave the
+/// new button the id of the bubble position list).
+const _: () = {
+    let ids = [ID_STATUS, ID_PAUSE, ID_TAB, ID_ABOUT, ID_SAVE, ID_CLOSE, ID_LBL_HOTKEY, ID_HOTKEY, ID_LBL_HOTKEY_CASE, ID_HOTKEY_CASE, ID_LBL_WORK, ID_WORK_MODE, ID_COPY_RESULT, ID_LBL_TRY, ID_TRY, ID_LBL_RESULT, ID_RESULT, ID_LBL_LANG, ID_LANG, ID_AUTOSTART, ID_LBL_DIRECTION, ID_DIRECTION, ID_SWITCH, ID_BUBBLE, ID_SOUND, ID_CAREFUL, ID_CAPSOFF, ID_CONSOLE, ID_LASTWORD, ID_LBL_LIMIT, ID_LIMIT, ID_LBL_DELAY, ID_DELAY, ID_LBL_EXCLUDED, ID_EXCLUDED, ID_LAYOUTS, ID_DIAG_LAST, ID_DIAG_TEXT, ID_DIAG_COPY, ID_DIAG_REFRESH, ID_INDICATOR, ID_EXPORT, ID_IMPORT, ID_UNDO_IMPORT, ID_CHECK_UPDATE, ID_BUBBLE_POS];
+    let mut i = 0;
+    while i < ids.len() {
+        let mut j = i + 1;
+        while j < ids.len() {
+            assert!(ids[i] != ids[j], "two controls of the settings window share an id");
+            j += 1;
+        }
+        i += 1;
+    }
+};
 const ID_BUBBLE_POS: i32 = 263;
 
 const PAGE_SIMPLE: &[i32] = &[ID_LBL_HOTKEY, ID_HOTKEY, ID_LBL_HOTKEY_CASE, ID_HOTKEY_CASE, ID_LBL_WORK, ID_WORK_MODE, ID_COPY_RESULT, ID_LBL_TRY, ID_TRY, ID_LBL_RESULT, ID_RESULT, ID_LBL_LANG, ID_LANG, ID_AUTOSTART, ID_INDICATOR];
 const PAGE_ADVANCED: &[i32] = &[
     ID_LBL_DIRECTION, ID_DIRECTION, ID_SWITCH, ID_BUBBLE, ID_BUBBLE_POS, ID_SOUND, ID_CAREFUL, ID_LASTWORD, ID_CAPSOFF, ID_CONSOLE, ID_LBL_LIMIT, ID_LIMIT, ID_LBL_DELAY, ID_DELAY, ID_LBL_EXCLUDED, ID_EXCLUDED,
 ];
-const PAGE_DIAG: &[i32] = &[ID_DIAG_LAST, ID_DIAG_TEXT, ID_LAYOUTS, ID_DIAG_COPY, ID_DIAG_REFRESH, ID_EXPORT, ID_IMPORT, ID_UNDO_IMPORT];
+const PAGE_DIAG: &[i32] = &[ID_DIAG_LAST, ID_DIAG_TEXT, ID_LAYOUTS, ID_DIAG_COPY, ID_DIAG_REFRESH, ID_EXPORT, ID_IMPORT, ID_UNDO_IMPORT, ID_CHECK_UPDATE];
 
 const HKM_SETHOTKEY: u32 = WM_USER + 1;
 const HKM_GETHOTKEY: u32 = WM_USER + 2;
@@ -194,9 +211,20 @@ fn make_fonts(dpi: u32) {
     }
 }
 
+/// 1.8.9: technical text (diagnostic, program names, numbers) always left to right, even in the
+/// Hebrew window. The window does not hand its mirroring down (WS_EX_NOINHERITLAYOUT): every
+/// other control is mirrored here, one by one. (1.8.5 took the mirroring off AFTER creation, which
+/// an EDIT ignores: the text stayed on the right.)
+const LTR_IDS: &[i32] = &[ID_DIAG_TEXT, ID_EXCLUDED, ID_LIMIT, ID_DELAY];
+
+thread_local! {
+    static MIRRORED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 fn create(class: &str, txt: &str, style: u32, ex: u32, id: i32) {
     let c = wide(class);
     let t = wide(txt);
+    let ex = if MIRRORED.with(|m| m.get()) && !LTR_IDS.contains(&id) { ex | WS_EX_LAYOUTRTL } else { ex };
     // SAFETY: child of our window; strings outlive the call.
     unsafe {
         CreateWindowExW(ex, c.as_ptr(), t.as_ptr(), WS_CHILD | WS_VISIBLE | style, 0, 0, 10, 10, window(), id as usize as HMENU, app::instance(), null());
@@ -279,8 +307,10 @@ fn layout() -> Vec<(i32, i32, i32, i32, i32)> {
     v.push((ID_DIAG_LAST, x0, y, right - x0, 56));
     v.push((ID_DIAG_TEXT, x0, y + 60, right - x0, 84 - k));
     v.push((ID_LAYOUTS, x0, y + 148 - k, right - x0, 20)); // installed keyboards, ✓ / ✗
-    v.push((ID_DIAG_COPY, x0, y + 172 - k, 180, 26));
-    v.push((ID_DIAG_REFRESH, x0 + 188, y + 172 - k, 110, 26));
+    // 1.8.9: three buttons on this row (copy, refresh, check for updates)
+    v.push((ID_DIAG_COPY, x0, y + 172 - k, 150, 26));
+    v.push((ID_DIAG_REFRESH, x0 + 156, y + 172 - k, 90, 26));
+    v.push((ID_CHECK_UPDATE, x0 + 252, y + 172 - k, right - x0 - 252, 26));
     // export / import of the settings (1.5.0)
     let bw = (right - x0 - 12) / 3;
     v.push((ID_EXPORT, x0, y + 202 - k, bw, 26));
@@ -510,8 +540,11 @@ fn layouts_line(l: Lang) -> String {
     let list: Vec<String> = crate::platform::layouts::installed()
         .iter()
         .map(|h| {
-            let ok = !matches!(klf_core::layouts::classify_hkl(*h), klf_core::layouts::LayoutKind::Unsupported);
-            format!("{}{}", klf_core::layouts::hkl_name_in(*h, l), if ok { " ✓" } else { " ✗" })
+            let ok = crate::platform::layouts::supported(*h);
+            // 1.8.9: in Hebrew each item is closed by a right-to-left mark, so that the sign and the
+            // number in brackets stay with their own layout (they were drawn in the wrong place)
+            let end = if l.is_rtl() { "\u{200F}" } else { "" };
+            format!("{}{}{end}", klf_core::layouts::hkl_name_in(*h, l), if ok { " ✓" } else { " ✗" })
         })
         .collect();
     text(l, Msg::LayoutsLine).replace("{list}", &list.join(", "))
@@ -551,6 +584,7 @@ fn fill_controls() {
     set_text(ID_EXPORT, text(l, Msg::ButtonExport));
     set_text(ID_IMPORT, text(l, Msg::ButtonImport));
     set_text(ID_UNDO_IMPORT, text(l, Msg::ButtonUndoImport));
+    set_text(ID_CHECK_UPDATE, text(l, Msg::ButtonCheckUpdate));
     set_text(ID_ABOUT, text(l, Msg::ButtonAbout));
     set_text(ID_SAVE, text(l, Msg::ButtonSave));
     set_text(ID_CLOSE, text(l, Msg::ButtonClose));
@@ -969,6 +1003,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 (ID_EXPORT, _) => on_export(),
                 (ID_IMPORT, _) => on_import(),
                 (ID_UNDO_IMPORT, _) => on_undo_import(),
+                (ID_CHECK_UPDATE, BN_CLICKED) => app::check_updates_now(),
                 (ID_DIAG_COPY, _) if !app::busy() => {
                     refresh_diagnostic();
                     if crate::platform::clipboard::put_plain_text(window(), &crate::diagnostic::report().replace('\n', "\r\n")) {
@@ -1114,8 +1149,9 @@ pub fn open() {
         }
         let mut ex = WS_EX_CONTROLPARENT | WS_EX_APPWINDOW;
         if l.is_rtl() {
-            ex |= WS_EX_LAYOUTRTL;
+            ex |= WS_EX_LAYOUTRTL | WS_EX_NOINHERITLAYOUT;
         }
+        MIRRORED.with(|m| m.set(l.is_rtl()));
         let style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_CLIPCHILDREN;
         let hwnd = CreateWindowExW(ex, class.as_ptr(), title.as_ptr(), style, CW_USEDEFAULT, CW_USEDEFAULT, 100, 100, null_mut(), null_mut(), app::instance(), null());
         if hwnd.is_null() {
@@ -1168,6 +1204,7 @@ pub fn open() {
         create("EDIT", "", ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | WS_VSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE, ID_DIAG_TEXT);
         create("BUTTON", "", BS_PUSHBUTTON | WS_TABSTOP, 0, ID_DIAG_COPY);
         create("BUTTON", "", BS_PUSHBUTTON | WS_TABSTOP, 0, ID_DIAG_REFRESH);
+        create("BUTTON", "", BS_PUSHBUTTON | WS_TABSTOP, 0, ID_CHECK_UPDATE);
         create("BUTTON", "", BS_PUSHBUTTON | WS_TABSTOP, 0, ID_EXPORT);
         create("BUTTON", "", BS_PUSHBUTTON | WS_TABSTOP, 0, ID_IMPORT);
         create("BUTTON", "", BS_PUSHBUTTON | WS_TABSTOP, 0, ID_UNDO_IMPORT);
@@ -1175,15 +1212,6 @@ pub fn open() {
         create("BUTTON", "", BS_PUSHBUTTON | WS_TABSTOP, 0, ID_ABOUT);
         create("BUTTON", "", BS_DEFPUSHBUTTON | WS_TABSTOP, 0, ID_SAVE);
         create("BUTTON", "", BS_PUSHBUTTON | WS_TABSTOP, 0, ID_CLOSE);
-        // 1.8.5: technical text (diagnostic, program names) always left to right, even in the
-        // mirrored Hebrew window: the mirroring inherited by these boxes is taken off
-        if l.is_rtl() {
-            for id in [ID_DIAG_TEXT, ID_EXCLUDED, ID_LIMIT, ID_DELAY] {
-                let h = GetDlgItem(hwnd, id);
-                let ex = GetWindowLongPtrW(h, GWL_EXSTYLE) as u32;
-                SetWindowLongPtrW(h, GWL_EXSTYLE, (ex & !(WS_EX_LAYOUTRTL | WS_EX_RTLREADING | WS_EX_RIGHT | WS_EX_LEFTSCROLLBAR)) as isize);
-            }
-        }
         // the tab control last: at the bottom of the Z order, under the page controls (clicks
         // reach them), and last in the Tab order (Ctrl+Tab changes the page from anywhere)
         create("SysTabControl32", "", WS_TABSTOP | WS_CLIPSIBLINGS, 0, ID_TAB);

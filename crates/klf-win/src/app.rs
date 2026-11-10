@@ -136,8 +136,6 @@ thread_local! {
     static DORMANT: Cell<Option<Msg>> = const { Cell::new(None) };
     /// the last foreground window of a real program
     static LAST_FG: Cell<usize> = const { Cell::new(0) };
-    /// 1.8.6: times of the last quick toggles (safety brake)
-    static TOGGLES: RefCell<Vec<u64>> = const { RefCell::new(Vec::new()) };
     /// 1.8.5: a keyboard hook removed by Windows could not be put back (alert on the icon)
     static HOOK_LOST: Cell<bool> = const { Cell::new(false) };
 }
@@ -933,17 +931,50 @@ thread_local! {
 }
 
 pub fn show_about(owner: HWND) {
+    use windows_sys::Win32::UI::Controls::*;
     let l = lang();
     let body = text_with_key(l, Msg::AboutText, &key_name()).replace("{version}", klf_core::VERSION);
     let title = wide(text(l, Msg::WindowTitle));
     let body = wide(&body);
-    let mut flags = MB_OK | MB_ICONINFORMATION;
+    // 1.8.9: a real "Check for updates" button in the About box (a task dialog, not a message box)
+    const ID_CHECK: i32 = 200;
+    const ID_OK: i32 = 201;
+    let (t_check, t_close) = (wide(text(l, Msg::ButtonCheckUpdate)), wide(text(l, Msg::ButtonClose)));
+    let buttons = [TASKDIALOG_BUTTON { nButtonID: ID_CHECK, pszButtonText: t_check.as_ptr() }, TASKDIALOG_BUTTON { nButtonID: ID_OK, pszButtonText: t_close.as_ptr() }];
+    let mut flags = TDF_ALLOW_DIALOG_CANCELLATION;
     if l.is_rtl() {
-        flags |= MB_RTLREADING | MB_RIGHT;
+        flags |= TDF_RTL_LAYOUT;
     }
-    // SAFETY: valid strings.
-    unsafe {
-        MessageBoxW(owner, body.as_ptr(), title.as_ptr(), flags);
+    let icon = app_icon(32);
+    if !icon.is_null() {
+        flags |= TDF_USE_HICON_MAIN;
+    }
+    // SAFETY: a zeroed TASKDIALOGCONFIG is valid; every pointer lives until TaskDialogIndirect returns.
+    let mut cfg: TASKDIALOGCONFIG = unsafe { std::mem::zeroed() };
+    cfg.cbSize = std::mem::size_of::<TASKDIALOGCONFIG>() as u32;
+    cfg.hwndParent = owner;
+    cfg.dwFlags = flags;
+    cfg.pszWindowTitle = title.as_ptr();
+    cfg.Anonymous1.hMainIcon = icon;
+    cfg.pszContent = body.as_ptr();
+    cfg.cButtons = buttons.len() as u32;
+    cfg.pButtons = buttons.as_ptr();
+    cfg.nDefaultButton = ID_OK;
+    let mut pressed = 0i32;
+    // SAFETY: see above.
+    let hr = unsafe { TaskDialogIndirect(&cfg, &mut pressed, null_mut(), null_mut()) };
+    if hr < 0 {
+        // no task dialog (very old comctl32): the plain box, as before
+        let mut f = MB_OK | MB_ICONINFORMATION;
+        if l.is_rtl() {
+            f |= MB_RTLREADING | MB_RIGHT;
+        }
+        // SAFETY: valid strings.
+        unsafe { MessageBoxW(owner, body.as_ptr(), title.as_ptr(), f) };
+        return;
+    }
+    if pressed == ID_CHECK {
+        check_updates_now();
     }
 }
 
@@ -1003,8 +1034,6 @@ struct Quick {
 }
 
 static QUICK: std::sync::Mutex<Option<Quick>> = std::sync::Mutex::new(None);
-/// 1.8.6: safety brake, F10 does nothing until this tick
-static BRAKE_UNTIL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// last quick toggle (tick)
 static LAST_TOGGLE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 const QUICK_MS: u64 = 5_000;
@@ -1047,23 +1076,8 @@ fn quick_toggle() -> bool {
         *g = None;
         return false;
     }
-    // 1.8.6, safety brake: more than 8 toggles in 10 s looks like a key stuck or a loop
-    let now_t = sys_tick();
-    let recent = TOGGLES.with(|t| {
-        let mut v = t.borrow_mut();
-        v.retain(|x| now_t.saturating_sub(*x) < 10_000);
-        v.push(now_t);
-        v.len()
-    });
-    if recent > 8 {
-        *g = None;
-        drop(g);
-        BRAKE_UNTIL.store(now_t + 10_000, Ordering::SeqCst);
-        let l = lang();
-        bubble::show(text(l, Msg::QuickBrake), l.is_rtl(), None, 0, false);
-        log("F10 pressed again too often: F10 paused 10 s (safety brake)");
-        return true;
-    }
+    // 1.8.9: no more cadence brake on F10 (every press must work at once, even 20 in a
+    // row); a key held down is still one press (MOD_NOREPEAT), and the typing brakes stay
     // a selected text: the usual path converts the selection (checked by copying it); typing
     // over a selection that may not be there could erase other text
     if q.selected {
@@ -1139,9 +1153,6 @@ fn start_hotkey(hwnd: HWND, action: Action, delayed: bool) {
     let (enabled, busy) = STATE.with(|s| (s.enabled.get(), s.busy.clone()));
     if !enabled {
         return;
-    }
-    if action == Action::Layout && sys_tick() < BRAKE_UNTIL.load(Ordering::SeqCst) {
-        return; // safety brake (a key stuck?): nothing for a few seconds
     }
     if action == Action::Layout && !delayed && quick_toggle() {
         return;
@@ -1244,6 +1255,49 @@ fn sys_tick() -> u64 {
 }
 
 /// Looks for an update on a worker thread (public per-user install, setting on, no policy).
+/// 1.8.9: "Check for updates" (About, settings window): asked by the user, so checked at once
+/// (even with the automatic check off) and, if there is a newer version, installed at once with the
+/// usual checks (signature, size, SHA-256, version). A PC managed by an administrator (school
+/// version) never downloads anything: it is said so.
+pub fn check_updates_now() {
+    let l = lang();
+    let hwnd = main_window();
+    if !crate::update::allowed(true) {
+        bubble::show(&text(l, Msg::UpdatesManaged).replace("{version}", klf_core::VERSION), l.is_rtl(), None, 0, false);
+        return;
+    }
+    if UPDATE_BUSY.swap(true, Ordering::SeqCst) {
+        return; // a check or an install is already running
+    }
+    let owner = hwnd as usize;
+    CHECK_ASKED.store(true, Ordering::SeqCst);
+    let started = std::thread::Builder::new().name("update-now".into()).spawn(move || {
+        let code = match crate::update::check_now() {
+            crate::update::Checked::Newer(r) => {
+                log(&format!("Update asked by the user: {} available", r.tag));
+                *crate::update::OFFER.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(r);
+                7 // UPDATE_BUSY kept until the install starts on the UI thread (no automatic check between)
+            }
+            crate::update::Checked::Latest => 5,
+            crate::update::Checked::Failed => 6,
+        };
+        if code != 7 {
+            UPDATE_BUSY.store(false, Ordering::SeqCst);
+        }
+        // SAFETY: posting a message without pointers.
+        unsafe { PostMessageW(owner as HWND, WM_APP_UPDATE, code, 0) };
+    });
+    if started.is_err() {
+        UPDATE_BUSY.store(false, Ordering::SeqCst);
+        CHECK_ASKED.store(false, Ordering::SeqCst);
+        bubble::show(text(l, Msg::UpdateCheckFailed), l.is_rtl(), None, 0, false);
+    }
+}
+
+/// 1.8.9: a check asked by the user is running: only its answer (7) may start an install without
+/// another click (another program could post the message).
+static CHECK_ASKED: AtomicBool = AtomicBool::new(false);
+
 fn start_update_check(hwnd: HWND) {
     let s = settings();
     if !crate::update::allowed(s.check_updates) {
@@ -1321,6 +1375,22 @@ fn on_update_message(hwnd: HWND, code: WPARAM) {
         2 if UPDATE_INSTALLED.load(Ordering::SeqCst) => request_exit(hwnd),
         2 => {}
         4 => bubble::show(text(l, Msg::UpdateFailed), l.is_rtl(), None, 0, false), // network: offered again later
+        // 1.8.9: answers to "Check for updates"
+        5 if CHECK_ASKED.swap(false, Ordering::SeqCst) => bubble::show(&text(l, Msg::UpdateUpToDate).replace("{version}", klf_core::VERSION), l.is_rtl(), None, 0, true),
+        6 if CHECK_ASKED.swap(false, Ordering::SeqCst) => bubble::show(text(l, Msg::UpdateCheckFailed), l.is_rtl(), None, 0, false),
+        7 if CHECK_ASKED.swap(false, Ordering::SeqCst) => {
+            UPDATE_BUSY.store(false, Ordering::SeqCst); // handed to the install right below (same thread)
+            if busy() {
+                // a conversion is running: the new version is offered in the menu, never lost
+                let tag = crate::update::OFFER.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref().map(|r| r.tag.trim_start_matches('v').to_string());
+                if let Some(v) = tag {
+                    bubble::show(&text(l, Msg::UpdateAvailable).replace("{version}", &v), l.is_rtl(), None, 0, true);
+                }
+            } else {
+                start_update_install(hwnd);
+            }
+        }
+        5..=7 => {}
         _ => {
             // the failed version is not offered again for 7 days (no loop)
             let tag = std::mem::take(&mut *UPDATE_ERROR.lock().unwrap_or_else(std::sync::PoisonError::into_inner));

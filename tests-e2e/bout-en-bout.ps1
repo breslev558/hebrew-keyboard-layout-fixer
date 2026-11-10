@@ -88,10 +88,20 @@ for ($i = 0; $i -lt 5; $i++) { [W]::Key(0x79); Start-Sleep -Milliseconds 150 }
 while ($sw2.ElapsedMilliseconds -lt 3000 -and (Texte) -ne 'akuo') { Start-Sleep -Milliseconds 20 }
 $ms2 = $sw2.ElapsedMilliseconds
 $txt2 = Texte
-Stop-Process -Id $n.Id -Force -ErrorAction SilentlyContinue
 "Texte après 5 F10 rapides : '$txt2'"
-if ($txt2 -ne 'akuo') { Fail "5 F10 rapides : attendu « akuo » (aller-retour à chaque appui)" }
+if ($txt2 -ne 'akuo') { Stop-Process -Id $n.Id -Force -ErrorAction SilentlyContinue; Fail "5 F10 rapides : attendu « akuo » (aller-retour à chaque appui)" }
 "OK    5 F10 à 150 ms : chaque appui pris en compte, en $ms2 ms"
+# 6. (1.8.9) plus de frein de cadence : 21 appuis rapides de suite, TOUS appliqués (nombre impair :
+#    « akuo » devient « שלום » ; l'ancien frein s'arrêtait après 8 et laissait « akuo »)
+Start-Sleep 1
+for ($i = 0; $i -lt 21; $i++) { [W]::Key(0x79); Start-Sleep -Milliseconds 150 }
+$sw3 = [Diagnostics.Stopwatch]::StartNew()
+while ($sw3.ElapsedMilliseconds -lt 3000 -and (Texte) -ne $cible) { Start-Sleep -Milliseconds 20 }
+$txt3 = Texte
+Stop-Process -Id $n.Id -Force -ErrorAction SilentlyContinue
+"Texte après 21 F10 rapides : '$txt3'"
+if ($txt3 -ne $cible) { Fail "21 F10 rapides : chaque appui doit être appliqué (attendu « שלום »)" }
+"OK    21 F10 à 150 ms : tous appliqués, aucun frein"
 $pr = Get-Process KeyboardLayoutFixer -ErrorAction SilentlyContinue | Select-Object -First 1
 if ($pr) {
   $ws = [math]::Round($pr.WorkingSet64 / 1MB, 1); $pv = [math]::Round($pr.PrivateMemorySize64 / 1MB, 1); $cpu = [math]::Round($pr.TotalProcessorTime.TotalMilliseconds)

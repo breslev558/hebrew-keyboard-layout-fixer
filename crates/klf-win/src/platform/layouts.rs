@@ -116,20 +116,29 @@ pub fn note_active(hkl: Option<u32>) {
     }
 }
 
-pub fn choose(active: Option<u32>) -> Choice {
+/// What F10 makes of a layout: known by its name, or recognised from its table read from Windows
+/// (Hebrew variants, Latin layouts with the US letters).
+fn layout_kind(h: u32) -> LayoutKind {
     use klf_core::layouts::{is_latin_table, same_hebrew_letters};
+    match classify_hkl(h) {
+        LayoutKind::Unsupported => match read_layout(h) {
+            Some(t) if same_hebrew_letters(&t) || hebrew_variant_ok(h, &t) => LayoutKind::HebrewStandard,
+            Some(t) if is_latin_table(&t) => LayoutKind::Latin(LatinKind::Us),
+            _ => LayoutKind::Unsupported,
+        },
+        k => k,
+    }
+}
+
+/// 1.8.9: the same answer as F10 (the settings window showed ✗ for a Hebrew variant F10 accepts).
+pub fn supported(h: u32) -> bool {
+    !matches!(layout_kind(h), LayoutKind::Unsupported)
+}
+
+pub fn choose(active: Option<u32>) -> Choice {
     let installed = installed();
     // what a layout is: by its exact value, else by its letters
-    let kind = |h: u32| -> LayoutKind {
-        match classify_hkl(h) {
-            LayoutKind::Unsupported => match read_layout(h) {
-                Some(t) if same_hebrew_letters(&t) || hebrew_variant_ok(h, &t) => LayoutKind::HebrewStandard,
-                Some(t) if is_latin_table(&t) => LayoutKind::Latin(LatinKind::Us),
-                _ => LayoutKind::Unsupported,
-            },
-            k => k,
-        }
-    };
+    let kind = layout_kind;
     let first_latin = || {
         // 1.8.6: the Latin layout chosen in the settings, else the last one used, else a layout
         // supported by name first, then any Latin layout (US table)

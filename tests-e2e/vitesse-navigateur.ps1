@@ -17,6 +17,12 @@ public static class N {
   [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint a, uint b, bool f);
   [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
   public static void Key(byte vk) { keybd_event(vk, 0, 0, UIntPtr.Zero); keybd_event(vk, 0, 2, UIntPtr.Zero); }
+  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
+  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+  [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+  [DllImport("user32.dll")] public static extern void mouse_event(uint f, int x, int y, uint d, UIntPtr e);
+  // a click inside the page: the focus goes to the text box (Edge leaves it in the address bar)
+  public static void ClickIn(IntPtr h, int dx, int dy) { RECT r; GetWindowRect(h, out r); SetCursorPos(r.L + dx, r.T + dy); mouse_event(2, 0, 0, 0, UIntPtr.Zero); mouse_event(4, 0, 0, 0, UIntPtr.Zero); }
   public static bool Front(IntPtr h) {
     uint me = GetCurrentThreadId(), fg = GetWindowThreadProcessId(GetForegroundWindow(), IntPtr.Zero);
     AttachThreadInput(me, fg, true); keybd_event(0x12, 0, 0, UIntPtr.Zero); keybd_event(0x12, 0, 2, UIntPtr.Zero);
@@ -35,7 +41,7 @@ Start-Process $exe; Start-Sleep 3
 $edge = @("${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe", "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $edge) { Write-Host "MANQUE : Edge introuvable sur cette machine, essai sauté"; exit 0 }
 $profil = Join-Path $env:TEMP 'klf-edge-profil'
-$html = '<!doctype html><title>KLF</title><textarea id=t autofocus style="width:700px;height:200px;font-size:20px"></textarea>'
+$html = '<!doctype html><title>KLF</title><body style="margin:0"><textarea id=t autofocus style="position:fixed;left:0;top:0;width:100%;height:100%;font-size:20px"></textarea></body>'
 $page = 'data:text/html;base64,' + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($html))   # (avis Fable : # % " cassent une URL brute)
 $p = Start-Process -FilePath $edge -ArgumentList "--user-data-dir=`"$profil`"", '--inprivate', '--no-first-run', '--no-default-browser-check', '--disable-sync', '--new-window', $page -PassThru
 $h = [IntPtr]::Zero; $t = 0
@@ -48,12 +54,19 @@ while ($h -eq [IntPtr]::Zero) {
 Start-Sleep 4   # page loaded, textarea focused
 $t = 0; while (-not [N]::Front($h)) { Start-Sleep -Milliseconds 300; if (++$t -gt 20) { Fail 'Edge pas au premier plan' } }
 Start-Sleep 1
+# 1.9.2 (2nd trial): the focus stayed in the address bar (field Chrome_WidgetWin_1, nothing typed in the
+# page): a click in the middle of the window, where the text box fills the whole page
+$r = New-Object N+RECT; [void][N]::GetWindowRect($h, [ref]$r)
+[N]::ClickIn($h, [int](($r.R - $r.L) / 2), [int](($r.B - $r.T) / 2))
+Start-Sleep -Milliseconds 800
 
 function Lancer($chemin) {
   Get-Process KeyboardLayoutFixer -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep 1
   Start-Process $chemin; Start-Sleep 3
   if (-not (Get-Process KeyboardLayoutFixer -ErrorAction SilentlyContinue)) { Fail "le programme ne démarre pas ($chemin)" }
   [void][N]::Front($h); Start-Sleep -Milliseconds 500
+  $r = New-Object N+RECT; [void][N]::GetWindowRect($h, [ref]$r)
+  [N]::ClickIn($h, [int](($r.R - $r.L) / 2), [int](($r.B - $r.T) / 2)); Start-Sleep -Milliseconds 500
 }
 function Heure($ligne) { [datetime]::ParseExact($ligne.Substring(1, 23), 'yyyy-MM-dd HH:mm:ss.fff', $null) }
 function Mesure($version, $nom, [scriptblock]$avant, $attendu, $seuil) {

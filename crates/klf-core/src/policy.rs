@@ -210,7 +210,9 @@ pub fn has_terminal_panel(exe: &str) -> bool {
 /// Firefox: Ctrl+C with nothing selected copies nothing, so the first copy is not waited for long.
 pub fn copies_nothing_without_selection(focus_class: &str) -> bool {
     let c = focus_class.to_ascii_lowercase();
-    c == "chrome_renderwidgethostwnd" || c == "chrome_renderwidgethosthwnd" || c == "mozillawindowclass"
+    // (Chrome_WidgetWin_*: the browser's own boxes such as the address bar, and Electron apps that
+    // give the focus to their top window; seen in the 1.9.2 Windows test)
+    c == "chrome_renderwidgethostwnd" || c == "chrome_renderwidgethosthwnd" || c == "mozillawindowclass" || c == "chrome_widgetwin_0" || c == "chrome_widgetwin_1"
 }
 
 /// 1.8.5: programs where F10 without a selection never extends to the whole paragraph (Shift+Up

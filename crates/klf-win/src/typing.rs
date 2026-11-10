@@ -567,7 +567,7 @@ fn on_key(vk: u32, sc: u32) -> bool {
         return true;
     }
     let fresh = PROPOSAL.with(|p| p.borrow().as_ref().is_some_and(|x| now.saturating_sub(x.at) < PROPOSAL_MS && x.hwnd == fg));
-    if want_t && fresh && vk == VK_TAB as u32 && !down(VK_SHIFT) && !down(VK_CONTROL) && !down(VK_MENU) && !down(VK_LWIN) && !down(VK_RWIN) {
+    if want_t && fresh && vk == VK_TAB as u32 && !down(VK_SHIFT) && !down(VK_CONTROL) && !down(VK_MENU) && !down(VK_LWIN) && !down(VK_RWIN) && !single_line_field() {
         SWALLOW_TAB_UP.with(|s| s.set(true));
         post(FIX);
         return true;
@@ -944,6 +944,23 @@ fn show_proposal(p: Proposal) {
     PROPOSAL.with(|p| *p.borrow_mut() = Some(Proposal { s, hwnd: fg as usize, latin_hkl, at: tick(), words }));
     if auto {
         fix(); // a word taught with F10: fixed at once (Backspace undoes it)
+    }
+}
+
+/// 1.9.0: a one-line Windows text box (a form field): there Tab moves to the next field, so it is
+/// never taken to accept a proposal (the proposal is simply dropped). Read in the hook without any
+/// message sent to the program (class name and window style only).
+fn single_line_field() -> bool {
+    // SAFETY: structure sized; GetWindowLongW only reads the style of a window.
+    unsafe {
+        let mut gi: GUITHREADINFO = std::mem::zeroed();
+        gi.cbSize = std::mem::size_of::<GUITHREADINFO>() as u32;
+        if GetGUIThreadInfo(0, &mut gi) == 0 || gi.hwndFocus.is_null() {
+            return false;
+        }
+        let class = crate::platform::sys::class_name(gi.hwndFocus).to_ascii_lowercase();
+        let edit = class == "edit" || class.starts_with("richedit") || class.starts_with("windowsforms10.edit") || class.starts_with("windowsforms10.richedit");
+        edit && (GetWindowLongW(gi.hwndFocus, GWL_STYLE) as u32) & 0x0004 == 0 // ES_MULTILINE
     }
 }
 

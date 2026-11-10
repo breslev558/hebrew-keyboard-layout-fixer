@@ -187,6 +187,21 @@ fn note_foreground(hwnd: HWND) {
     if exe.is_empty() || SHELL_EXES.contains(&exe.as_str()) || exe == "keyboardlayoutfixer.exe" {
         return;
     }
+    // 1.9.0: a remote desktop in front gets F10 / F9 itself (the copy on the other PC answers)
+    let remote = klf_core::policy::is_remote_screen(&exe);
+    if remote != PASSTHROUGH.with(|p| p.get()) {
+        PASSTHROUGH.with(|p| p.set(remote));
+        if remote {
+            if STATE.with(|s| s.registered.get()) {
+                unregister_hotkey();
+                log("Remote desktop in front: F10 and F9 given to it");
+            }
+        } else if STATE.with(|s| s.enabled.get()) {
+            register_hotkey();
+            log("Remote desktop left: F10 and F9 taken again");
+        }
+        update_tray();
+    }
     LAST_APP.with(|a| *a.borrow_mut() = exe);
     LAST_FG.with(|w| w.set(hwnd as usize));
     crate::typing::on_foreground();
@@ -286,11 +301,16 @@ pub fn lang_of(s: &AppSettings) -> Lang {
     }
 }
 
+thread_local! {
+    /// 1.9.0: a remote desktop window is in front: the keys are left to it on purpose
+    static PASSTHROUGH: Cell<bool> = const { Cell::new(false) };
+}
+
 pub fn hotkey_state() -> HotkeyState {
     STATE.with(|s| {
         if !s.enabled.get() {
             HotkeyState::Paused
-        } else if s.registered.get() {
+        } else if s.registered.get() || PASSTHROUGH.with(|p| p.get()) {
             HotkeyState::Ready
         } else {
             HotkeyState::Unavailable
@@ -485,6 +505,9 @@ fn register_case_hotkey() {
 }
 
 pub fn register_hotkey() -> bool {
+    if PASSTHROUGH.with(|p| p.get()) {
+        return true; // a remote desktop is in front: taken again when it is left
+    }
     let s = settings();
     let hwnd = STATE.with(|st| st.hwnd.get());
     let vk = key_to_vk(s.hotkey_key);

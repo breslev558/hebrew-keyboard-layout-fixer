@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.9.0 (November 2026)
+- **Remote desktop**: while a remote desktop or virtual machine window is in front (Remote Desktop, AnyDesk, TeamViewer, RustDesk, VNC, Parsec, Hyper-V), F10 and F9 are left to it, so that the copy running on the other PC fixes the text. Before, F10 was taken here and nothing happened on either side.
+- Fix while typing: in a one-line Windows text box (a form field), **Tab always moves to the next field**; it never accepts a proposal there.
+- Full visual audit on Windows at every version: welcome, tray menu, F10 bubble at the top and at the bottom, update bubble, settings at 150 % and 200 %, high contrast and the uninstall question, in Hebrew, French and English.
+
 ## 1.8.9 (November 2026)
 - **Check for updates** button in the About box and on the Diagnostic page of the settings: it checks at once and, if there is a newer version, installs it (same signature checks). Otherwise it says "You have the latest version". On a PC managed by an administrator it only shows the version: updates are managed there.
 - F10 pressed many times in a row: **every press works**, even 20 in a row (the 1.8.6 brake after 8 presses in 10 s is removed; a key held down still counts once).

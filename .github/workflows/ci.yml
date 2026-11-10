@@ -164,6 +164,12 @@ jobs:
         run: |
           powershell -NoProfile -ExecutionPolicy Bypass -File tests-e2e\captures-et-paragraphe.ps1
           exit $LASTEXITCODE
+      - name: Audit visuel (toutes les fenêtres, 3 langues, 150 % et 200 %, contraste élevé, désinstallation)
+        if: always()
+        shell: powershell
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File tests-e2e\audit-visuel.ps1
+          exit $LASTEXITCODE
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:

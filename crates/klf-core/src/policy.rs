@@ -50,6 +50,13 @@ pub fn exe_base_name(path: &str) -> String {
     path.rsplit(['\\', '/']).next().unwrap_or(path).to_lowercase()
 }
 
+/// 1.9.0: remote desktop and virtual machine windows: while one is in front, F10 and F9 are given
+/// to it (not taken here), so that the copy running on the other PC gets them; before, F10 was
+/// taken and nothing was done on either side.
+pub fn is_remote_screen(exe_name: &str) -> bool {
+    matches!(exe_base_name(exe_name).as_str(), "mstsc.exe" | "msrdc.exe" | "vmconnect.exe" | "anydesk.exe" | "teamviewer.exe" | "rustdesk.exe" | "vncviewer.exe" | "tvnviewer.exe" | "parsecd.exe")
+}
+
 pub fn is_excluded(exe_name: &str, extra: &[String]) -> bool {
     let n = exe_base_name(exe_name);
     BUILT_IN_EXCLUDED.contains(&n.as_str()) || extra.iter().any(|e| exe_base_name(e) == n)
@@ -211,6 +218,12 @@ mod tests {
         assert!(paragraph_field("WindowsForms10.EDIT.app.0.141b42a_r6_ad1", "powershell.exe"));
         assert!(!paragraph_field("WindowsForms10.EDIT.app.0.141b42a_r6_ad1", "excel.exe"));
         assert!(!paragraph_field("ConsoleWindowClass", "powershell.exe"), "a console is never a paragraph field");
+    }
+
+    #[test]
+    fn remote_screens_get_the_keys() {
+        assert!(is_remote_screen("C:\\Windows\\System32\\MSTSC.EXE") && is_remote_screen("AnyDesk.exe"));
+        assert!(!is_remote_screen("notepad.exe"));
     }
 
     #[test]

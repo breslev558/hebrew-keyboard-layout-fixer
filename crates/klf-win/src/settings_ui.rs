@@ -1067,10 +1067,13 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             let dpi = ((wparam >> 16) & 0xFFFF) as u32;
             DPI.with(|d| d.set(dpi));
             make_fonts(dpi);
-            // SAFETY: lparam points to the suggested rectangle (documented).
-            unsafe {
-                let r = &*(lparam as *const RECT);
-                SetWindowPos(hwnd, null_mut(), r.left, r.top, r.right - r.left, r.bottom - r.top, SWP_NOZORDER | SWP_NOACTIVATE);
+            // SAFETY: lparam points to the suggested rectangle (documented); never NULL from Windows,
+            // checked anyway (a message posted by another program)
+            if lparam != 0 {
+                unsafe {
+                    let r = &*(lparam as *const RECT);
+                    SetWindowPos(hwnd, null_mut(), r.left, r.top, r.right - r.left, r.bottom - r.top, SWP_NOZORDER | SWP_NOACTIVATE);
+                }
             }
             apply_layout();
             0
@@ -1159,7 +1162,10 @@ pub fn open() {
             return;
         }
         HWND_.with(|c| c.set(hwnd));
-        let dpi = GetDpiForWindow(hwnd).max(96);
+        // 1.9.0: KLF_TEST_DPI (120 to 288) draws the window as at 125 % to 300 %: only for the visual
+        // test on GitHub's Windows, where the screen scale cannot be changed without a new logon
+        let test_dpi = std::env::var("KLF_TEST_DPI").ok().and_then(|v| v.parse::<u32>().ok()).filter(|d| (120..=288).contains(d));
+        let dpi = test_dpi.unwrap_or_else(|| GetDpiForWindow(hwnd).max(96));
         DPI.with(|d| d.set(dpi));
         make_fonts(dpi);
 

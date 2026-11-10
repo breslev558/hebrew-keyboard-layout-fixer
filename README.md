@@ -97,9 +97,9 @@ All are off by default and are switched on from the tray menu. They are not avai
 
 ## Updates
 
-Once a day the program asks GitHub whether a newer version exists. No identifier is sent; GitHub sees your IP address, as with any download. If there is a new version, a bubble tells you and the tray menu offers **Install version X**. Nothing is installed without your click. The ARM64 version updates itself with its own ARM64 files.
+Once a day the program asks GitHub whether a newer version exists. No identifier is sent; GitHub sees your IP address, as with any download. If there is a new version, a bubble tells you and the tray menu offers **Install version X**. Nothing is installed without your click. To check at once, click **Check for updates** in the About box or on the Diagnostics page of the settings: a newer version is installed right away, otherwise it says you have the latest one. The ARM64 version updates itself with its own ARM64 files.
 
-Before switching, the program checks the new file's SHA-256 and a digital signature (ECDSA P-256) made with a key kept offline, using Windows cryptography. If anything fails, or the new version does not start within 60 seconds, the previous version is put back automatically. To turn the check off, untick **Check for updates** in the tray menu.
+Before switching, the program checks the new file's SHA-256 and a digital signature (ECDSA P-256) made with a key kept offline, using Windows cryptography. If anything fails, or the new version does not start within 60 seconds, the previous version is put back automatically. To turn the daily check off, untick **Automatic update check** in the tray menu.
 
 ## Uninstall
 
@@ -167,7 +167,7 @@ Press F10 again at once to put the original text back, or Ctrl+Z in the program.
 <details>
 <summary><b>F10 does nothing in one program</b></summary>
 
-Some programs (administrator windows, games, some remote desktops) do not accept simulated keys. Check in the tray menu whether the fixer is paused or disabled in that program, and see Settings › **Diagnostics** for what happened.
+In a remote desktop window (Remote Desktop, AnyDesk, TeamViewer, RustDesk…), F10 is left to the other PC: install Keyboard Layout Fixer there too. Some programs (administrator windows, games) do not accept simulated keys. Check in the tray menu whether the fixer is paused or disabled in that program, and see Settings › **Diagnostics** for what happened.
 
 </details>
 
@@ -241,7 +241,7 @@ Releases are built by [`.github/workflows/release.yml`](.github/workflows/releas
   - **Messageries : retenir l'envoi d'une phrase dans la mauvaise langue** : un second appui sur Entrée l'envoie quand même.
   - **Ctrl gauche = anglais, Ctrl droit = hébreu**, **Programmes à une seule langue (ex. le Terminal en anglais)**, **Double appui sur Maj = conversion (comme F10)**.
   - **Remplacements de texte (ex. @@ → adresse mail)** : vos propres abréviations dans **Mes remplacements…**, une par ligne, par exemple `@@ = nom@exemple.com` ; tapez l'abréviation puis Espace.
-- **Mises à jour** : une fois par jour, une bulle signale une nouvelle version. Elle ne s'installe qu'après votre clic dans le menu, et après vérification de sa signature. Vous pouvez les désactiver dans ce menu (**Rechercher des mises à jour**).
+- **Mises à jour** : une fois par jour, une bulle signale une nouvelle version. Elle ne s'installe qu'après votre clic dans le menu, et après vérification de sa signature. Vous pouvez désactiver cette vérification dans ce menu (**Recherche automatique des mises à jour**). Pour vérifier tout de suite : bouton **Rechercher une mise à jour** dans la fenêtre À propos ou dans l'onglet Diagnostic des réglages.
 - **Désinstallation** : Paramètres › Applications › Applications installées (Windows 10 : Applications et fonctionnalités) › Keyboard Layout Fixer. Le désinstalleur propose d'effacer aussi vos réglages et les mots appris (non par défaut).
 - **Jeux avec anti-triche** : quittez le programme avant de jouer (menu de l'icône › **Quitter**).
 - **Vie privée** : rien de ce que vous tapez n'est envoyé ; seuls les mots appris et vos remplacements sont enregistrés, sur votre PC. Après une vraie erreur, une notification propose d'envoyer un rapport anonyme (version, étape en échec, nom du programme, jamais votre texte) : rien ne part sans votre clic.
@@ -259,7 +259,7 @@ Releases are built by [`.github/workflows/release.yml`](.github/workflows/releas
   - האפשרות **Ctrl שמאלי = אנגלית, Ctrl ימני = עברית**: לחיצה קצרה על Ctrl השמאלי מעבירה לאנגלית, ועל Ctrl הימני לעברית.
   - **תוכנות בשפה אחת (למשל הטרמינל באנגלית)**, **לחיצה כפולה על Shift ממירה (כמו F10)**.
   - **החלפות טקסט**: הקיצורים שלכם ב-**ההחלפות שלי…**, שורה לכל קיצור, למשל <span dir="ltr">`@@ = name@example.com`</span>; מקלידים את הקיצור ואז רווח.
-- **עדכונים**: פעם ביום מופיעה הודעה כשיש גרסה חדשה. היא מותקנת רק אחרי לחיצה שלכם בתפריט הסמל, ואחרי בדיקת החתימה. אפשר לכבות את הבדיקה באותו תפריט (**בדוק אם קיימים עדכונים**).
+- **עדכונים**: פעם ביום מופיעה הודעה כשיש גרסה חדשה. היא מותקנת רק אחרי לחיצה שלכם בתפריט הסמל, ואחרי בדיקת החתימה. אפשר לכבות את הבדיקה היומית באותו תפריט (**בדיקת עדכונים אוטומטית**). לבדיקה מיידית: הכפתור **חיפוש עדכון** בחלון אודות או בלשונית אבחון בהגדרות.
 - **הסרה**: הגדרות › אפליקציות › אפליקציות מותקנות › Keyboard Layout Fixer. תוכנית ההסרה שואלת אם למחוק גם את ההגדרות ואת המילים שהתוכנה למדה (ברירת המחדל: לא).
 - **משחקים עם אנטי-צ'יט**: לפני המשחק צאו מהתוכנה (תפריט הסמל › **יציאה**).
 - **פרטיות**: שום דבר ממה שאתם מקלידים לא נשלח. רק המילים שהתוכנה למדה וההחלפות שלכם נשמרים, במחשב שלכם. אחרי תקלה אמיתית מוצע לשלוח דיווח אנונימי (גרסה, השלב שנכשל, שם התוכנה, לעולם לא הטקסט שלכם), ושום דבר לא נשלח בלי לחיצה שלכם.

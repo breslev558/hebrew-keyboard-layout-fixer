@@ -164,6 +164,13 @@ jobs:
         run: |
           powershell -NoProfile -ExecutionPolicy Bypass -File tests-e2e\captures-et-paragraphe.ps1
           exit $LASTEXITCODE
+      - name: Vitesse de F10 dans un navigateur (Edge, avec et sans sélection)
+        if: success() || failure()
+        timeout-minutes: 10
+        shell: powershell
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File tests-e2e\vitesse-navigateur.ps1
+          exit $LASTEXITCODE
       - name: Audit visuel (toutes les fenêtres, 3 langues, 150 % et 200 %, contraste élevé, désinstallation)
         if: success() || failure()
         timeout-minutes: 15

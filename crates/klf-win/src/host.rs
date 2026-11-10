@@ -126,7 +126,17 @@ impl Host for WinHost {
         self.target.set(h(hwnd));
         self.focus.set(target::focus_of(h(hwnd)));
         *self.pids.borrow_mut() = target::pids_of(h(hwnd));
-        target::info(h(hwnd))
+        let mut info = target::info(h(hwnd));
+        // 1.9.2: in a web page or an Electron app the selection is asked to UI Automation (60 ms at
+        // most): nothing selected = no Ctrl+C to wait for, the line is taken at once
+        if matches!(info.selection, None | Some(klf_core::policy::Selection::Unknown)) && klf_core::policy::copies_nothing_without_selection(&info.focus_class) {
+            info.selection = match crate::platform::uia::selection_empty(60) {
+                Some(true) => Some(klf_core::policy::Selection::Empty),
+                Some(false) => Some(klf_core::policy::Selection::NonEmpty),
+                None => info.selection,
+            };
+        }
+        info
     }
     fn wait_keys_released(&self) -> bool {
         input::wait_keys_released(self.hotkey_vk, 1500)

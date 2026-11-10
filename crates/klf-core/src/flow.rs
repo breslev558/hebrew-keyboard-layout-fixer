@@ -507,6 +507,16 @@ enum Copy {
 
 /// Ctrl+C in the target, then waits for a REAL clipboard change.
 fn copy_selection(host: &mut dyn Host, target: usize, st: &mut ClipState) -> Copy {
+    copy_selection_within(host, target, st, COPY_WAIT_MS)
+}
+
+/// 1.9.2: the FIRST Ctrl+C when the selection is unknown, in a web page or an Electron app (Chrome,
+/// Edge, Claude Code, Teams…): with nothing selected they copy nothing at all, and F10 waited the
+/// whole 1.5 s before taking the line (1 to 3 s in a browser, instant in Notepad). A real
+/// selection is copied there in a few tens of ms.
+pub const COPY_WAIT_UNKNOWN_WEB_MS: u64 = 400;
+
+fn copy_selection_within(host: &mut dyn Host, target: usize, st: &mut ClipState, wait_ms: u64) -> Copy {
     if host.foreground() != target {
         return Copy::Stopped(Outcome::say(Msg::WindowChanged, "Target window changed before Ctrl+C"));
     }
@@ -521,7 +531,7 @@ fn copy_selection(host: &mut dyn Host, target: usize, st: &mut ClipState) -> Cop
         if host.clipboard_seq() != seq {
             break;
         }
-        if waited >= COPY_WAIT_MS {
+        if waited >= wait_ms {
             return Copy::NoChange;
         }
         if host.foreground() != target {
@@ -602,10 +612,18 @@ fn convert_window_inner(
     let selection = info.selection.unwrap_or(Selection::Unknown);
     // "last word": the word to convert (the raw copy stays in st.captured)
     let mut to_convert: Option<String> = None;
+    // 1.9.2: code editors with a terminal panel (VS Code, Cursor…): Ctrl+C with nothing selected in
+    // their terminal stops the running program, and in their editor it copies the whole line
+    // (refused anyway): Ctrl+C only on a selection seen by Windows
+    if selection != Selection::NonEmpty && policy::has_terminal_panel(&info.exe_name) {
+        return Outcome::say(Msg::SelectText, "Code editor with a terminal: select the text first (Ctrl+C could stop a program), nothing sent");
+    }
+    let web = policy::copies_nothing_without_selection(&info.focus_class);
 
     if selection != Selection::Empty {
         trace.mark(Step::Copy, host.now_ms());
-        match copy_selection(host, target, st) {
+        let wait = if selection == Selection::Unknown && web { COPY_WAIT_UNKNOWN_WEB_MS } else { COPY_WAIT_MS };
+        match copy_selection_within(host, target, st, wait) {
             Copy::Text(t) => {
                 let suspect = policy::line_copy_suspect(&t, selection, &info.focus_class);
                 st.captured = Some(t);
@@ -636,11 +654,18 @@ fn convert_window_inner(
         if host.foreground() != target || !host.focus_unchanged() || host.user_moving() {
             return Outcome::say(Msg::WindowChanged, "Target window or field changed, stopped");
         }
+        // 1.9.2: a copy that came after the wait (a real selection copied slowly) must not meet our
+        // Shift+Home: the clipboard moved since we emptied it = stopped, nothing done
+        if selection == Selection::Unknown && host.clipboard_seq() != st.seq_clear {
+            return Outcome::say(Msg::NothingToConvert, "The clipboard changed after the wait for the copy (late copy?), nothing done");
+        }
         trace.mark(Step::LineStart, host.now_ms());
         if !host.send_select_to_line_start() {
             return Outcome::say(Msg::KeysBlocked, "Shift+Home not sent, stopped");
         }
-        match copy_selection(host, target, st) {
+        // 1.9.2: in a web page, Shift+Home that selects nothing (caret at the start, empty field) is
+        // not waited for 1.5 s either: at worst nothing is done
+        match copy_selection_within(host, target, st, if web { COPY_WAIT_UNKNOWN_WEB_MS } else { COPY_WAIT_MS }) {
             Copy::Text(t) => {
                 // something was selected by Shift+Home (an empty line or the caret at its start
                 // selects nothing: then no Right arrow is ever sent)
@@ -2136,6 +2161,41 @@ mod tests {
         m.line = Some("akuo".into());
         run(&mut m, &settings());
         assert!(!m.events.borrow().iter().any(|e| e.starts_with("select-back")));
+    }
+
+    // ---- 1.9.2 : a web page with nothing selected is not waited for 1.5 s ----
+
+    #[test]
+    fn a_web_page_without_selection_is_not_waited_for_long() {
+        let run_in = |class: &str| {
+            let mut m = Mock::new();
+            *m.selected.borrow_mut() = None; // the page copies nothing for Ctrl+C
+            m.info.focus_class = class.into();
+            m.line = Some("akuo".into());
+            let o = run(&mut m, &settings());
+            assert_eq!(m.pasted.borrow().as_deref(), Some("שלום"), "{class}: {}", o.log);
+            m.sleeps_after_copy.get()
+        };
+        let web = run_in("Chrome_RenderWidgetHostHWND");
+        let other = run_in("SomeUnknownEdit");
+        assert!(web < 120, "web page: {web} waits of 5 ms after the first Ctrl+C");
+        assert!(other >= 300, "unknown program: the full 1.5 s is kept ({other})");
+    }
+
+    #[test]
+    fn a_code_editor_never_gets_ctrl_c_without_a_seen_selection() {
+        let mut m = Mock::new();
+        m.info.exe_name = "Windsurf.exe".into(); // (VS Code, Cursor, VSCodium: excluded altogether)
+        m.info.focus_class = "Chrome_RenderWidgetHostHWND".into();
+        let o = run(&mut m, &settings());
+        assert_eq!(o.msg, Some(Msg::SelectText), "{}", o.log);
+        assert!(!m.happened("copy"), "no Ctrl+C: it would stop the program in the terminal");
+        // a selection seen by Windows (UI Automation): converted as usual
+        let mut m = Mock::new();
+        m.info.exe_name = "Windsurf.exe".into(); // (VS Code, Cursor, VSCodium: excluded altogether)
+        m.info.selection = Some(Selection::NonEmpty);
+        let o = run(&mut m, &settings());
+        assert_eq!(o.msg, Some(Msg::Converted), "{}", o.log);
     }
 
     // ---- 1.8.8 : a selection we made never stays after a stop (audit Fable) ----

@@ -200,6 +200,19 @@ pub fn paragraph_field(focus_class: &str, exe: &str) -> bool {
     known && !no_paragraph_extension(exe) && !crate::typing::is_code_editor(exe)
 }
 
+/// 1.9.2: code editors with a terminal panel inside the same window (indistinguishable by the class):
+/// Ctrl+C there may stop the program running in the terminal.
+pub fn has_terminal_panel(exe: &str) -> bool {
+    matches!(exe_base_name(exe).as_str(), "code.exe" | "code - insiders.exe" | "cursor.exe" | "codium.exe" | "vscodium.exe" | "windsurf.exe" | "hyper.exe" | "tabby.exe" | "trae.exe" | "positron.exe")
+}
+
+/// 1.9.2: web pages and Electron apps (Chrome, Edge, Claude Code, Teams, VS Code's web views) and
+/// Firefox: Ctrl+C with nothing selected copies nothing, so the first copy is not waited for long.
+pub fn copies_nothing_without_selection(focus_class: &str) -> bool {
+    let c = focus_class.to_ascii_lowercase();
+    c == "chrome_renderwidgethostwnd" || c == "chrome_renderwidgethosthwnd" || c == "mozillawindowclass"
+}
+
 /// 1.8.5: programs where F10 without a selection never extends to the whole paragraph (Shift+Up
 /// would leave the cell being edited in Excel, or do something else in a terminal).
 /// 1.8.8: cmd / PowerShell / conhost are no longer listed: their console windows never reach this

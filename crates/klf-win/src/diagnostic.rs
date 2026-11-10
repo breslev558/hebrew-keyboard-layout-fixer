@@ -11,6 +11,16 @@ static RING: Mutex<Option<Ring>> = Mutex::new(None);
 pub fn record(action: Action, outcome: &Outcome, mut trace: Trace, now_ms: u64, layout: Option<u32>) {
     let (stopped_at, total_ms) = trace.finish(now_ms);
     let info = trace.info.take().unwrap_or_default();
+    // 1.9.2: the time of each step in the journal (never any text): « where do the seconds go? »
+    // in a browser, and read by the Windows test
+    let steps: Vec<String> = trace.steps.iter().map(|(st, ms)| format!("{} {ms}", st.name_in(false))).collect();
+    // time until the fixed text is pasted (what the user waits for; the wait before the clipboard is
+    // put back comes after)
+    let until_paste: u32 = match trace.steps.iter().position(|(st, _)| *st == klf_core::diag::Step::Paste) {
+        Some(i) => trace.steps[..=i].iter().map(|(_, ms)| *ms).sum(),
+        None => 0,
+    };
+    crate::util::log(&format!("Timing: until paste {until_paste} ms; total {total_ms} ms ({}); field {}; {}", steps.join(", "), info.focus_class, klf_core::diag::selection_text(info.selection)));
     let a = Attempt {
         when: crate::platform::sys::local_clock(),
         action: Some(action),

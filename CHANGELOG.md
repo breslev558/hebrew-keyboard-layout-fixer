@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.9.2 (November 2026)
+- **F10 is much faster in web pages and Electron apps** (Chrome, Edge, Claude Code, Teams…): it took 1.5 to 3 seconds there, instant in Notepad. The program could not know whether text was selected and waited up to 1.5 s for a copy that never came. Now it asks Windows (UI Automation, 60 ms at most) whether text is selected: with nothing selected the line is taken at once; with a selection the wait ends as soon as the copy arrives. Without an answer, the wait is 0.4 s instead of 1.5 s, also after Shift+Home.
+- Safety: a copy arriving late never meets the line selection (nothing is done then); in code editors with a terminal panel (Windsurf, Hyper, Tabby…), Ctrl+C is only sent on a selection seen by Windows (it could stop the program running in the terminal; VS Code, Cursor and VSCodium stay excluded).
+- The journal notes the time of each step of F10 and the time until the paste (never any text). The Windows test measures F10 in Edge, with and without a selection, next to the previous version, with a limit of 300 ms.
+
 ## 1.9.1 (November 2026)
 - F10 bubble: the "before → after" preview is drawn without its invisible direction marks, measured on the bubble itself, and ends with "…" if it is ever too wide (never cut at both ends).
 - Settings, Diagnostics page: the explanation of the last attempt is in the language of the interface (it was always French), and the copied information is in English for the Hebrew and English interfaces (French for French).

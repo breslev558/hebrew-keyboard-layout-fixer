@@ -18,6 +18,13 @@ public static class N {
   [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
   public static void Key(byte vk) { keybd_event(vk, 0, 0, UIntPtr.Zero); keybd_event(vk, 0, 2, UIntPtr.Zero); }
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, System.Text.StringBuilder s, int n);
+  [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr LoadKeyboardLayout(string id, uint f);
+  // the window's keyboard back to English (US) before typing « akuo » (after a fix it can be Hebrew,
+  // and then SendKeys' Ctrl+A and « akuo » come out wrong: seen in the 4th 1.9.2 trial)
+  public static void English(IntPtr h) { PostMessage(h, 0x0050, IntPtr.Zero, LoadKeyboardLayout("00000409", 1)); }
+  // Ctrl+A by key codes (independent of the keyboard language)
+  public static void CtrlA() { keybd_event(0x11, 0, 0, UIntPtr.Zero); keybd_event(0x41, 0, 0, UIntPtr.Zero); keybd_event(0x41, 0, 2, UIntPtr.Zero); keybd_event(0x11, 0, 2, UIntPtr.Zero); }
   public static string Title(IntPtr h) { var sb = new System.Text.StringBuilder(512); GetWindowText(h, sb, 512); return sb.ToString(); }
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
@@ -46,7 +53,7 @@ if (-not $edge) { Write-Host "MANQUE : Edge introuvable sur cette machine, essai
 $profil = Join-Path $env:TEMP 'klf-edge-profil'
 # the page title shows the text of the box (« T:akuo… »): read through the window title, never through
 # the clipboard (both reads came back empty in the 2nd 1.9.2 trial)
-$html = '<!doctype html><title>T::F</title><body style="margin:0"><textarea id=t autofocus oninput="document.title=''T:''+this.value+'':F''" style="position:fixed;left:0;top:0;width:100%;height:100%;font-size:20px"></textarea></body>'
+$html = '<!doctype html><title>T::F</title><body style="margin:0"><textarea id=t autofocus oninput="document.title=''T:''+this.value+'':F''" onselect="document.title=''T:''+this.value+'':F sel''" style="position:fixed;left:0;top:0;width:100%;height:100%;font-size:20px"></textarea></body>'
 $page = 'data:text/html;base64,' + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($html))   # (avis Fable : # % " cassent une URL brute)
 $p = Start-Process -FilePath $edge -ArgumentList "--user-data-dir=`"$profil`"", '--inprivate', '--no-first-run', '--no-default-browser-check', '--disable-sync', '--new-window', $page -PassThru
 $h = [IntPtr]::Zero; $t = 0
@@ -81,6 +88,7 @@ function Mesure($version, $nom, [scriptblock]$avant, $attendu, $seuil) {
   & $avant
   Start-Sleep -Milliseconds 800
   Write-Host "       avant F10 : texte '$(Texte)'"
+  if ((Texte) -ne 'akuo') { Fail "$version $nom : « akuo » n'a pas été tapé correctement ('$(Texte)')" }
   $appui = Get-Date
   [N]::Key(0x79)   # F10
   $fin = $null; $sw = [Diagnostics.Stopwatch]::StartNew()
@@ -121,10 +129,14 @@ function Mediane3($version, $nom, [scriptblock]$avant, $attendu, $seuil) {
 $shalom = [string][char]0x05E9 + [char]0x05DC + [char]0x05D5 + [char]0x05DD
 # the box is emptied with Ctrl+A then Backspace (the Delete key sent by keybd_event did nothing in the
 # 3rd 1.9.2 trial: the texts piled up)
-$vider = { [System.Windows.Forms.SendKeys]::SendWait('^a'); Start-Sleep -Milliseconds 150; [System.Windows.Forms.SendKeys]::SendWait('{BACKSPACE}'); Start-Sleep -Milliseconds 300
+$vider = { [N]::English($h); Start-Sleep -Milliseconds 300
+           # several rounds: even without a selection each Backspace removes a letter (avis Fable)
+           for ($i = 0; $i -lt 12 -and (Texte) -ne ''; $i++) { [N]::CtrlA(); Start-Sleep -Milliseconds 150; [N]::Key(0x08); Start-Sleep -Milliseconds 300 }
+           Write-Host "       vidé en $i tour(s)"
            if ((Texte) -ne '') { Fail "zone de texte pas vidée : '$(Texte)'" } }
 $sans = { & $vider; [System.Windows.Forms.SendKeys]::SendWait('akuo') }
-$avec = { & $vider; [System.Windows.Forms.SendKeys]::SendWait('akuo'); Start-Sleep -Milliseconds 300; [System.Windows.Forms.SendKeys]::SendWait('^a') }
+$avec = { & $vider; [System.Windows.Forms.SendKeys]::SendWait('akuo'); Start-Sleep -Milliseconds 300; [N]::CtrlA()
+          Start-Sleep -Milliseconds 300; if ([N]::Title($h) -notmatch ':F sel') { Fail 'sélection non faite (Ctrl+A)' } }
 if ($env:GITHUB_STEP_SUMMARY) { @("", "### Vitesse de F10 dans Edge", "", "| Version | Cas | Jusqu'au collage | En tout (dont 100 ms avant la remise du presse-papiers) |", "|---|---|---|---|") | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY }
 # AVANT : la 1.9.1 publiée
 $ancien = Join-Path $env:TEMP 'klf-191\KeyboardLayoutFixer.exe'

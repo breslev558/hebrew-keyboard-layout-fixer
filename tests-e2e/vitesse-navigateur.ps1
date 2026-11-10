@@ -17,6 +17,8 @@ public static class N {
   [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint a, uint b, bool f);
   [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
   public static void Key(byte vk) { keybd_event(vk, 0, 0, UIntPtr.Zero); keybd_event(vk, 0, 2, UIntPtr.Zero); }
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, System.Text.StringBuilder s, int n);
+  public static string Title(IntPtr h) { var sb = new System.Text.StringBuilder(512); GetWindowText(h, sb, 512); return sb.ToString(); }
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
@@ -41,7 +43,9 @@ Start-Process $exe; Start-Sleep 3
 $edge = @("${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe", "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $edge) { Write-Host "MANQUE : Edge introuvable sur cette machine, essai sauté"; exit 0 }
 $profil = Join-Path $env:TEMP 'klf-edge-profil'
-$html = '<!doctype html><title>KLF</title><body style="margin:0"><textarea id=t autofocus style="position:fixed;left:0;top:0;width:100%;height:100%;font-size:20px"></textarea></body>'
+# the page title shows the text of the box (« T:akuo… »): read through the window title, never through
+# the clipboard (both reads came back empty in the 2nd 1.9.2 trial)
+$html = '<!doctype html><title>T:</title><body style="margin:0"><textarea id=t autofocus oninput="document.title=''T:''+this.value+'':F''" style="position:fixed;left:0;top:0;width:100%;height:100%;font-size:20px"></textarea></body>'
 $page = 'data:text/html;base64,' + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($html))   # (avis Fable : # % " cassent une URL brute)
 $p = Start-Process -FilePath $edge -ArgumentList "--user-data-dir=`"$profil`"", '--inprivate', '--no-first-run', '--no-default-browser-check', '--disable-sync', '--new-window', $page -PassThru
 $h = [IntPtr]::Zero; $t = 0
@@ -68,11 +72,13 @@ function Lancer($chemin) {
   $r = New-Object N+RECT; [void][N]::GetWindowRect($h, [ref]$r)
   [N]::ClickIn($h, [int](($r.R - $r.L) / 2), [int](($r.B - $r.T) / 2)); Start-Sleep -Milliseconds 500
 }
+function Texte { $m = [regex]::Match([N]::Title($h), 'T:(.*?):F'); if ($m.Success) { $m.Groups[1].Value } else { "(titre : $([N]::Title($h)))" } }
 function Heure($ligne) { [datetime]::ParseExact($ligne.Substring(1, 23), 'yyyy-MM-dd HH:mm:ss.fff', $null) }
 function Mesure($version, $nom, [scriptblock]$avant, $attendu, $seuil) {
   $n0 = @(Get-Content $log -ErrorAction SilentlyContinue).Count
   & $avant
   Start-Sleep -Milliseconds 800
+  Write-Host "       avant F10 : texte '$(Texte)'"
   $appui = Get-Date
   [N]::Key(0x79)   # F10
   $fin = $null; $sw = [Diagnostics.Stopwatch]::StartNew()
@@ -87,10 +93,8 @@ function Mesure($version, $nom, [scriptblock]$avant, $attendu, $seuil) {
   $exact = @(Get-Content $log) | Select-Object -Skip $n0 | Where-Object { $_ -match 'Timing: until paste (\d+) ms' } | Select-Object -Last 1
   $ms = if ($exact) { [int]([regex]::Match($exact, 'until paste (\d+) ms').Groups[1].Value) } else { $null }
   Start-Sleep 1
-  [System.Windows.Forms.Clipboard]::Clear()
-  [System.Windows.Forms.SendKeys]::SendWait('^a'); Start-Sleep -Milliseconds 300
-  [System.Windows.Forms.SendKeys]::SendWait('^c'); Start-Sleep -Milliseconds 500
-  $texte = [System.Windows.Forms.Clipboard]::GetText()
+  $texte = Texte
+  Write-Host "       fin : $(($fin -split '\] ', 2)[1])"
   [N]::Key(0x23)   # End: no selection left for the next case
   $jusque = if ($null -ne $ms) { "$ms ms jusqu'au collage, " } else { '' }
   Write-Host "MESURE $version $nom : $jusque$ext ms en tout ; texte '$texte'"

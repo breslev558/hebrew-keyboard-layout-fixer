@@ -217,23 +217,31 @@ fn down(vk: u16) -> bool {
     (unsafe { GetAsyncKeyState(vk as i32) } as u16 & 0x8000) != 0
 }
 
-/// A mouse button, Tab or Enter is down now, or was pressed since the previous call (bit 0 of
-/// GetAsyncKeyState: indicative only, any other caller resets it). Sampled every 5 ms during
-/// the waits of a conversion (audit B3).
-/// `hotkey_vk` is left out (a hotkey with Enter or Tab would always look like a move).
-pub fn user_moving(hotkey_vk: u16) -> bool {
-    let clicked = [VK_LBUTTON, VK_RBUTTON, VK_MBUTTON, VK_TAB, VK_RETURN].iter().filter(|k| **k != hotkey_vk).any(|k| {
+/// 1.9.4: the key or button the user holds down NOW (bit 15 only), named for the journal: mouse
+/// buttons, Tab, Enter, arrows, Page Up/Down. `hotkey_vk` is left out.
+pub fn held_now(hotkey_vk: u16) -> Option<&'static str> {
+    const KEYS: [(u16, &str); 11] = [
+        (VK_LBUTTON, "left mouse button held"), (VK_RBUTTON, "right mouse button held"), (VK_MBUTTON, "middle mouse button held"),
+        (VK_TAB, "Tab held"), (VK_RETURN, "Enter held"), (VK_LEFT, "Left arrow held"), (VK_RIGHT, "Right arrow held"),
+        (VK_UP, "Up arrow held"), (VK_DOWN, "Down arrow held"), (VK_PRIOR, "Page Up held"), (VK_NEXT, "Page Down held"),
+    ];
+    KEYS.iter().find(|(k, _)| *k != hotkey_vk && down(*k)).map(|(_, n)| *n)
+}
+
+/// 1.9.4: the mouse button, Tab or Enter pressed since the previous call (bit 0 of GetAsyncKeyState),
+/// named. EVERY key is read (each read clears its flag): the 1.9.3 purge stopped at the first flag
+/// found (`any`), leaving the others (Enter, Tab) to cancel the next F10.
+pub fn pressed_since_last_call(hotkey_vk: u16) -> Option<&'static str> {
+    const KEYS: [(u16, &str); 5] = [(VK_LBUTTON, "left click (Windows flag)"), (VK_RBUTTON, "right click (Windows flag)"), (VK_MBUTTON, "middle click (Windows flag)"), (VK_TAB, "Tab (Windows flag)"), (VK_RETURN, "Enter (Windows flag)")];
+    let mut found = None;
+    for (k, n) in KEYS {
+        // every key is asked (each call clears its flag)
         // SAFETY: no pointers.
-        let s = unsafe { GetAsyncKeyState(*k as i32) } as u16;
-        s & 0x8001 != 0
-    });
-    // arrows and page keys held down by the user (audit A03): only "down now" (bit 15), because
-    // the "only the last word" mode sends Shift+Left/Right itself (key up sent at once)
-    clicked
-        || [VK_LEFT, VK_RIGHT, VK_UP, VK_DOWN, VK_PRIOR, VK_NEXT].iter().filter(|k| **k != hotkey_vk).any(|k| {
-            // SAFETY: no pointers.
-            (unsafe { GetAsyncKeyState(*k as i32) } as u16) & 0x8000 != 0
-        })
+        if k != hotkey_vk && (unsafe { GetAsyncKeyState(k as i32) } as u16) & 1 != 0 && found.is_none() {
+            found = Some(n);
+        }
+    }
+    found
 }
 
 // Every press of Caps Lock, seen by a low-level keyboard hook when Windows dispatches it,
@@ -249,8 +257,25 @@ static USER_CLICKS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32:
 /// the layout hotkey (F10 by default): its own presses are not "other keys"
 static HOTKEY_VK: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
-pub fn set_hotkey_vk(vk: u32) {
+/// 1.9.4: with its modifiers (MOD_ALT 1, MOD_CONTROL 2, MOD_SHIFT 4, MOD_WIN 8): the key alone,
+/// without them, is a key typed by the user (Ctrl+Alt+K: a plain K is counted).
+static HOTKEY_MODS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+pub fn set_hotkey_vk(vk: u32, mods: u32) {
     HOTKEY_VK.store(vk, std::sync::atomic::Ordering::SeqCst);
+    HOTKEY_MODS.store(mods, std::sync::atomic::Ordering::SeqCst);
+}
+/// 1.9.4: the Caps Lock hotkey (F9 by default) is left out of the counted keys too (its repeats
+/// while held are not keys typed during the fix)
+static CASE_HOTKEY_VK: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+static CASE_HOTKEY_MODS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+pub fn set_case_hotkey_vk(vk: u32, mods: u32) {
+    CASE_HOTKEY_VK.store(vk, std::sync::atomic::Ordering::SeqCst);
+    CASE_HOTKEY_MODS.store(mods, std::sync::atomic::Ordering::SeqCst);
+}
+/// 1.9.4 (keyboard hook): the modifiers `mods` (MOD_* bits) are all held now.
+fn mods_held(mods: u32) -> bool {
+    [(1, VK_MENU), (2, VK_CONTROL), (4, VK_SHIFT)].iter().all(|(bit, vk)| mods & bit == 0 || down(*vk))
+        && (mods & 8 == 0 || down(VK_LWIN) || down(VK_RWIN))
 }
 
 /// 1.8.5: last event seen by the hooks of this module (GetTickCount, ms) and their handles, to see
@@ -333,10 +358,51 @@ pub fn user_activity() -> (u32, u32) {
     (USER_KEYS.load(SeqCst), USER_CLICKS.load(SeqCst))
 }
 
+// 1.9.4: event times (ms, clock of the input events) of the hotkey's first key-down (not its
+// repeats), of the last user click and of the last counted user key; 0 = never (bit 32 marks a
+// time that was set). A click or key is "during the fix" if it came at or after the hotkey's press,
+// whatever the order in which the hooks and WM_HOTKEY reach the UI thread.
+static HOTKEY_DOWN_AT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static HOTKEY_HELD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static LAST_CLICK_AT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static LAST_KEY_AT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+fn stamp(t: u32) -> u64 {
+    (1u64 << 32) | t as u64
+}
+fn stamped(v: u64) -> Option<u32> {
+    (v >> 32 != 0).then_some(v as u32)
+}
+/// 1.9.4: event time of the press of a hotkey (F10/F9) seen by the keyboard hook, if it is recent
+/// (less than 2 s old: a key-up missed by a hook removed meanwhile would leave an old time, that
+/// would date every later click "during the fix"; the counters are used then).
+pub fn hotkey_down_at() -> Option<u32> {
+    let recent = stamped(HOTKEY_DOWN_AT.load(std::sync::atomic::Ordering::SeqCst)).filter(|t| tick32().wrapping_sub(*t) < 2_000);
+    if recent.is_none() {
+        // (a key-up missed: the next press dates itself again)
+        HOTKEY_HELD.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+    recent
+}
+/// 1.9.4: a user click, or a user key (other than the hotkeys and modifiers), at or after `since`.
+pub fn input_since(since: u32) -> Option<&'static str> {
+    use std::sync::atomic::Ordering::SeqCst;
+    let after = |v: u64| stamped(v).is_some_and(|t| t.wrapping_sub(since) as i32 >= 0);
+    if after(LAST_CLICK_AT.load(SeqCst)) {
+        Some("mouse click")
+    } else if after(LAST_KEY_AT.load(SeqCst)) {
+        Some("key pressed")
+    } else {
+        None
+    }
+}
+
 unsafe extern "system" fn click_hook(code: i32, wp: usize, lp: isize) -> isize {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{CallNextHookEx, WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_RBUTTONDOWN};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{CallNextHookEx, MSLLHOOKSTRUCT, WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_RBUTTONDOWN};
     LAST_EVENT.store(tick32(), std::sync::atomic::Ordering::Relaxed);
     if code >= 0 && matches!(wp as u32, WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN) {
+        // SAFETY: for code >= 0, lp points to a MSLLHOOKSTRUCT (contract of WH_MOUSE_LL).
+        let m = unsafe { &*(lp as *const MSLLHOOKSTRUCT) };
+        LAST_CLICK_AT.store(stamp(m.time), std::sync::atomic::Ordering::SeqCst);
         USER_CLICKS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         LAST_CHAR.store(false, std::sync::atomic::Ordering::Relaxed);
     }
@@ -355,20 +421,47 @@ pub fn activity_watched() -> bool {
 }
 
 unsafe extern "system" fn caps_hook(code: i32, wp: usize, lp: isize) -> isize {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{CallNextHookEx, KBDLLHOOKSTRUCT, WM_KEYDOWN, WM_SYSKEYDOWN};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{CallNextHookEx, KBDLLHOOKSTRUCT, WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP};
     // trivial on purpose: a slow hook is skipped, then removed, by Windows
     LAST_EVENT.store(tick32(), std::sync::atomic::Ordering::Relaxed);
+    // the key of a hotkey (with its modifiers held); for a key-up, the key alone
+    let hotkey_key = |vk: u32| {
+        vk != 0 && (vk == HOTKEY_VK.load(std::sync::atomic::Ordering::SeqCst) || vk == CASE_HOTKEY_VK.load(std::sync::atomic::Ordering::SeqCst))
+    };
+    let hotkey = |vk: u32| {
+        use std::sync::atomic::Ordering::SeqCst;
+        (vk != 0 && vk == HOTKEY_VK.load(SeqCst) && mods_held(HOTKEY_MODS.load(SeqCst)))
+            || (vk != 0 && vk == CASE_HOTKEY_VK.load(SeqCst) && mods_held(CASE_HOTKEY_MODS.load(SeqCst)))
+    };
+    if code >= 0 && (wp as u32 == WM_KEYUP || wp as u32 == WM_SYSKEYUP) {
+        // SAFETY: for code >= 0, lp points to a KBDLLHOOKSTRUCT (contract of WH_KEYBOARD_LL).
+        let k = unsafe { &*(lp as *const KBDLLHOOKSTRUCT) };
+        if hotkey_key(k.vkCode) {
+            HOTKEY_HELD.store(false, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
     if code >= 0 && (wp as u32 == WM_KEYDOWN || wp as u32 == WM_SYSKEYDOWN) {
         // SAFETY: for code >= 0, lp points to a KBDLLHOOKSTRUCT (contract of WH_KEYBOARD_LL).
         // SAFETY: same structure.
         let k = unsafe { &*(lp as *const KBDLLHOOKSTRUCT) };
+        // 1.9.4: time of the hotkey's first key-down (its repeats while held do not move it; a time
+        // older than 2 s is renewed: a key-up missed meanwhile)
+        let is_hotkey = hotkey(k.vkCode) || (hotkey_key(k.vkCode) && HOTKEY_HELD.load(std::sync::atomic::Ordering::SeqCst));
+        if is_hotkey {
+            let old = stamped(HOTKEY_DOWN_AT.load(std::sync::atomic::Ordering::SeqCst));
+            let stale = old.is_none_or(|t| k.time.wrapping_sub(t) >= 2_000);
+            if !HOTKEY_HELD.swap(true, std::sync::atomic::Ordering::SeqCst) || stale {
+                HOTKEY_DOWN_AT.store(stamp(k.time), std::sync::atomic::Ordering::SeqCst);
+            }
+        }
         if k.vkCode == VK_CAPITAL as u32 {
             CAPS_PRESSES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         } else if (k.flags & windows_sys::Win32::UI::WindowsAndMessaging::LLKHF_INJECTED == 0 || k.dwExtraInfo != OUR_MARK)
-            && k.vkCode != HOTKEY_VK.load(std::sync::atomic::Ordering::SeqCst)
+            && !is_hotkey
             && !matches!(k.vkCode as u16, VK_SHIFT | VK_LSHIFT | VK_RSHIFT | VK_CONTROL | VK_LCONTROL | VK_RCONTROL | VK_MENU | VK_LMENU | VK_RMENU | VK_LWIN | VK_RWIN)
         {
             USER_KEYS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            LAST_KEY_AT.store(stamp(k.time), std::sync::atomic::Ordering::SeqCst);
             // a character key (letters, digits, signs, space) without Ctrl/Alt: typing; anything
             // else (arrows, End, Home, Delete...) or Shift+navigation: not
             let ch = matches!(k.vkCode, 0x20 | 0x30..=0x39 | 0x41..=0x5A | 0x60..=0x6F | 0xBA..=0xC0 | 0xDB..=0xDF | 0xE2);

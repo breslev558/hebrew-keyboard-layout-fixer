@@ -1,4 +1,4 @@
-﻿# Essai Windows (CI) 1.9.2-1.9.3 : VITESSE de F10 dans Edge puis dans Chrome (moteur Chromium, le même
+﻿# Essai Windows (CI) 1.9.2-1.9.4 : VITESSE de F10 dans Edge puis dans Chrome (moteur Chromium, le même
 # que les applications Electron telles que Claude ou Teams ; aucune application Electron n'est installée
 # sur la machine d'essai). Après bout-en-bout.ps1 (programme installé).
 # Cas : 1er F10 juste après un changement de fenêtre (1.9.3 : il s'arrêtait sur « champ changé » et ne
@@ -6,7 +6,7 @@
 # tenu enfoncé 200 ms (1.9.3 : plus d'attente du doigt sur F10 dans Chromium). Le temps lu est
 # « until paste » du journal du programme (de l'appui sur F10 jusqu'au collage du texte corrigé ; aucun
 # texte n'est jamais écrit dans le journal). Le texte obtenu est aussi relu (Ctrl+A, Ctrl+C).
-# Mesure « avant » : la 1.9.2 publiée (téléchargée de GitHub) passe le même essai dans Edge, à côté.
+# Mesure « avant » : la 1.9.3 publiée (téléchargée de GitHub) passe le même essai dans Edge, à côté.
 # Seuil : la nouvelle version doit réussir chaque cas et coller en moins de 300 ms (médiane de 3 ; 1er F10
 # à froid ou après un changement de fenêtre : 800 ms, la page prépare alors son accessibilité), et aucun
 # arrêt « changed (… » ne doit paraître dans son journal, sinon ECHEC. Chrome absent = ECHEC.
@@ -41,6 +41,9 @@ public static class N {
   [DllImport("user32.dll")] public static extern void mouse_event(uint f, int x, int y, uint d, UIntPtr e);
   // a click inside the page: the focus goes to the text box (Edge leaves it in the address bar)
   public static void ClickIn(IntPtr h, int dx, int dy) { RECT r; GetWindowRect(h, out r); SetCursorPos(r.L + dx, r.T + dy); mouse_event(2, 0, 0, 0, UIntPtr.Zero); mouse_event(4, 0, 0, 0, UIntPtr.Zero); }
+  // 1.9.4: F10 pressed, a click 10 ms later while F10 is still down, then F10 released (timing kept
+  // here, not in PowerShell where a 5 ms sleep lasts 15-20 ms, avis Fable)
+  public static void F10ThenClick(IntPtr h, int dx, int dy) { keybd_event(0x79, 0, 0, UIntPtr.Zero); System.Threading.Thread.Sleep(10); ClickIn(h, dx, dy); System.Threading.Thread.Sleep(150); keybd_event(0x79, 0, 2, UIntPtr.Zero); }
   public static bool Front(IntPtr h) {
     uint me = GetCurrentThreadId(), fg = GetWindowThreadProcessId(GetForegroundWindow(), IntPtr.Zero);
     AttachThreadInput(me, fg, true); keybd_event(0x12, 0, 0, UIntPtr.Zero); keybd_event(0x12, 0, 2, UIntPtr.Zero);
@@ -177,6 +180,11 @@ $retour = { $np = Start-Process notepad -PassThru; Start-Sleep 2
             $t = 0; while (-not [N]::Front($h)) { Start-Sleep -Milliseconds 300; if (++$t -gt 20) { Fail 'navigateur pas revenu au premier plan' } }
             Cliquer; Start-Sleep -Milliseconds 300
             & $vider; [System.Windows.Forms.SendKeys]::SendWait('akuo') }
+# 1.9.4: Enter, then a click in the text box just BEFORE F10 (60 ms): on 12/11 such F10s were
+# cancelled, the 1.9.3 cleared the flag of the click but not the one of Enter (avis Fable); the
+# click is in the middle of the page, below the text: the caret goes to the end of « akuo »
+$clic = { [System.Windows.Forms.SendKeys]::SendWait('{ENTER}'); & $vider
+          [System.Windows.Forms.SendKeys]::SendWait('akuo'); Start-Sleep -Milliseconds 400; Cliquer }
 if ($env:GITHUB_STEP_SUMMARY) { @("", "### Vitesse de F10 dans Edge et Chrome", "", "| Version | Cas | Jusqu'au collage | En tout (dont 100 ms avant la remise du presse-papiers) |", "|---|---|---|---|") | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY }
 $navs = @(@{ Nom = 'Edge'; Exe = $edge; Prive = '--inprivate' }, @{ Nom = 'Chrome'; Exe = $chrome; Prive = '--incognito' }) | Where-Object { $_.Exe }
 if (-not $edge) { Write-Host "MANQUE : Edge introuvable sur cette machine" }
@@ -187,20 +195,20 @@ foreach ($n in $navs) {
   Write-Host "===== $($n.Nom) ====="
   Ouvrir $n.Exe $n.Prive
   if ($n.Nom -eq 'Edge') {
-    # AVANT : la 1.9.2 publiée (dans Edge seulement)
-    $ancien = Join-Path $env:TEMP 'klf-192\KeyboardLayoutFixer.exe'
+    # AVANT : la 1.9.3 publiée (dans Edge seulement)
+    $ancien = Join-Path $env:TEMP 'klf-193\KeyboardLayoutFixer.exe'
     New-Item -ItemType Directory -Force -Path (Split-Path $ancien) | Out-Null
     $script:avant = $true
     try {
-      Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/breslev558/hebrew-keyboard-layout-fixer/releases/download/v1.9.2/KeyboardLayoutFixer.exe' -OutFile $ancien
+      Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/breslev558/hebrew-keyboard-layout-fixer/releases/download/v1.9.3/KeyboardLayoutFixer.exe' -OutFile $ancien
       Lancer $ancien
       # each « before » case on its own: a failure of the old version only informs (avis Fable)
-      foreach ($c in @(@('Edge, 1er F10 après changement de fenêtre', $retour, 150, 0), @('Edge, sans sélection', $sans, 800, 0), @('Edge, F10 tenu 200 ms', $sans, 800, 200))) {
+      foreach ($c in @(@('Edge, 1er F10 après changement de fenêtre', $retour, 150, 0), @('Edge, clic dans la zone 60 ms avant F10', $clic, 60, 0), @('Edge, sans sélection', $sans, 800, 0), @('Edge, F10 tenu 200 ms', $sans, 800, 200))) {
         $n1 = @(Get-Content $log -ErrorAction SilentlyContinue).Count
-        try { [void](Mesure '1.9.2 (avant)' $c[0] $c[1] $shalom $null $c[2] $c[3]) } catch { Write-Host "AVANT (pour information) : $($_.Exception.Message)" }
+        try { [void](Mesure '1.9.3 (avant)' $c[0] $c[1] $shalom $null $c[2] $c[3]) } catch { Write-Host "AVANT (pour information) : $($_.Exception.Message)" }
         # does the old version show the « 2nd press » fault here? (else this test proves nothing for it)
-        $arr = @(Get-Content $log) | Select-Object -Skip $n1 | Where-Object { $_ -match 'field changed, stopped' }
-        Write-Host "       1.9.2, $($c[0]) : $(if ($arr) { 'REPRODUIT (arrêt « champ changé »)' } else { 'NON REPRODUIT' })"
+        $arr = @(Get-Content $log) | Select-Object -Skip $n1 | Where-Object { $_ -match 'field changed' }
+        Write-Host "       1.9.3, $($c[0]) : $(if ($arr) { 'REPRODUIT (arrêt « champ changé »)' } else { 'NON REPRODUIT' })"
       }
     } catch { Write-Host "MANQUE : mesure avant impossible ($($_.Exception.Message))" }
     $script:avant = $false
@@ -215,6 +223,31 @@ foreach ($n in $navs) {
   [void](Mesure 'nouvelle' "$v, tout 1er F10 à froid" $sans $shalom 800 150)
   [void](Mesure 'nouvelle' "$v, 1er F10 après changement de fenêtre" $retour $shalom 800 150)
   [void](Mesure 'nouvelle' "$v, 1er F10 après changement de fenêtre (2e fois)" $retour $shalom 800 150)
+  [void](Mesure 'nouvelle' "$v, clic dans la zone 60 ms avant F10" $clic $shalom 800 60)
+  [void](Mesure 'nouvelle' "$v, clic dans la zone 60 ms avant F10 (2e fois)" $clic $shalom 800 60)
+  # and the other way: a real click DURING the fix still cancels it (the safety must stay): never a
+  # paste; retried (3 times) only when the journal shows neither a paste nor a cancel (avis Fable)
+  $annule = $false
+  foreach ($e in 1..3) {
+    $n2 = @(Get-Content $log).Count
+    & $sans; $sw0 = [Diagnostics.Stopwatch]::StartNew()
+    while ((Texte) -ne 'akuo' -and $sw0.ElapsedMilliseconds -lt 2000) { Start-Sleep -Milliseconds 20 }
+    Start-Sleep -Milliseconds 800
+    $r = New-Object N+RECT; [void][N]::GetWindowRect($h, [ref]$r)
+    [N]::F10ThenClick($h, [int](($r.R - $r.L) / 2), [int](($r.B - $r.T) / 2))
+    Start-Sleep 3
+    $apres = @(@(Get-Content $log) | Select-Object -Skip $n2) + @('')   # never empty (FindIndex)
+    $iVu = [array]::FindIndex([string[]]$apres, [Predicate[string]]{ param($l) $l -match 'User input during the fix' })
+    $iColle = [array]::FindIndex([string[]]$apres, [Predicate[string]]{ param($l) $l -match 'Ctrl\+V sent' })
+    Write-Host "       clic pendant la correction (essai $e) : $(if ($iVu -ge 0) { ($apres[$iVu] -split '\] ', 2)[1] } else { 'rien vu' }) ; collé : $($iColle -ge 0) ; texte '$(Texte)'"
+    # the click comes 10 ms after F10 (well before the paste, about 57 ms): any paste is a failure
+    if ($iColle -ge 0) { Fail "$v : texte collé malgré le clic pendant la correction (essai $e)" }
+    if ($iVu -ge 0) {
+      if ((Texte) -ne 'akuo') { Fail "$v : correction annulée mais texte changé ('$(Texte)')" }
+      $annule = $true; break
+    }
+  }
+  if (-not $annule) { Fail "$v : un clic pendant la correction ne l'a jamais annulée (3 essais)" }
   $resultats += Mediane3 'nouvelle' "$v, sans sélection" $sans $shalom 300
   $resultats += Mediane3 'nouvelle' "$v, avec sélection" $avec $shalom 300
   $resultats += Mediane3 'nouvelle' "$v, F10 tenu 200 ms" $sans $shalom 300 200
@@ -223,7 +256,7 @@ foreach ($n in $navs) {
   [void](Mesure 'nouvelle' "$v, F10 tenu 1 s avec répétitions" $sans $shalom $null 800 1000)
   # the focus must still be in the box after the repeats (F10 reaching the browser opens its menu)
   [void](Mesure 'nouvelle' "$v, après F10 tenu 1 s" $sans $shalom $null)
-  $vus = @(Get-Content $log) | Select-Object -Skip $nlog | Where-Object { $_ -match 'Focus moved|Text caret moved' }
+  $vus = @(Get-Content $log) | Select-Object -Skip $nlog | Where-Object { $_ -match 'Focus moved|Text caret moved|User input during' }
   Write-Host "INFO $v : $($vus.Count) changement(s) de focus vus par la nouvelle version"; $vus | ForEach-Object { Write-Host "       $(($_ -split '\] ', 2)[1])" }
   Fermer $n.Exe
 }

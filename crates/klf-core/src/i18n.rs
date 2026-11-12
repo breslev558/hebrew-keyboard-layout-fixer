@@ -34,6 +34,8 @@ pub enum Msg {
     ClipboardBusy,
     ClipboardTooBig,
     WindowChanged,
+    /// 1.9.4: a click or a key (Tab, Enter, arrow…) during the fix
+    UserMoved,
     ExcludedProgram,
     KeysHeld,
     TooLong,
@@ -196,7 +198,7 @@ pub enum Msg {
 
 pub const ALL_MSGS: &[Msg] = &[
     Msg::Converted, Msg::NothingToConvert, Msg::SelectText, Msg::ConsoleUnsupported, Msg::ConsoleBusy,
-    Msg::AdminWindow, Msg::PasswordField, Msg::ClipboardBusy, Msg::ClipboardTooBig, Msg::WindowChanged,
+    Msg::AdminWindow, Msg::PasswordField, Msg::ClipboardBusy, Msg::ClipboardTooBig, Msg::WindowChanged, Msg::UserMoved,
     Msg::ExcludedProgram, Msg::KeysHeld, Msg::TooLong, Msg::PasteFailed, Msg::KeysBlocked, Msg::NewCopyKept, Msg::ClipboardNotRestored, Msg::LayoutUnsupported, Msg::HotkeyBusy, Msg::CaseKeyBusy,
     Msg::MenuPause, Msg::MenuResume, Msg::MenuSettings, Msg::MenuAbout, Msg::MenuExit, Msg::MenuRuleDisable, Msg::MenuRuleSelection, Msg::MenuRuleRemove, Msg::MenuPause10, Msg::MenuResumeAt,
     Msg::TipReady, Msg::TipPaused, Msg::TipUnavailable,
@@ -242,6 +244,9 @@ pub fn text(lang: Lang, m: Msg) -> &'static str {
         (WindowChanged, He) => "החלון התחלף: הפעולה בוטלה",
         (WindowChanged, Fr) => "Fenêtre changée : correction annulée",
         (WindowChanged, En) => "Window changed: cancelled",
+        (UserMoved, He) => "לחיצת מקש או עכבר: הפעולה בוטלה",
+        (UserMoved, Fr) => "Clic ou touche pendant la correction : annulée",
+        (UserMoved, En) => "Click or key during the fix: cancelled",
         (ExcludedProgram, He) => "לא פעיל בתוכנה זו",
         (ExcludedProgram, Fr) => "Désactivé dans ce programme",
         (ExcludedProgram, En) => "Disabled in this program",

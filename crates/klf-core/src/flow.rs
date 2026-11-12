@@ -610,14 +610,15 @@ fn function_key_alone(s: &AppSettings) -> bool {
     s.action == Action::Layout && s.hotkey_modifiers == 0 && crate::settings::key_is_function(s.hotkey_key)
 }
 
-/// 1.9.3: which check stopped the conversion (the journal said only "window or field changed").
-fn change_reason(host: &dyn Host, target: usize) -> Option<&'static str> {
+/// 1.9.3: which check stopped the conversion (the journal said only "window or field changed");
+/// 1.9.4: with the message to show (a click or key is not "window changed").
+fn change_reason(host: &dyn Host, target: usize) -> Option<(Msg, &'static str)> {
     if host.foreground() != target {
-        Some("other window")
+        Some((Msg::WindowChanged, "other window"))
     } else if !host.focus_unchanged() {
-        Some("other field")
+        Some((Msg::WindowChanged, "other field"))
     } else if host.user_moving() {
-        Some("click, Tab, Enter or arrow")
+        Some((Msg::UserMoved, "click, Tab, Enter or arrow"))
     } else {
         None
     }
@@ -674,8 +675,8 @@ fn convert_window_inner(
     }
     if st.captured.is_none() {
         // nothing selected (or the application refuses copying): caret -> start of the line
-        if let Some(why) = change_reason(host, target) {
-            return Outcome::say(Msg::WindowChanged, format!("Target window or field changed ({why}), stopped"));
+        if let Some((msg, why)) = change_reason(host, target) {
+            return Outcome::say(msg, format!("Target window or field changed ({why}), stopped"));
         }
         // 1.9.2: a copy that came after the wait (a real selection copied slowly) must not meet our
         // Shift+Home: the clipboard moved since we emptied it = stopped, nothing done
@@ -753,8 +754,8 @@ fn convert_window_inner(
     }
     trace.mark(Step::Verify, host.now_ms());
     host.sleep(10);
-    if let Some(why) = change_reason(host, target) {
-        return Outcome::say(Msg::WindowChanged, format!("Target window or field changed ({why}), NOT pasted"));
+    if let Some((msg, why)) = change_reason(host, target) {
+        return Outcome::say(msg, format!("Target window or field changed ({why}), NOT pasted"));
     }
     match host.clipboard_still_ours(st) {
         StillOurs::Yes => {}
@@ -838,10 +839,10 @@ fn extend_to_paragraph(host: &mut dyn Host, target: usize, st: &mut ClipState, s
     for _ in 0..PARAGRAPH_LINES {
         let before = st.captured.clone().unwrap_or_default();
         // a key typed or a click, a move, too long: stop where we are (the text selected now is `before`)
-        let why = change_reason(host, target).or_else(|| (host.user_activity() != activity).then_some("key typed or click"));
-        if let Some(why) = why {
+        let why = change_reason(host, target).or_else(|| (host.user_activity() != activity).then_some((Msg::UserMoved, "key typed or click")));
+        if let Some((msg, why)) = why {
             collapse_ours(host, st, target);
-            return Err(Outcome::say(Msg::WindowChanged, format!("Target window or field changed ({why}), stopped")));
+            return Err(Outcome::say(msg, format!("Target window or field changed ({why}), stopped")));
         }
         if host.now_ms().saturating_sub(started) > PARAGRAPH_MS {
             return Ok(());
@@ -882,8 +883,8 @@ fn select_last_word(host: &mut dyn Host, target: usize, st: &mut ClipState, trac
     if host.modifiers_down() {
         return Err(Outcome::say(Msg::KeysHeld, "Last word: Shift/Ctrl/Alt held, nothing done"));
     }
-    if let Some(why) = change_reason(host, target) {
-        return Err(Outcome::say(Msg::WindowChanged, format!("Last word: window or field changed ({why}), stopped")));
+    if let Some((msg, why)) = change_reason(host, target) {
+        return Err(Outcome::say(msg, format!("Last word: window or field changed ({why}), stopped")));
     }
     trace.mark(Step::LineStart, host.now_ms());
     host.sleep(30); // the application finishes the copy before the keys
@@ -1755,7 +1756,7 @@ mod tests {
         let mut m = Mock::new();
         m.moving.set(true);
         let o = go(&mut m);
-        assert_eq!(o.msg, Some(Msg::WindowChanged), "{}", o.log);
+        assert_eq!(o.msg, Some(Msg::UserMoved), "{}", o.log);
         assert!(m.pasted.borrow().is_none());
         assert_eq!(m.clip_text().as_deref(), Some("USER CLIPBOARD"));
     }

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.9.4 (November 2026)
+- **F10 is no longer cancelled for nothing** ("Window changed: cancelled" right after F10, the text not fixed): an Enter, Tab or click made BEFORE F10 (sending a message, then clicking in the field) was still reported by Windows and taken for a key or click during the fix: at the press only the first of these reports was cleared. Now all are cleared at the press, and the clicks and keys made after F10 are also counted by the program itself.
+- A click or key during the fix now says so ("Click or key during the fix: cancelled") instead of "Window changed", and the journal names it (which button or key).
+- The Windows test clicks in the text box 60 ms before F10, in Edge and Chrome, next to version 1.9.3.
+
 ## 1.9.3 (November 2026)
 - **F10 works on the first press in Chrome, Edge and Electron apps**: the first F10 after a while sometimes stopped ("the window or the field changed") and only the second press worked. Asking the page whether text is selected switches its accessibility on, and the browser then moves its focus to a window it creates for the page: this is now recognized as the same field (clicks, Tab, Enter and arrows still stop the fix).
 - **F10 is faster there**: the fix no longer waits for the finger to leave F10 (125 to 260 ms on each press) in Chrome, Edge and Electron apps, which act on F10 when it is pressed. This applies when the hotkey is a function key alone; elsewhere (Word, classic menus) releasing F10 can open the menu, so the wait stays.

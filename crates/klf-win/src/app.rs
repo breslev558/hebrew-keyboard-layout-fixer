@@ -506,6 +506,8 @@ fn register_case_hotkey() {
     // SAFETY: our window, on its own thread.
     let ok = vk != 0 && unsafe { RegisterHotKey(hwnd, HOTKEY_CASE_ID, s.case_hotkey_modifiers | MOD_NOREPEAT, vk) } != 0;
     CASE_OK.with(|c| c.set(ok));
+    // (with or without modifier: the repeats of its key held down are never "keys typed")
+    crate::platform::input::set_case_hotkey_vk(if ok { vk } else { 0 }, s.case_hotkey_modifiers);
     // SAFETY: right after the call (meaningless when vk == 0, then 0 is written).
     let err = if ok || vk == 0 { 0 } else { unsafe { GetLastError() } };
     // written once per state change (the retry timer calls this every 30 s)
@@ -534,9 +536,9 @@ pub fn register_hotkey() -> bool {
     unsafe { UnregisterHotKey(hwnd, HOTKEY_ID) };
     // SAFETY: our window, on its own thread.
     let ok = vk != 0 && unsafe { RegisterHotKey(hwnd, HOTKEY_ID, s.hotkey_modifiers | MOD_NOREPEAT, vk) } != 0;
-    // 1.8.5: its own presses are left out of the "other keys" count, and its release swallowed,
-    // only when the key is really ours (registered, without modifiers)
-    crate::platform::input::set_hotkey_vk(if ok && s.hotkey_modifiers == 0 { vk } else { 0 });
+    // 1.8.5: its own presses are left out of the "other keys" count when the key is really ours
+    // (registered); 1.9.4: with its modifiers (the key alone stays a key typed by the user)
+    crate::platform::input::set_hotkey_vk(if ok { vk } else { 0 }, s.hotkey_modifiers);
     STATE.with(|st| st.registered.set(ok));
     if ok {
         // the retry timer stays on while the Caps Lock hotkey is missing (audit 1.3.5, N4)
@@ -583,7 +585,8 @@ pub fn hotkey_free(mods: u32, key: u32) -> bool {
 
 pub fn unregister_hotkey() {
     let hwnd = STATE.with(|st| st.hwnd.get());
-    crate::platform::input::set_hotkey_vk(0); // paused: F10 is the program's again
+    crate::platform::input::set_hotkey_vk(0, 0); // paused: F10 is the program's again
+    crate::platform::input::set_case_hotkey_vk(0, 0);
     // SAFETY: our window, on its own thread.
     unsafe {
         KillTimer(hwnd, TIMER_RETRY);
@@ -1043,13 +1046,24 @@ struct Done {
 pub fn convert_now() {
     let hwnd = main_window();
     if !hwnd.is_null() && !busy() {
-        on_hotkey(hwnd, Action::Layout);
+        on_hotkey(hwnd, Action::Layout, false);
     }
 }
 
-fn on_hotkey(hwnd: HWND, action: Action) {
+/// `from_hotkey`: called for a WM_HOTKEY message (its press can be dated by the keyboard hook).
+fn on_hotkey(hwnd: HWND, action: Action, from_hotkey: bool) {
+    // 1.9.4: ALL the "pressed since the last call" flags of Windows are cleared at the press, even
+    // when the conversion is kept for later (`delayed`): only clicks and keys made after it count
+    // (the 1.9.3 cleared only the first one found)
+    let vk = {
+        let s = settings();
+        key_to_vk(if action == Action::Case { s.case_hotkey_key } else { s.hotkey_key }) as u16
+    };
+    let _ = crate::platform::input::pressed_since_last_call(vk);
+    FROM_HOTKEY.with(|f| f.set(from_hotkey));
     start_hotkey(hwnd, action, false);
 }
+thread_local!(static FROM_HOTKEY: Cell<bool> = const { Cell::new(false) });
 
 // 1.8.5, quick repeated F10: each press right after a conversion toggles the text just pasted
 // (converted <-> original) by typing it, without the clipboard and without waiting for the
@@ -1231,13 +1245,25 @@ fn start_hotkey(hwnd: HWND, action: Action, delayed: bool) {
     // text, selected by the program, not by the user: taken away (Delete) by the worker once the
     // keys are released, only if the last key typed there was a character (not Shift+End, not a
     // click: then the selection is the user's)
+    // 1.9.4: user keys and clicks counted so far, read HERE at the press (UI thread), and ALL the
+    // "pressed since the last call" flags of Windows cleared here too
+    let watched = crate::platform::input::activity_watched();
+    let activity_at_hotkey = watched.then(crate::platform::input::user_activity);
+    // the press dated by the hook, kept only if it is THIS press (less than 500 ms before the
+    // WM_HOTKEY message; a press kept for later, `delayed`, is not dated)
+    // SAFETY: no pointers.
+    let msg_time = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetMessageTime() } as u32;
+    // (only for a WM_HOTKEY message: double Shift and delayed presses are not dated, avis Fable;
+    // the flags of Windows were cleared at the press, in on_hotkey)
+    let from_hotkey = FROM_HOTKEY.with(|f| f.replace(false));
+    let hotkey_at = if watched && !delayed && from_hotkey { crate::platform::input::hotkey_down_at().filter(|t| msg_time.wrapping_sub(*t) < 500) } else { None };
     let drop_suggestion = action == Action::Layout && crate::platform::input::last_key_was_character() && autocomplete_suffix(fg_at_hotkey as HWND);
     let started = sys_tick();
     let spawned = std::thread::Builder::new().name("f10".into()).spawn(move || {
         log(if s.action == Action::Case { "Caps Lock hotkey pressed" } else { "Hotkey pressed" });
         let fg = fg_at_hotkey as HWND;
         let caret = if fg.is_null() { None } else { target::caret_point(fg) };
-        let mut host = WinHost::new(owner, vk, caps_at_hotkey, fg_at_hotkey);
+        let mut host = WinHost::new(owner, vk, caps_at_hotkey, fg_at_hotkey, activity_at_hotkey, hotkey_at);
         host.drop_suggestion = drop_suggestion;
         let mut trace = klf_core::diag::Trace::default();
         let outcome = flow::run_traced(&mut host, &s, &mut trace);
@@ -1504,11 +1530,11 @@ fn on_done(hwnd: HWND) {
 extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     match msg {
         WM_HOTKEY if wparam as i32 == HOTKEY_ID => {
-            on_hotkey(hwnd, Action::Layout);
+            on_hotkey(hwnd, Action::Layout, true);
             0
         }
         WM_HOTKEY if wparam as i32 == HOTKEY_CASE_ID => {
-            on_hotkey(hwnd, Action::Case);
+            on_hotkey(hwnd, Action::Case, true);
             0
         }
         WM_APP_PENDING => {

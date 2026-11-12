@@ -20,6 +20,11 @@ pub struct WinHost {
     caret: Cell<Option<Option<target::Caret>>>,
     /// a mouse button, Tab or Enter was seen during the operation (audit B3)
     moved: Cell<bool>,
+    /// 1.9.4: user keys and clicks counted by the hooks at F10 (None: hooks not working); a key or
+    /// click is "during the fix" only if these counters moved, never from a flag set before F10
+    activity_at_start: Cell<Option<(u32, u32)>>,
+    /// 1.9.4: event time of the hotkey's press (keyboard hook), to date the clicks and keys
+    hotkey_at: Option<u32>,
     /// Caps Lock at the hotkey (UI thread): state read on the target (None = unknown) and
     /// number of Caps Lock presses counted so far (None = not followed)
     caps_at_hotkey: (Option<bool>, Option<u32>),
@@ -63,7 +68,38 @@ impl WinHost {
         }
         same
     }
-    pub fn new(owner: usize, hotkey_vk: u16, caps_at_hotkey: (Option<bool>, Option<u32>), start_fg: usize) -> Self {
+    /// 1.9.4: a click or key of the user DURING the fix (after F10), three ways: held down now,
+    /// counted by the hooks since the press, or the "pressed since the last call" flag of Windows
+    /// (always read too: a safety net when a hook misses an event; all its flags are cleared at
+    /// the press, so it no longer reports a click or Enter from BEFORE F10, the cancelled F10s of
+    /// 12/11). The first cause is written to the journal.
+    fn watch_user(&self) {
+        if self.moved.get() {
+            return;
+        }
+        let flag = input::pressed_since_last_call(self.hotkey_vk);
+        // dated by the hooks (any click or key at or after the press, whatever the order of arrival),
+        // else counted since the press (counters read on the UI thread at WM_HOTKEY)
+        // (both when both exist: a click injected with its own time, remote control, tablet, is
+        // still counted)
+        let by_count = self.activity_at_start.get().and_then(|start| {
+            let now = input::user_activity();
+            if now.1 != start.1 {
+                Some("mouse click")
+            } else if now.0 != start.0 {
+                Some("key pressed")
+            } else {
+                None
+            }
+        });
+        let counted = self.hotkey_at.and_then(input::input_since).or(by_count);
+        let why = input::held_now(self.hotkey_vk).or(counted).or(flag);
+        if let Some(why) = why {
+            self.moved.set(true);
+            crate::util::log(&format!("User input during the fix: {why}"));
+        }
+    }
+    pub fn new(owner: usize, hotkey_vk: u16, caps_at_hotkey: (Option<bool>, Option<u32>), start_fg: usize, activity_at_hotkey: Option<(u32, u32)>, hotkey_at: Option<u32>) -> Self {
         Self {
             drop_suggestion: false,
             owner: owner as HWND,
@@ -73,11 +109,10 @@ impl WinHost {
             focus: Cell::new(std::ptr::null_mut()),
             pids: RefCell::new(Vec::new()),
             caret: Cell::new(None),
-            moved: Cell::new({
-                // the first call clears the "pressed since last call" bits left from before F10
-                input::user_moving(hotkey_vk);
-                false
-            }),
+            // (the "pressed since last call" flags were all cleared at the press, app.rs, 1.9.4)
+            moved: Cell::new(false),
+            activity_at_start: Cell::new(activity_at_hotkey),
+            hotkey_at,
             lang_before: Cell::new(None),
             caps_at_hotkey,
             console: None,
@@ -148,9 +183,7 @@ impl Host for WinHost {
         input::wait_keys_released(if hotkey_too { self.hotkey_vk } else { 0 }, 1500)
     }
     fn user_moving(&self) -> bool {
-        if input::user_moving(self.hotkey_vk) {
-            self.moved.set(true);
-        }
+        self.watch_user();
         self.moved.get()
     }
     fn remember_caret(&self) {
@@ -179,9 +212,7 @@ impl Host for WinHost {
     fn sleep(&self, ms: u64) {
         let end = std::time::Instant::now() + std::time::Duration::from_millis(ms);
         loop {
-            if input::user_moving(self.hotkey_vk) {
-                self.moved.set(true);
-            }
+            self.watch_user();
             let now = std::time::Instant::now();
             if now >= end {
                 break;

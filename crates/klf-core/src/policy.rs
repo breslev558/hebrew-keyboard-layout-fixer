@@ -215,6 +215,29 @@ pub fn copies_nothing_without_selection(focus_class: &str) -> bool {
     c == "chrome_renderwidgethostwnd" || c == "chrome_renderwidgethosthwnd" || c == "mozillawindowclass" || c == "chrome_widgetwin_0" || c == "chrome_widgetwin_1"
 }
 
+fn chromium_class(c: &str) -> bool {
+    let c = c.to_ascii_lowercase();
+    c == "chrome_renderwidgethosthwnd" || c == "chrome_renderwidgethostwnd" || c == "chrome_widgetwin_0" || c == "chrome_widgetwin_1"
+}
+
+/// 1.9.3: Chrome, Edge and Electron act on F10 when it is PRESSED (eaten by our hotkey): its
+/// key-up reaching them does nothing, so F10 does not have to be released before our keys.
+/// Elsewhere (Word, menus of classic programs) the key-up of F10 may open the menu: waited for.
+/// (Firefox left out: not verified.)
+pub fn hotkey_up_harmless(focus_class: &str) -> bool {
+    chromium_class(focus_class)
+}
+
+/// 1.9.3: the focus moved between a Chrome/Edge/Electron window and the page window it holds
+/// (Chrome_RenderWidgetHostHWND; the caller checks that one is the direct parent of the other).
+/// Asking their selection (UI Automation) switches their accessibility on, which can create or
+/// focus that page window: same field for the user. Two page windows are never "the same" (two
+/// embedded views of one program are two fields).
+pub fn same_chromium_field(before_class: &str, now_class: &str) -> bool {
+    let page = |c: &str| c.eq_ignore_ascii_case("chrome_renderwidgethosthwnd");
+    chromium_class(before_class) && chromium_class(now_class) && (page(before_class) != page(now_class))
+}
+
 /// 1.8.5: programs where F10 without a selection never extends to the whole paragraph (Shift+Up
 /// would leave the cell being edited in Excel, or do something else in a terminal).
 /// 1.8.8: cmd / PowerShell / conhost are no longer listed: their console windows never reach this
@@ -226,6 +249,18 @@ pub fn no_paragraph_extension(exe: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn chromium_focus_swap_and_hotkey_up() {
+        assert!(same_chromium_field("Chrome_WidgetWin_1", "Chrome_RenderWidgetHostHWND"));
+        assert!(same_chromium_field("Chrome_RenderWidgetHostHWND", "Chrome_WidgetWin_1"));
+        assert!(!same_chromium_field("Chrome_WidgetWin_1", "Edit"));
+        assert!(!same_chromium_field("Chrome_RenderWidgetHostHWND", "Chrome_RenderWidgetHostHWND"));
+        assert!(!same_chromium_field("Chrome_WidgetWin_1", "Chrome_WidgetWin_0"));
+        assert!(!same_chromium_field("MozillaWindowClass", "Chrome_WidgetWin_1"));
+        assert!(hotkey_up_harmless("chrome_widgetwin_1") && hotkey_up_harmless("Chrome_RenderWidgetHostHWND"));
+        assert!(!hotkey_up_harmless("_WwG") && !hotkey_up_harmless("Edit") && !hotkey_up_harmless("MozillaWindowClass"));
+    }
+
     use super::*;
 
     #[test]

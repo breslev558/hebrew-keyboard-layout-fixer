@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.9.3 (November 2026)
+- **F10 works on the first press in Chrome, Edge and Electron apps**: the first F10 after a while sometimes stopped ("the window or the field changed") and only the second press worked. Asking the page whether text is selected switches its accessibility on, and the browser then moves its focus to a window it creates for the page: this is now recognized as the same field (clicks, Tab, Enter and arrows still stop the fix).
+- **F10 is faster there**: the fix no longer waits for the finger to leave F10 (125 to 260 ms on each press) in Chrome, Edge and Electron apps, which act on F10 when it is pressed. This applies when the hotkey is a function key alone; elsewhere (Word, classic menus) releasing F10 can open the menu, so the wait stays.
+- Coming back to the same browser window after 10 seconds prepares it again for F10; the journal says which check stopped a fix (other window, other field, text caret moved, click or key).
+- The Windows test now measures F10 in Edge and Chrome: the very first press, the first press right after coming back from another window, with and without a selection, and F10 held 80 ms, 200 ms and 1 second (with key repeats), next to version 1.9.2. Any "window or field changed" stop is a failure.
+
 ## 1.9.2 (November 2026)
 - **F10 is much faster in web pages and Electron apps** (Chrome, Edge, Claude Code, Teams…): it took 1.5 to 3 seconds there, instant in Notepad. The program could not know whether text was selected and waited up to 1.5 s for a copy that never came. Now it asks Windows (UI Automation, 60 ms at most) whether text is selected: with nothing selected the line is taken at once; with a selection the wait ends as soon as the copy arrives. Without an answer, the wait is 0.4 s instead of 1.5 s, also after Shift+Home.
 - Safety: a copy arriving late never meets the line selection (nothing is done then); in code editors with a terminal panel (Windsurf, Hyper, Tabby…), Ctrl+C is only sent on a selection seen by Windows (it could stop the program running in the terminal; VS Code, Cursor and VSCodium stay excluded).

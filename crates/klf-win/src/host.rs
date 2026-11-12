@@ -37,6 +37,32 @@ pub struct WinHost {
 
 impl WinHost {
     /// `owner`: our hidden window (clipboard owner).
+    /// 1.9.3: Chrome/Edge/Electron moved their focus to (or from) the child window they create for
+    /// accessibility, inside the target window: the same field (see policy::same_chromium_field).
+    /// The new focus is then the one checked from now on. Only window classes are logged.
+    fn chromium_focus_swap(&self, now: HWND) -> bool {
+        let (before, top) = (self.focus.get(), self.target.get());
+        if before.is_null() || now.is_null() {
+            return false;
+        }
+        use windows_sys::Win32::UI::WindowsAndMessaging::{GetParent, IsChild};
+        // SAFETY: plain window handles (a closed window only gives false / null).
+        let inside = |w: HWND| w == top || unsafe { IsChild(top, w) } != 0;
+        // one is the direct parent of the other (the page window inside its browser window)
+        // SAFETY: as above.
+        let parent_child = unsafe { GetParent(now) == before || GetParent(before) == now };
+        let (cb, cn) = (crate::platform::sys::class_name(before), crate::platform::sys::class_name(now));
+        let same = inside(before) && inside(now) && parent_child && klf_core::policy::same_chromium_field(&cb, &cn);
+        crate::util::log(&format!("Focus moved {cb} -> {cn}: {}", if same { "same page, accepted" } else { "other field" }));
+        if same {
+            self.focus.set(now);
+            // the caret, if remembered, belongs to the window that had the focus: remembered again
+            if self.caret.get().is_some() {
+                self.remember_caret();
+            }
+        }
+        same
+    }
     pub fn new(owner: usize, hotkey_vk: u16, caps_at_hotkey: (Option<bool>, Option<u32>), start_fg: usize) -> Self {
         Self {
             drop_suggestion: false,
@@ -105,13 +131,21 @@ impl Host for WinHost {
     fn focus_unchanged(&self) -> bool {
         // unknown -> known (or the reverse) is a change; unknown both times stays "unchanged",
         // or programs without a focused control would lose F10
-        let same_focus = target::focus_of(self.target.get()) == self.focus.get();
+        let now = target::focus_of(self.target.get());
+        let same_focus = now == self.focus.get() || self.chromium_focus_swap(now);
         // the caret, when remembered, must not have moved (other field of the same window)
         let same_caret = match self.caret.get() {
             Some(before) => target::caret_of(self.target.get()) == before,
             None => true,
         };
+        // 1.9.3: which of the two changed is written to the journal (window classes only)
+        if same_focus && !same_caret {
+            crate::util::log("Text caret moved (other field?)");
+        }
         same_focus && same_caret
+    }
+    fn wait_keys_released(&self, hotkey_too: bool) -> bool {
+        input::wait_keys_released(if hotkey_too { self.hotkey_vk } else { 0 }, 1500)
     }
     fn user_moving(&self) -> bool {
         if input::user_moving(self.hotkey_vk) {
@@ -137,9 +171,6 @@ impl Host for WinHost {
             };
         }
         info
-    }
-    fn wait_keys_released(&self) -> bool {
-        input::wait_keys_released(self.hotkey_vk, 1500)
     }
     fn pause(&self, ms: u64) {
         std::thread::sleep(std::time::Duration::from_millis(ms));

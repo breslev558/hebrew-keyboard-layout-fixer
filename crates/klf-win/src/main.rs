@@ -1,4 +1,4 @@
-//! Keyboard Layout Fixer — Rust 1.9.2. Fixes text typed with the wrong keyboard layout
+//! Keyboard Layout Fixer — Rust 1.9.3. Fixes text typed with the wrong keyboard layout
 //! (Hebrew <-> English) with one key (F10). Based on RavidSaadia/Keyboard_Layout_Fixer (MIT).
 #![cfg_attr(windows, windows_subsystem = "windows")]
 

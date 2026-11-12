@@ -182,13 +182,26 @@ pub fn selection_empty(ms: u64) -> Option<bool> {
     rx.recv_timeout(std::time::Duration::from_millis(ms)).ok().flatten()
 }
 
+/// 1.9.3: the UI Automation thread is answering a question.
+static BUSY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// 1.9.2: a web page or an Electron app came to the front: a first question is asked now (answer
 /// dropped), so that the browser has its accessibility ready when F10 asks (its first answer comes
 /// too late or empty: 422 ms lost in the Windows test). Once per window.
 pub fn warm_up(hwnd: usize) {
-    static LAST: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-    if LAST.swap(hwnd, std::sync::atomic::Ordering::Relaxed) == hwnd {
+    // 1.9.3: the same window is warmed again after 10 s: Chrome switches its accessibility off by
+    // itself when nobody asks for a while (the first F10 after that met a new child window)
+    static LAST: Mutex<(usize, Option<std::time::Instant>)> = Mutex::new((0, None));
+    // never queued while a question is being answered (an F10 may be waiting for it)
+    if BUSY.load(std::sync::atomic::Ordering::SeqCst) {
         return;
+    }
+    {
+        let mut last = LAST.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if last.0 == hwnd && last.1.is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(10)) {
+            return;
+        }
+        *last = (hwnd, Some(std::time::Instant::now()));
     }
     let (tx, _rx) = channel();
     send(Kind::SelectionEmpty, tx);
@@ -211,6 +224,7 @@ fn send(kind: Kind, reply: Sender<Option<bool>>) {
                     let _ = q.1.send(None);
                     q = newer;
                 }
+                BUSY.store(true, std::sync::atomic::Ordering::SeqCst);
                 let answer = if automation.is_null() {
                     None
                 } else {
@@ -219,6 +233,7 @@ fn send(kind: Kind, reply: Sender<Option<bool>>) {
                         Kind::SelectionEmpty => ask_selection_empty(automation),
                     }
                 };
+                BUSY.store(false, std::sync::atomic::Ordering::SeqCst);
                 let _ = q.1.send(answer);
             }
         });

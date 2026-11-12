@@ -235,8 +235,9 @@ pub trait Host {
     /// checks it did not move (other field of the same window).
     fn remember_caret(&self);
     fn target_info(&self, hwnd: usize) -> TargetInfo;
-    /// Waits (max 1.5 s) until the hotkey and Ctrl/Alt/Shift/Win are released.
-    fn wait_keys_released(&self) -> bool;
+    /// Waits (max 1.5 s) until Ctrl/Alt/Shift/Win are released, and the hotkey too when
+    /// `hotkey_too` (1.9.3: not in Chrome/Edge/Electron, see `policy::hotkey_up_harmless`).
+    fn wait_keys_released(&self, hotkey_too: bool) -> bool;
     fn sleep(&self, ms: u64);
     /// Plain wait, without watching the user (after Ctrl+V: the destination is settled).
     fn pause(&self, ms: u64) {
@@ -442,7 +443,10 @@ pub fn run_traced(host: &mut dyn Host, s: &AppSettings, trace: &mut Trace) -> Ou
         return Outcome::say(Msg::PasswordField, "Password field, nothing done");
     }
     trace.mark(Step::KeysReleased, host.now_ms());
-    if !host.wait_keys_released() {
+    // 1.9.3: in Chrome, Edge and Electron the hotkey's key-up does nothing (their F10 acts on the
+    // key press, eaten by the hotkey): no wait for the finger to leave F10 (125-260 ms seen). Only
+    // for a function key alone: a letter held down would be typed by its repeats
+    if !host.wait_keys_released(!(policy::hotkey_up_harmless(&info.focus_class) && function_key_alone(s))) {
         return Outcome::say(Msg::KeysHeld, "Keys still held after 1.5 s, nothing done");
     }
     host.sleep(AFTER_RELEASE_MS); // the hotkey key-up reaches the application first
@@ -600,6 +604,25 @@ fn convert_window(
     o
 }
 
+/// 1.9.3: the hotkey of this run is the F10 hotkey, a function key (F1-F12) without modifier
+/// (only its key is left out of the typing counter, see klf-win input::set_hotkey_vk; F9 waits).
+fn function_key_alone(s: &AppSettings) -> bool {
+    s.action == Action::Layout && s.hotkey_modifiers == 0 && crate::settings::key_is_function(s.hotkey_key)
+}
+
+/// 1.9.3: which check stopped the conversion (the journal said only "window or field changed").
+fn change_reason(host: &dyn Host, target: usize) -> Option<&'static str> {
+    if host.foreground() != target {
+        Some("other window")
+    } else if !host.focus_unchanged() {
+        Some("other field")
+    } else if host.user_moving() {
+        Some("click, Tab, Enter or arrow")
+    } else {
+        None
+    }
+}
+
 fn convert_window_inner(
     host: &mut dyn Host,
     s: &AppSettings,
@@ -651,8 +674,8 @@ fn convert_window_inner(
     }
     if st.captured.is_none() {
         // nothing selected (or the application refuses copying): caret -> start of the line
-        if host.foreground() != target || !host.focus_unchanged() || host.user_moving() {
-            return Outcome::say(Msg::WindowChanged, "Target window or field changed, stopped");
+        if let Some(why) = change_reason(host, target) {
+            return Outcome::say(Msg::WindowChanged, format!("Target window or field changed ({why}), stopped"));
         }
         // 1.9.2: a copy that came after the wait (a real selection copied slowly) must not meet our
         // Shift+Home: the clipboard moved since we emptied it = stopped, nothing done
@@ -730,8 +753,8 @@ fn convert_window_inner(
     }
     trace.mark(Step::Verify, host.now_ms());
     host.sleep(10);
-    if host.foreground() != target || !host.focus_unchanged() || host.user_moving() {
-        return Outcome::say(Msg::WindowChanged, "Target window or field changed, NOT pasted");
+    if let Some(why) = change_reason(host, target) {
+        return Outcome::say(Msg::WindowChanged, format!("Target window or field changed ({why}), NOT pasted"));
     }
     match host.clipboard_still_ours(st) {
         StillOurs::Yes => {}
@@ -815,9 +838,10 @@ fn extend_to_paragraph(host: &mut dyn Host, target: usize, st: &mut ClipState, s
     for _ in 0..PARAGRAPH_LINES {
         let before = st.captured.clone().unwrap_or_default();
         // a key typed or a click, a move, too long: stop where we are (the text selected now is `before`)
-        if host.foreground() != target || !host.focus_unchanged() || host.user_moving() || host.user_activity() != activity {
+        let why = change_reason(host, target).or_else(|| (host.user_activity() != activity).then_some("key typed or click"));
+        if let Some(why) = why {
             collapse_ours(host, st, target);
-            return Err(Outcome::say(Msg::WindowChanged, "Target window or field changed, stopped"));
+            return Err(Outcome::say(Msg::WindowChanged, format!("Target window or field changed ({why}), stopped")));
         }
         if host.now_ms().saturating_sub(started) > PARAGRAPH_MS {
             return Ok(());
@@ -858,8 +882,8 @@ fn select_last_word(host: &mut dyn Host, target: usize, st: &mut ClipState, trac
     if host.modifiers_down() {
         return Err(Outcome::say(Msg::KeysHeld, "Last word: Shift/Ctrl/Alt held, nothing done"));
     }
-    if host.foreground() != target || !host.focus_unchanged() || host.user_moving() {
-        return Err(Outcome::say(Msg::WindowChanged, "Last word: window or field changed, stopped"));
+    if let Some(why) = change_reason(host, target) {
+        return Err(Outcome::say(Msg::WindowChanged, format!("Last word: window or field changed ({why}), stopped")));
     }
     trace.mark(Step::LineStart, host.now_ms());
     host.sleep(30); // the application finishes the copy before the keys
@@ -890,7 +914,7 @@ fn select_last_word(host: &mut dyn Host, target: usize, st: &mut ClipState, trac
 // Unicode characters are sent, and only when cmd/PowerShell is waiting for a command.
 
 fn run_console(host: &mut dyn Host, s: &AppSettings, map: &KeyMap, target: usize) -> Outcome {
-    if !host.wait_keys_released() {
+    if !host.wait_keys_released(true) {
         return Outcome::say(Msg::KeysHeld, "Keys still held after 1.5 s, nothing done");
     }
     host.sleep(50);
@@ -1114,6 +1138,7 @@ mod tests {
         start_fg: usize,
         info: TargetInfo,
         keys_ok: bool,
+        hotkey_waited: Cell<Option<bool>>,
         save: SaveResult,
         clip: RefCell<Clip>,
         seq: Cell<u32>,
@@ -1195,6 +1220,7 @@ mod tests {
                 start_fg: 0,
                 info: TargetInfo { window_class: "Notepad".into(), exe_name: "notepad.exe".into(), elevated: Some(false), ..Default::default() },
                 keys_ok: true,
+                hotkey_waited: Cell::new(None),
                 save: SaveResult::Complete,
                 clip: RefCell::new(text("USER CLIPBOARD")),
                 seq: Cell::new(1),
@@ -1340,7 +1366,8 @@ mod tests {
         fn target_info(&self, _: usize) -> TargetInfo {
             self.info.clone()
         }
-        fn wait_keys_released(&self) -> bool {
+        fn wait_keys_released(&self, hotkey_too: bool) -> bool {
+            self.hotkey_waited.set(Some(hotkey_too));
             self.keys_ok
         }
         fn sleep(&self, _ms: u64) {
@@ -2180,6 +2207,43 @@ mod tests {
         let other = run_in("SomeUnknownEdit");
         assert!(web < 120, "web page: {web} waits of 5 ms after the first Ctrl+C");
         assert!(other >= 300, "unknown program: the full 1.5 s is kept ({other})");
+    }
+
+    #[test]
+    fn f10_release_is_not_waited_for_in_chromium_only() {
+        let mut m = Mock::new();
+        m.info.focus_class = "Chrome_WidgetWin_1".into();
+        run(&mut m, &settings());
+        assert_eq!(m.hotkey_waited.get(), Some(false), "Chrome/Edge/Electron: only the modifiers");
+        let mut m = Mock::new();
+        run(&mut m, &settings());
+        assert_eq!(m.hotkey_waited.get(), Some(true), "other programs: F10 released first");
+        // a hotkey with a modifier (or a letter): its key is waited for everywhere
+        let mut m = Mock::new();
+        m.info.focus_class = "Chrome_WidgetWin_1".into();
+        let mut st = settings();
+        st.hotkey_modifiers = 2; // Ctrl
+        run(&mut m, &st);
+        assert_eq!(m.hotkey_waited.get(), Some(true), "Ctrl+F10: F10 released first");
+        let mut m = Mock::new();
+        m.info.focus_class = "Chrome_WidgetWin_1".into();
+        let mut st = settings();
+        st.hotkey_key = crate::settings::KEY_A; // a letter alone
+        run(&mut m, &st);
+        assert_eq!(m.hotkey_waited.get(), Some(true), "a letter: released first");
+    }
+
+    #[test]
+    fn the_stop_says_which_check_failed() {
+        let mut m = Mock::new();
+        m.focus_moved.set(true);
+        let o = run(&mut m, &settings());
+        assert_eq!(o.msg, Some(Msg::WindowChanged), "{}", o.log);
+        assert!(o.log.contains("(other field)"), "{}", o.log);
+        let mut m = Mock::new();
+        m.moving.set(true);
+        let o = run(&mut m, &settings());
+        assert!(o.log.contains("(click, Tab, Enter or arrow)"), "{}", o.log);
     }
 
     #[test]

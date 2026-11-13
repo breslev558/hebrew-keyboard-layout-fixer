@@ -49,6 +49,7 @@ $ver = '1.25.2733.0'; $sha = 'bf3ef2012f6c44d8340a4c58125acc9498d19b580f9890dc04
 $zip = Join-Path $env:TEMP "wt-$ver.zip"; $dir = Join-Path $env:TEMP "wt-$ver"
 Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/microsoft/terminal/releases/download/v$ver/Microsoft.WindowsTerminal_${ver}_x64.zip" -OutFile $zip
 if ((Get-FileHash -Algorithm SHA256 $zip).Hash.ToLower() -ne $sha) { Fail 'empreinte de Windows Terminal incorrecte' }
+Write-Host "Windows Terminal $ver téléchargé, empreinte vérifiée"
 Expand-Archive -Force $zip $dir
 $wt = Get-ChildItem $dir -Recurse -Filter WindowsTerminal.exe | Select-Object -First 1
 if (-not $wt) { Fail 'WindowsTerminal.exe introuvable dans le zip' }
@@ -64,8 +65,12 @@ $out = Join-Path $env:TEMP 'klf-term-out.txt'
 $results = @()
 
 # ouvre Windows Terminal sur un script qui lit une ligne (Read-Host) et l'écrit dans $out
+# 1.9.5 (2nd trial): ONLY the copy downloaded here is closed: the console of the test itself may be
+# hosted by the Windows Terminal of the machine (closing every WindowsTerminal cancelled the step)
+function Nos() { Get-Process WindowsTerminal -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($wt.DirectoryName, [StringComparison]::OrdinalIgnoreCase) } }
 function Ouvrir($script) {
-  Get-Process WindowsTerminal -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep 1
+  Nos | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep 1
+  Write-Host "  (ouverture de Windows Terminal)"
   Remove-Item $out -ErrorAction SilentlyContinue
   $ps1 = Join-Path $env:TEMP 'klf-term.ps1'
   Set-Content -Encoding UTF8 $ps1 $script
@@ -73,7 +78,7 @@ function Ouvrir($script) {
   $script:h = [IntPtr]::Zero; $t = 0
   while ($script:h -eq [IntPtr]::Zero) {
     Start-Sleep -Milliseconds 500
-    $p = Get-Process WindowsTerminal -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
+    $p = Nos | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
     if ($p) { $script:h = $p.MainWindowHandle }
     if (++$t -gt 40) { Fail 'fenêtre de Windows Terminal introuvable' }
   }
@@ -90,6 +95,7 @@ function Lu() { if (Test-Path $out) { (Get-Content -Encoding UTF8 $out -Raw).Tri
 $shalom = [string][char]0x05E9 + [char]0x05DC + [char]0x05D5 + [char]0x05DD
 $lire = '$x = Read-Host "T"; Set-Content -Encoding UTF8 "' + $out + '" $x'
 
+Write-Host "Programme lancé (KLF_TEST_TERMINAL=1)"
 # 1. correction, puis aller-retour (2e et 3e F10)
 Ouvrir $lire
 $n0 = @(Get-Content $log).Count
@@ -164,7 +170,7 @@ foreach ($e in 1..3) {
 if (-not $annule) { Fail 'clic pendant la correction : jamais annulée (3 essais)' }
 $results += 'OK    terminal : clic pendant la correction, annulée'
 
-Get-Process WindowsTerminal -ErrorAction SilentlyContinue | Stop-Process -Force
+Nos | Stop-Process -Force -ErrorAction SilentlyContinue
 Remove-Item Env:KLF_TEST_TERMINAL
 Get-Process KeyboardLayoutFixer -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Process $exe
 $results

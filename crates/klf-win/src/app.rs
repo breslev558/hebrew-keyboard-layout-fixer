@@ -193,7 +193,11 @@ fn note_foreground(hwnd: HWND) {
     // 1.9.5: the run in the terminal is kept only if this event is about the window still in
     // front (one of its inner windows); any other window, even briefly (A → B → A), forgets it
     // SAFETY: plain window handles.
-    let same = !hwnd.is_null() && unsafe { GetAncestor(hwnd, GA_ROOT) == GetForegroundWindow() };
+    // (a root that exists: a window already destroyed gives NULL, never "the same")
+    let same = !hwnd.is_null() && unsafe {
+        let root = GetAncestor(hwnd, GA_ROOT);
+        !root.is_null() && root == GetForegroundWindow()
+    };
     // SAFETY: IsWindowVisible has no pointers.
     if hwnd.is_null() || unsafe { IsWindowVisible(hwnd) } == 0 {
         refresh_terminal_watch(same);
@@ -494,10 +498,16 @@ fn refresh_terminal_watch(keep: bool) {
     // SAFETY: no pointers.
     let fg = unsafe { GetForegroundWindow() };
     let class = if fg.is_null() { String::new() } else { sys::class_name(fg) };
-    let wt = class == "CASCADIA_HOSTING_WINDOW_CLASS";
+    let s = settings();
+    // 1.9.6: the classic console too (visible conhost window of that exact class)
+    let followed = match class.as_str() {
+        "CASCADIA_HOSTING_WINDOW_CLASS" => s.terminal_support,
+        "ConsoleWindowClass" => s.terminal_support && s.conhost_support,
+        _ => false,
+    };
     // (every console or terminal window: Windows Terminal, conhost, PuTTY, mintty…)
     crate::platform::input::set_terminal_front(klf_core::policy::console_kind(&class).is_some());
-    crate::platform::input::set_terminal_watch(wt && settings().terminal_support, fg as usize, keep);
+    crate::platform::input::set_terminal_watch(followed, fg as usize, keep);
 }
 
 // ---------------------------------------------------------------------------------------------

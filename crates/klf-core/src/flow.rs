@@ -5,7 +5,7 @@ use crate::convert::{contains_hebrew, convert_with, swap_case, us_map};
 use crate::diag::{Step, Trace};
 use crate::layouts::KeyMap;
 use crate::i18n::Msg;
-use crate::policy::{self, ConsoleKind, ConsoleReader, Selection};
+use crate::policy::{self, ConsoleKind, Selection};
 use crate::settings::{Action, AppSettings, MixedTextMode, RuleMode};
 
 /// What we know about the window that had the focus when F10 was pressed.
@@ -310,6 +310,10 @@ pub trait Host {
     fn terminal_typed(&self) -> Option<(String, u64)> {
         None
     }
+    /// 1.9.6: the font of the attached console can show Hebrew (TrueType); None if unknown.
+    fn console_truetype(&self) -> Option<bool> {
+        None
+    }
     /// 1.9.5: the generation of the run now (changes with every key of the user).
     fn terminal_generation(&self) -> u64 {
         0
@@ -349,7 +353,6 @@ impl Outcome {
 pub const COPY_WAIT_MS: u64 = 1500;
 const RESTORE_RETRIES: usize = 3;
 const NO_TEXT_LOG: &str = "Clipboard changed but contains no text (image/files?)";
-const POLL_MS: u64 = 20;
 /// 1.5.1: the copy is watched every 5 ms (reading the sequence
 /// number costs nothing), then it must stay unchanged for SETTLE_MS (cap SETTLE_MAX_MS) instead
 /// of a fixed 100 ms: an application still writing its formats moves the number.
@@ -447,13 +450,13 @@ pub fn run_traced(host: &mut dyn Host, s: &AppSettings, trace: &mut Trace) -> Ou
     }
     if let Some(kind) = policy::console_kind(&info.window_class) {
         return match kind {
-            // careful mode: the console path reads the whole typed line (no selection): refused
-            ConsoleKind::Classic if s.console_support && s.require_selection => {
+            // 1.9.6: the classic console uses the keys followed, like Windows Terminal
+            ConsoleKind::Classic if s.terminal_support && s.conhost_support && s.require_selection => {
                 Outcome::say(Msg::SelectText, "Console and careful mode on: nothing done")
             }
-            ConsoleKind::Classic if s.console_support => {
+            ConsoleKind::Classic if s.terminal_support && s.conhost_support => {
                 trace.mark(Step::Console, host.now_ms());
-                run_console(host, s, &map, target)
+                run_conhost(host, s, &map, target)
             }
             ConsoleKind::Terminal if s.terminal_support && s.require_selection => {
                 Outcome::say(Msg::SelectText, "Terminal and careful mode on: nothing done")
@@ -1064,184 +1067,154 @@ fn terminal_send(host: &mut dyn Host, s: &AppSettings, target: usize, typed: &st
 }
 
 // ---------------------------------------------------------------------------------------------
-// Classic console: no clipboard, no Ctrl+C. Only line-editing keys (Home, End, Backspace) and
-// Unicode characters are sent, and only when cmd/PowerShell is waiting for a command.
+// 1.9.6: classic console (conhost) — the same keys followed as in Windows Terminal, checked in
+// the console screen buffer (console API: more direct than UI Automation for conhost), replaced by
+// Backspaces + the converted text in ONE SendInput. Replaces the old "experimental console" mode
+// (which read the whole line with Home/End). Never Ctrl+C, never the clipboard.
 
-fn run_console(host: &mut dyn Host, s: &AppSettings, map: &KeyMap, target: usize) -> Outcome {
+/// ENABLE_LINE_INPUT and ENABLE_ECHO_INPUT of the console input mode.
+const LINE_INPUT: u32 = 0x2;
+const ECHO_INPUT: u32 = 0x4;
+
+/// The `n` + 8 characters just before the cursor (wrapping back over the previous lines), and the
+/// rest of the cursor's line after it; None if the buffer cannot be read.
+fn conhost_around(host: &mut dyn Host, n: usize) -> Option<(String, String)> {
+    let (x, y, w) = host.console_cursor()?;
+    if w <= 0 || x < 0 || y < 0 || x >= w {
+        return None;
+    }
+    let at = y as i64 * w as i64 + x as i64;
+    let start = (at - n as i64 - 8).max(0);
+    let before = if at > start { host.console_read((start % w as i64) as i32, (start / w as i64) as i32, (at - start) as usize)? } else { String::new() };
+    // (a failed reading is a refusal, never "nothing after the cursor")
+    let after = host.console_read(x, y, (w - x) as usize)?;
+    Some((before, after))
+}
+
+fn run_conhost(host: &mut dyn Host, s: &AppSettings, map: &KeyMap, target: usize) -> Outcome {
     if !host.wait_keys_released(true) {
         return Outcome::say(Msg::KeysHeld, "Keys still held after 1.5 s, nothing done");
     }
-    host.sleep(50);
+    host.sleep(20);
     if host.foreground() != target {
         return Outcome::say(Msg::WindowChanged, "Target window changed, nothing done");
     }
-    if !host.console_attach(target) {
-        return Outcome::say(Msg::ConsoleBusy, "Console: could not attach");
-    }
-    let o = console_inner(host, s, map, target);
-    host.console_detach();
+    let Some((typed, generation)) = host.terminal_typed() else {
+        return Outcome::say(Msg::TerminalRetype, "Console: nothing followed (Enter, Tab, arrow, click, special key or idle), nothing done");
+    };
+    let o = conhost_inner(host, s, map, target, &typed, generation);
+    crate::terminal::wipe_string(typed);
     o
 }
 
-/// Moves the cursor with Home or End, waits until it stops moving, returns the new position.
-/// None if the key was not sent or the cursor never became stable (audit A5).
-fn move_and_read(host: &mut dyn Host, home: bool) -> Option<(i32, i32, i32)> {
-    let sent = if home { host.send_home() } else { host.send_end() };
-    if !sent {
-        return None;
-    }
-    let mut last = host.console_cursor()?;
-    let mut stable = 0;
-    let mut waited = 0;
-    while stable < 3 {
-        if waited >= 400 {
-            return None;
-        }
-        host.sleep(POLL_MS);
-        waited += POLL_MS;
-        let now = host.console_cursor()?;
-        if now == last {
-            stable += 1;
-        } else {
-            stable = 0;
-            last = now;
-        }
-    }
-    Some(last)
-}
-
-/// What the console looked like when the line was read; checked again right before the
-/// Backspaces, so that nothing is erased at another place (audit A5).
-struct ConsoleView {
-    procs: Vec<String>,
-    mode: u32,
-    home: (i32, i32, i32),
-    end: (i32, i32, i32),
-    count: usize,
-    text: String,
-}
-
-fn console_unchanged(host: &mut dyn Host, target: usize, v: &ConsoleView) -> bool {
-    host.foreground() == target
-        && !host.console_selection_active()
-        && host.console_cursor() == Some(v.end)
-        && host.console_input_mode() == Some(v.mode)
-        && host.console_processes() == v.procs
-        && host.console_read(v.home.0, v.home.1, v.count).as_deref() == Some(v.text.as_str())
-}
-
-fn console_inner(host: &mut dyn Host, s: &AppSettings, map: &KeyMap, target: usize) -> Outcome {
-    let procs = host.console_processes();
-    let mode = match host.console_input_mode() {
-        Some(m) => m,
-        None => return Outcome::say(Msg::ConsoleBusy, "Console: input mode unknown"),
+fn conhost_inner(host: &mut dyn Host, s: &AppSettings, map: &KeyMap, target: usize, typed: &str, generation: u64) -> Outcome {
+    let n = match crate::terminal::check_text(typed) {
+        Ok(n) => n,
+        Err(r) => return Outcome::say(Msg::TerminalRetype, format!("Console: typed text refused ({r:?}), nothing done")),
     };
-    let reader = match policy::console_reader(&procs, mode) {
-        Some(r) => r,
-        None => return Outcome::say(Msg::ConsoleBusy, format!("Console busy (mode 0x{mode:X}, {} processes), nothing done", procs.len())),
+    let out = transform(&*host, s, map, typed);
+    if out == typed {
+        return Outcome::say(Msg::NothingToConvert, "Console: text unchanged");
+    }
+    if let Err(r) = crate::terminal::check_text(&out) {
+        crate::terminal::wipe_string(out);
+        return Outcome::say(Msg::NothingToConvert, format!("Console: converted text refused ({r:?}), nothing done"));
+    }
+    // attached only for the reading and the keys, detached during the wait
+    if !host.console_attach(target) {
+        crate::terminal::wipe_string(out);
+        return Outcome::say(Msg::ConsoleBusy, "Console: could not attach (or not this window), nothing done");
+    }
+    let sent = conhost_check_and_send(host, s, target, typed, generation, n, &out);
+    host.console_detach();
+    let o = match sent {
+        Err(o) => o,
+        Ok(after) => conhost_confirm(host, s, target, typed, generation, n, &out, after),
     };
+    crate::terminal::wipe_string(out);
+    o
+}
+
+/// Checks the console, then sends the keys; Ok(rest of the line after the cursor) when sent.
+fn conhost_check_and_send(host: &mut dyn Host, s: &AppSettings, target: usize, typed: &str, generation: u64, n: usize, out: &str) -> Result<String, Outcome> {
     if host.console_selection_active() {
-        return Outcome::say(Msg::ConsoleBusy, "Console in selection mode, nothing done");
+        return Err(Outcome::say(Msg::ConsoleBusy, "Console in selection mode, nothing done"));
     }
-    let start = match host.console_cursor() {
-        Some(c) => c,
-        None => return Outcome::say(Msg::ConsoleBusy, "Console: cursor unknown"),
-    };
-    let width = start.2;
-    if width <= 0 {
-        return Outcome::say(Msg::ConsoleBusy, "Console: bad buffer width");
-    }
-    if host.foreground() != target {
-        return Outcome::say(Msg::WindowChanged, "Target window changed, nothing done");
-    }
-    let Some(home) = move_and_read(host, true) else {
-        return Outcome::say(Msg::KeysBlocked, "Console: Home not sent or cursor not stable");
-    };
-    // from here the cursor has moved: any exit without replacement puts it back where it was
-    match console_line(host, s, map, target, procs, mode, reader, start, home) {
-        Ok(o) => o,
-        Err(o) => {
-            put_cursor_back(host, target, start, home);
-            o
+    // a line read without echo (password prompt): never
+    let mode = match host.console_input_mode() {
+        Some(m) if m & LINE_INPUT != 0 && m & ECHO_INPUT == 0 => {
+            return Err(Outcome::say(Msg::TerminalNotShown, "Console: input without echo (password?), nothing done"))
         }
-    }
-}
-
-fn idx(p: (i32, i32, i32), width: i32) -> i64 {
-    p.1 as i64 * width as i64 + p.0 as i64
-}
-
-/// Home, then Right x (start - home): only if the console is still ours and the distance is sane.
-fn put_cursor_back(host: &mut dyn Host, target: usize, start: (i32, i32, i32), home: (i32, i32, i32)) {
-    let width = start.2;
-    let d = idx(start, width) - idx(home, width);
-    if d < 0 || d > width as i64 * 4 || host.foreground() != target || host.console_selection_active() {
-        return;
-    }
-    if host.send_home() && d > 0 {
-        host.send_right(d as usize);
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn console_line(
-    host: &mut dyn Host,
-    s: &AppSettings,
-    map: &KeyMap,
-    target: usize,
-    procs: Vec<String>,
-    mode: u32,
-    reader: ConsoleReader,
-    start: (i32, i32, i32),
-    home: (i32, i32, i32),
-) -> Result<Outcome, Outcome> {
-    let width = start.2;
-    if host.foreground() != target {
-        return Err(Outcome::say(Msg::WindowChanged, "Target window changed, stopped"));
-    }
-    let Some(end) = move_and_read(host, false) else {
-        return Err(Outcome::say(Msg::KeysBlocked, "Console: End not sent or cursor not stable"));
+        Some(m) => m,
+        None => return Err(Outcome::say(Msg::ConsoleBusy, "Console: input mode unknown, nothing done")),
     };
-    let (h, e, c) = (idx(home, width), idx(end, width), idx(start, width));
-    if !(h <= c && c <= e) || e - h > (width as i64) * 4 || end.2 != width || home.2 != width {
-        return Err(Outcome::say(Msg::ConsoleBusy, "Console: line positions not coherent, nothing done"));
+    // the Hebrew text must be shown as Hebrew (a raster font shows "?"), avis Fable
+    if contains_hebrew(out) && host.console_truetype() != Some(true) {
+        return Err(Outcome::say(Msg::ConsoleBusy, "Console: font without Hebrew (not TrueType), nothing done"));
     }
-    let count = (e - h) as usize;
-    if count == 0 {
-        return Err(Outcome::say(Msg::NothingToConvert, "Console: empty line"));
-    }
-    let text = match host.console_read(home.0, home.1, count) {
-        Some(t) => t,
-        None => return Err(Outcome::say(Msg::ConsoleBusy, "Console: line could not be read")),
+    let Some((before, after)) = conhost_around(host, n) else {
+        return Err(Outcome::say(Msg::ConsoleBusy, "Console: screen buffer not read, nothing done"));
     };
-    let max = if s.max_character_limit > 0 { (s.max_character_limit as usize).min(CONSOLE_MAX_CHARS) } else { CONSOLE_MAX_CHARS };
-    if !policy::console_text_ok(&text, max) || text.chars().count() != count {
-        return Err(Outcome::say(Msg::ConsoleBusy, "Console: line has unsupported characters or is too long, nothing done"));
+    let ok = crate::terminal::shown(&before, typed);
+    crate::terminal::wipe_string(before);
+    if !ok {
+        crate::terminal::wipe_string(after);
+        return Err(Outcome::say(Msg::TerminalNotShown, "Console: the typed text is not seen before the cursor, nothing done"));
     }
-    let out = transform(&*host, s, map, &text);
-    if out == text {
-        return Err(Outcome::say(Msg::NothingToConvert, "Console: text unchanged"));
+    // text after the cursor in a line read by the console: typing would overwrite it
+    if mode & LINE_INPUT != 0 && !after.trim_end().is_empty() {
+        crate::terminal::wipe_string(after);
+        return Err(Outcome::say(Msg::TerminalNotShown, "Console: text after the cursor, nothing done"));
     }
-    let caps_typed = caps_fixed_to_hebrew(&text, &out);
-    let view = ConsoleView { procs, mode, home, end, count, text };
-    if !console_unchanged(host, target, &view) {
-        return Err(Outcome::say(Msg::WindowChanged, "Console: cursor, line, mode or programs changed, NOT replaced"));
+    if let Some(o) = terminal_still(host, target, generation) {
+        crate::terminal::wipe_string(after);
+        return Err(o);
     }
-    // the cursor is at the end of the input: `count` Backspaces erase exactly the input
-    if !host.send_replace(count, &out) {
-        return Ok(Outcome::say(Msg::KeysBlocked, "Console: keys not sent"));
+    // ONE SendInput: n Backspaces, then the converted text (printable characters only)
+    if !host.send_replace(n, out) {
+        host.terminal_forget();
+        crate::terminal::wipe_string(after);
+        return Err(Outcome::say(Msg::KeysBlocked, "Console: keys not sent"));
     }
     if s.switch_language_after_convert && s.action == Action::Layout {
-        host.switch_language(target, contains_hebrew(&out));
+        host.switch_language(target, contains_hebrew(out));
     }
-    if s.turn_off_caps_lock && (s.action == Action::Case || (s.action == Action::Layout && caps_typed)) {
+    Ok(after)
+}
+
+/// Reads the console again (attached again, 1 s at most): the converted text before the cursor
+/// and the same rest of the line after it; adopted for a second F10 only then.
+#[allow(clippy::too_many_arguments)]
+fn conhost_confirm(host: &mut dyn Host, s: &AppSettings, target: usize, typed: &str, generation: u64, n: usize, out: &str, after: String) -> Outcome {
+    let m = out.chars().count();
+    let mut confirmed = false;
+    // 5 readings at most (each one attaches to the console again)
+    for wait in [30, 60, 120, 250, 500] {
+        host.sleep(wait);
+        if host.foreground() != target || !host.console_attach(target) {
+            break;
+        }
+        let seen = conhost_around(host, m);
+        host.console_detach();
+        if let Some((b, a)) = seen {
+            confirmed = crate::terminal::shown(&b, out) && a.trim_end() == after.trim_end();
+            crate::terminal::wipe_string(b);
+            crate::terminal::wipe_string(a);
+            if confirmed {
+                break;
+            }
+        }
+    }
+    crate::terminal::wipe_string(after);
+    if confirmed && host.terminal_generation() == generation {
+        host.terminal_adopt(out);
+    } else {
+        host.terminal_forget();
+    }
+    if s.turn_off_caps_lock && (s.action == Action::Case || (s.action == Action::Layout && caps_fixed_to_hebrew(typed, out))) {
         host.caps_lock_off();
     }
-    let who = match reader {
-        ConsoleReader::CmdLine => "cmd",
-        ConsoleReader::PsReadLine => "PowerShell",
-    };
-    Ok(Outcome::say(Msg::Converted, format!("Console ({who}): {count} characters replaced")))
+    Outcome::say(Msg::Converted, format!("Console: {n} characters replaced by {m}{}", if confirmed { "" } else { " (not confirmed on the screen)" }))
 }
 
 #[cfg(test)]
@@ -1311,7 +1284,6 @@ mod tests {
         /// the user moves the console cursor while the line is read
         audit_partial_publish: bool,
         audit_restore_failure: bool,
-        audit_move_console_cursor: bool,
         /// the clipboard is busy for the first N restore attempts
         restore_busy: Cell<u32>,
         /// the clipboard cannot be opened right before Ctrl+V
@@ -1338,6 +1310,11 @@ mod tests {
         c_prompt: i32,
         c_cursor: Cell<(i32, i32, i32)>,
         c_selection: bool,
+        /// 1.9.6: the console line as shown (column 0 = start), changed by send_replace
+        c_screen: RefCell<String>,
+        c_truetype: bool,
+        c_read_fails_after: Cell<Option<i32>>,
+        c_mode_unknown: bool,
         c_replaced: RefCell<Option<(usize, String)>>,
         /// 1.9.5 terminal: run followed, generation, screen answers (one per read, the last repeats)
         t_typed: RefCell<Option<(String, u64)>>,
@@ -1395,7 +1372,6 @@ mod tests {
                 set_ok: true,
                 audit_partial_publish: false,
                 audit_restore_failure: false,
-                audit_move_console_cursor: false,
                 restore_busy: Cell::new(0),
                 still_busy: false,
                 audit_partial_rich_restore: Cell::new(false),
@@ -1414,6 +1390,10 @@ mod tests {
                 c_prompt: 3, // "C:\>" ends at column 3, input starts at 4
                 c_cursor: Cell::new((8, 10, 120)),
                 c_selection: false,
+                c_screen: RefCell::new("C:\\>akuo".into()),
+                c_truetype: true,
+                c_read_fails_after: Cell::new(None),
+                c_mode_unknown: false,
                 c_replaced: RefCell::new(None),
                 t_typed: RefCell::new(None),
                 t_gen: Cell::new(0),
@@ -1689,7 +1669,7 @@ mod tests {
             self.c_procs.clone()
         }
         fn console_input_mode(&self) -> Option<u32> {
-            Some(self.c_mode)
+            (!self.c_mode_unknown).then_some(self.c_mode)
         }
         fn console_selection_active(&self) -> bool {
             self.c_selection
@@ -1697,13 +1677,15 @@ mod tests {
         fn console_cursor(&self) -> Option<(i32, i32, i32)> {
             Some(self.c_cursor.get())
         }
-        fn console_read(&self, x: i32, _y: i32, count: usize) -> Option<String> {
-            if self.audit_move_console_cursor {
-                let c = self.c_cursor.get();
-                self.c_cursor.set((self.c_prompt + 1, c.1, c.2));
+        fn console_read(&self, x: i32, y: i32, count: usize) -> Option<String> {
+            if self.c_read_fails_after.get().is_some_and(|ax| x == ax) {
+                return None;
             }
-            let start = (x - self.c_prompt - 1) as usize;
-            Some(self.c_line.chars().skip(start).take(count).collect())
+            let w = self.c_cursor.get().2;
+            Some(self.c_screen.borrow().chars().skip((y * w + x) as usize).take(count).collect())
+        }
+        fn console_truetype(&self) -> Option<bool> {
+            Some(self.c_truetype)
         }
         fn send_home(&self) -> bool {
             let c = self.c_cursor.get();
@@ -1722,6 +1704,15 @@ mod tests {
         }
         fn send_replace(&self, n: usize, text: &str) -> bool {
             *self.c_replaced.borrow_mut() = Some((n, text.into()));
+            // the console shows it at once (conhost)
+            if self.info.window_class == "ConsoleWindowClass" {
+                let mut sc = self.c_screen.borrow_mut();
+                let keep = sc.chars().count().saturating_sub(n);
+                let new: String = sc.chars().take(keep).chain(text.chars()).collect();
+                *sc = new;
+                let c = self.c_cursor.get();
+                self.c_cursor.set((sc.chars().count() as i32, c.1, c.2));
+            }
             true
         }
         fn terminal_typed(&self) -> Option<(String, u64)> {
@@ -2144,15 +2135,19 @@ mod tests {
         assert!(!m.events.borrow().contains(&"paste".to_string()));
     }
 
+    /// 1.9.6: a classic console (cmd), "akuo" typed and followed, shown after the prompt.
     fn console() -> Mock {
         let mut m = Mock::new();
         m.info.window_class = "ConsoleWindowClass".into();
         m.info.exe_name = "cmd.exe".into();
+        *m.t_typed.borrow_mut() = Some(("akuo".into(), 7));
+        m.t_gen.set(7);
+        m.c_cursor.set((8, 0, 120)); // after "C:\>akuo"
         m
     }
 
     #[test]
-    fn console_cmd_line_replaced_without_clipboard() {
+    fn conhost_replaces_the_typed_run_without_clipboard_or_ctrl_c() {
         let mut m = console();
         let o = go(&mut m);
         assert_eq!(o.msg, Some(Msg::Converted), "{}", o.log);
@@ -2160,56 +2155,88 @@ mod tests {
         assert_eq!(m.seq.get(), 1, "clipboard never touched");
         assert!(!m.events.borrow().contains(&"copy".to_string()), "never Ctrl+C");
         assert!(!m.attached.get(), "detached at the end");
+        assert_eq!(m.t_adopted.borrow().as_deref(), Some("שלום"), "confirmed: a second F10 toggles");
+        assert!(!o.log.contains("akuo") && !o.log.contains("שלום"), "{}", o.log);
     }
 
     #[test]
-    fn console_running_program_untouched() {
+    fn conhost_is_off_with_the_terminal_option_or_its_own_switch() {
+        for s in [AppSettings { terminal_support: false, ..settings() }, AppSettings { conhost_support: false, ..settings() }] {
+            let mut m = console();
+            assert_eq!(run(&mut m, &s).msg, Some(Msg::ConsoleUnsupported));
+            assert!(m.c_replaced.borrow().is_none() && m.events.borrow().is_empty());
+        }
+    }
+
+    #[test]
+    fn conhost_refuses_without_echo_text_after_cursor_hidden_text_selection_or_font() {
+        // a line read without echo (password)
         let mut m = console();
-        m.c_procs = vec!["cmd.exe".into(), "python.exe".into()];
-        assert_eq!(go(&mut m).msg, Some(Msg::ConsoleBusy));
+        m.c_mode = 0x1F7 & !0x4;
+        assert_eq!(go(&mut m).msg, Some(Msg::TerminalNotShown));
         assert!(m.c_replaced.borrow().is_none());
+        // text after the cursor in a line read by the console: it would be overwritten
+        let mut m = console();
+        *m.c_screen.borrow_mut() = "C:\\>akuo rest".into();
+        assert_eq!(go(&mut m).msg, Some(Msg::TerminalNotShown));
+        assert!(m.c_replaced.borrow().is_none());
+        // shown as stars (Read-Host -AsSecureString)
+        let mut m = console();
+        *m.c_screen.borrow_mut() = "Pass:****".into();
+        m.c_cursor.set((9, 0, 120));
+        assert_eq!(go(&mut m).msg, Some(Msg::TerminalNotShown));
+        assert!(m.c_replaced.borrow().is_none());
+        // selection mode
         let mut m = console();
         m.c_selection = true;
         assert_eq!(go(&mut m).msg, Some(Msg::ConsoleBusy));
+        // raster font: Hebrew would be shown as "?"
         let mut m = console();
-        m.c_mode = 0x80; // raw mode but cmd only: unknown reader
+        m.c_truetype = false;
         assert_eq!(go(&mut m).msg, Some(Msg::ConsoleBusy));
         assert!(m.c_replaced.borrow().is_none());
+        // nothing followed
+        let mut m = console();
+        *m.t_typed.borrow_mut() = None;
+        assert_eq!(go(&mut m).msg, Some(Msg::TerminalRetype));
+        // careful mode
+        let mut m = console();
+        assert_eq!(run(&mut m, &AppSettings { require_selection: true, ..settings() }).msg, Some(Msg::SelectText));
     }
 
     #[test]
-    fn console_powershell_and_options() {
+    fn conhost_fails_closed_and_reads_over_a_wrapped_line() {
+        // the rest of the line cannot be read: refused (never "nothing after the cursor")
         let mut m = console();
-        m.c_procs = vec!["powershell.exe".into()];
-        m.c_mode = 0x80 | 0x10;
-        m.c_prompt = 6;
-        m.c_cursor.set((11, 3, 120));
-        m.c_line = "יקךךם".into();
+        m.c_read_fails_after.set(Some(8));
+        assert_eq!(go(&mut m).msg, Some(Msg::ConsoleBusy));
+        assert!(m.c_replaced.borrow().is_none());
+        // input mode unknown: refused
+        let mut m = console();
+        m.c_mode_unknown = true;
+        assert_eq!(go(&mut m).msg, Some(Msg::ConsoleBusy));
+        assert!(m.c_replaced.borrow().is_none());
+        // "akuo" across the right edge: 3 cells on line 0, 1 on line 1 (width 10)
+        let mut m = console();
+        *m.c_screen.borrow_mut() = "C:\\>xx>akuo".into();
+        m.c_cursor.set((1, 1, 10));
         let o = go(&mut m);
         assert_eq!(o.msg, Some(Msg::Converted), "{}", o.log);
-        assert_eq!(m.c_replaced.borrow().clone(), Some((5, "hello".to_string())));
-        let mut m = console();
-        let mut s = settings();
-        s.console_support = false;
-        assert_eq!(run(&mut m, &s).msg, Some(Msg::ConsoleUnsupported));
-        let mut m = console();
-        m.info.window_class = "CASCADIA_HOSTING_WINDOW_CLASS".into();
-        let s = AppSettings { terminal_support: false, ..settings() }; // 1.9.5: on by default
-        assert_eq!(run(&mut m, &s).msg, Some(Msg::ConsoleUnsupported));
-        assert!(m.events.borrow().is_empty());
+        assert_eq!(m.c_replaced.borrow().clone(), Some((4, "שלום".to_string())));
     }
 
     #[test]
-    fn console_empty_or_incoherent() {
+    fn f9_in_console_swaps_the_typed_run() {
         let mut m = console();
-        m.c_line = String::new();
-        m.c_cursor.set((4, 10, 120));
-        assert_eq!(go(&mut m).msg, Some(Msg::NothingToConvert));
-        let mut m = console();
-        m.c_cursor.set((2, 10, 120)); // cursor BEFORE the input start: not coherent
-        assert_eq!(go(&mut m).msg, Some(Msg::ConsoleBusy));
-        assert!(m.c_replaced.borrow().is_none());
+        *m.t_typed.borrow_mut() = Some(("dIR".into(), 7));
+        *m.c_screen.borrow_mut() = "C:\\>dIR".into();
+        m.c_cursor.set((7, 0, 120));
+        let s = AppSettings { action: Action::Case, ..settings() };
+        let o = run(&mut m, &s);
+        assert_eq!(o.msg, Some(Msg::Converted), "{}", o.log);
+        assert_eq!(m.c_replaced.borrow().clone(), Some((3, "Dir".to_string())));
     }
+
     // Audit tests: expected user-facing safety properties, deliberately not implementation mirrors.
     #[test]
     fn audit_new_copy_before_capture_must_not_be_pasted() {
@@ -2267,25 +2294,6 @@ mod tests {
     }
 
     #[test]
-    fn audit_console_cursor_changed_after_read_must_cancel() {
-        let mut m = console();
-        m.audit_move_console_cursor = true;
-        let o = go(&mut m);
-        assert!(m.c_replaced.borrow().is_none(), "Replacement sent at another cursor position: {}", o.log);
-    }
-
-    #[test]
-    fn audit_console_no_change_must_keep_cursor_position() {
-        let mut m = console();
-        m.c_line = "12345".into();
-        m.c_cursor.set((6, 10, 120));
-        let before = m.c_cursor.get();
-        let o = go(&mut m);
-        assert_eq!(o.msg, Some(Msg::NothingToConvert));
-        assert_eq!(m.c_cursor.get(), before, "No conversion should preserve the cursor");
-    }
-
-    #[test]
     fn audit_new_foreign_rich_copy_is_not_ours() {
         let st = ClipState { seq_cap: Some(20), captured: Some("akuo".into()), ..Default::default() };
         let now = ClipObs { seq: 30, owner_is_us: false, owner: OTHER, text: Some("akuo".into()), formats: vec![13, 8], foreign_formats: true };
@@ -2302,13 +2310,6 @@ mod tests {
         let o = go(&mut m);
         assert_eq!(o.msg, Some(Msg::Converted), "{}", o.log);
         assert_eq!(m.clip_text().as_deref(), Some("USER CLIPBOARD"));
-    }
-
-    #[test]
-    fn console_is_off_by_default() {
-        let mut m = console();
-        assert_eq!(run(&mut m, &AppSettings::default()).msg, Some(Msg::ConsoleUnsupported));
-        assert!(m.events.borrow().is_empty() && m.c_replaced.borrow().is_none());
     }
 
     #[test]
@@ -2718,17 +2719,6 @@ mod tests {
         m.paste_ok = false;
         assert_eq!(caps(&mut m, "aBC").msg, Some(Msg::KeysBlocked));
         assert!(!m.happened("caps-off"));
-    }
-
-    #[test]
-    fn f9_in_console_swaps_the_line() {
-        let mut m = console();
-        m.c_line = "dIR".into();
-        m.c_cursor.set((7, 10, 120));
-        let s = AppSettings { action: Action::Case, ..settings() };
-        let o = run(&mut m, &s);
-        assert_eq!(o.msg, Some(Msg::Converted), "{}", o.log);
-        assert_eq!(m.c_replaced.borrow().clone(), Some((3, "Dir".to_string())));
     }
 
     // ---------------------------------------------------------------- 1.4.0: layouts, diagnostic

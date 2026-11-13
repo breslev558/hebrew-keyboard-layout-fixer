@@ -53,6 +53,13 @@ impl Session {
         if pid == 0 {
             return None;
         }
+        // 1.9.6: never when our process already has a console of its own (started from a terminal):
+        // it would be freed
+        // SAFETY: no arguments.
+        if !unsafe { GetConsoleWindow() }.is_null() {
+            crate::util::log("Console: this program already has a console, nothing done");
+            return None;
+        }
         // SAFETY: plain calls. The handler is set before attaching (a Ctrl+C right after
         // AttachConsole) AND again after, checked: attaching may reset the handlers (audit; the
         // documentation is not explicit). Without it a Ctrl+C / Ctrl+Break would end us.
@@ -74,12 +81,18 @@ impl Session {
         }
         let conin = open("CONIN$");
         let conout = open("CONOUT$");
+        let s = Session { conin, conout };
         if conin == INVALID_HANDLE_VALUE || conout == INVALID_HANDLE_VALUE {
-            let s = Session { conin, conout };
-            drop(s);
+            return None; // (Drop detaches)
+        }
+        // 1.9.6: the console we joined must be the one of THIS window (the pid of a console window
+        // is its first client, which may be gone or reused)
+        // SAFETY: no arguments.
+        if unsafe { GetConsoleWindow() } != hwnd {
+            crate::util::log("Console: attached to another console than the window, detached");
             return None;
         }
-        Some(Session { conin, conout })
+        Some(s)
     }
 
     /// Exe names of the processes attached to the console, except ours.
@@ -141,10 +154,26 @@ impl Session {
         let ok = unsafe {
             ReadConsoleOutputCharacterW(self.conout, buf.as_mut_ptr(), count as u32, COORD { X: x as i16, Y: y as i16 }, &mut read)
         };
-        if ok == 0 || read as usize != count {
-            return None;
+        let text = if ok == 0 || read as usize != count { None } else { String::from_utf16(&buf).ok() };
+        // the screen text is not left in memory
+        for u in buf.iter_mut() {
+            // SAFETY: plain value through a valid &mut (volatile: not optimized away).
+            unsafe { std::ptr::write_volatile(u, 0) };
         }
-        String::from_utf16(&buf).ok()
+        text
+    }
+
+    /// 1.9.6: the console font is TrueType (it can show Hebrew; a raster font shows "?").
+    pub fn truetype(&self) -> Option<bool> {
+        // SAFETY: structure of the documented size, written by Windows.
+        unsafe {
+            let mut f: CONSOLE_FONT_INFOEX = std::mem::zeroed();
+            f.cbSize = std::mem::size_of::<CONSOLE_FONT_INFOEX>() as u32;
+            if GetCurrentConsoleFontEx(self.conout, 0, &mut f) == 0 {
+                return None;
+            }
+            Some(f.FontFamily & 0x04 != 0) // TMPF_TRUETYPE
+        }
     }
 }
 

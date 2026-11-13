@@ -464,8 +464,8 @@ pub fn terminal_front() -> bool {
 }
 
 /// 1.9.5: follow (or not) the keys typed in the terminal window `hwnd`; the run is always forgotten.
-/// `keep`: the 5 s check (the run is kept if the same window is still followed); a foreground
-/// event always forgets it, even when the same window came back (A → B → A).
+/// `keep`: the same window is still followed (the 5 s check, or a foreground event about one of
+/// its own windows): the run is kept; any other window, even briefly (A → B → A), forgets it.
 pub fn set_terminal_watch(on: bool, hwnd: usize, keep: bool) {
     use std::sync::atomic::Ordering::SeqCst;
     static ONCE: std::sync::Once = std::sync::Once::new();

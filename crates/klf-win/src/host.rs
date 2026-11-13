@@ -370,6 +370,9 @@ impl Host for WinHost {
     fn console_input_mode(&self) -> Option<u32> {
         self.console.as_ref()?.input_mode()
     }
+    fn console_truetype(&self) -> Option<bool> {
+        self.console.as_ref()?.truetype()
+    }
     fn console_selection_active(&self) -> bool {
         self.console.as_ref().map(|c| c.selection_active()).unwrap_or(true)
     }

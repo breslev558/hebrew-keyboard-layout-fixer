@@ -212,6 +212,10 @@ pub struct AppSettings {
     /// 13/11); never with an administrator policy (school::effective), where it is also hidden.
     #[serde(rename = "TerminalSupport", deserialize_with = "de_bool_true")]
     pub terminal_support: bool,
+    /// 1.9.6: the classic console (conhost) too, under TerminalSupport; a separate switch (not in
+    /// the settings window) to turn the console alone off if needed. On by default.
+    #[serde(rename = "ConhostSupport", deserialize_with = "de_bool_true")]
+    pub conhost_support: bool,
     /// Time between Ctrl+V and putting the user's clipboard back (slow PCs need more).
     #[serde(rename = "PasteDelayMs", deserialize_with = "de_i64")]
     pub paste_delay_ms: i64,
@@ -328,6 +332,7 @@ impl Default for AppSettings {
             ui_language: UiLanguage::Auto,
             console_support: false,
             terminal_support: true,
+            conhost_support: true,
             paste_delay_ms: DEFAULT_PASTE_DELAY_MS,
             excluded_processes: Vec::new(),
             app_rules: Vec::new(),

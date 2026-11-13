@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.9.6 (November 2026)
+- **F10 now also works in the classic console** (cmd or PowerShell opened without Windows Terminal), the same way as in Windows Terminal: the keys you type there are followed in memory only, F10 first checks in the console that exactly this text is just before the cursor, then replaces it with Backspaces and the converted text. Never Ctrl+C, never the clipboard. Nothing is done for a line read without echo (password), when text follows the cursor, or with an old raster font that cannot show Hebrew.
+- This replaces the old "experimental console" option, which read the whole line with Home and End: now only the text you just typed is converted. The settings box is now *Also fix in terminals: Windows Terminal, cmd, PowerShell*.
+- Small safety fixes in the Windows Terminal following (a window closed at the wrong moment never counts as the same window).
+
 ## 1.9.5 (November 2026)
 - **F10 now works in Windows Terminal** (PowerShell, cmd, SSH to a server, programs that run in the terminal). A terminal has no selection to copy and Ctrl+C would stop the running program, so it works differently there: while Windows Terminal is in front, the program follows the keys you type (memory only, forgotten on Enter, Tab, arrows, a click, another window or within 20 seconds). On F10 it first checks on the screen that exactly this text is just before the cursor, then replaces it with Backspaces and the converted text. Never Ctrl+C, never the clipboard, never Enter.
 - A password typed blind (sudo, ssh) or shown as `****` is never touched: it is not shown as typed, so F10 does nothing. See PRIVACY.md.

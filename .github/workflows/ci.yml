@@ -180,6 +180,13 @@ jobs:
         run: |
           powershell -NoProfile -ExecutionPolicy Bypass -File tests-e2e\terminal.ps1
           exit $LASTEXITCODE
+      - name: F10 dans la console classique conhost (correction, aller-retour, mot de passe, Tab, F8, clic pendant, cmd)
+        if: success() || failure()
+        timeout-minutes: 10
+        shell: powershell
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File tests-e2e\console.ps1
+          exit $LASTEXITCODE
       - name: Audit visuel (toutes les fenêtres, 3 langues, 150 % et 200 %, contraste élevé, désinstallation)
         if: success() || failure()
         timeout-minutes: 15

@@ -48,9 +48,9 @@ To switch Caps Lock off safely and to let a quick second F10 toggle the text bac
 counts how many keys and mouse buttons are pressed (a number only, never which key or what text).
 The text of the last F10 is kept in memory for 5 seconds for that toggle, then forgotten.
 
-## F10 in Windows Terminal (1.9.5, on by default in the public version)
+## F10 in Windows Terminal and the classic console (1.9.5 / 1.9.6, on by default in the public version)
 A terminal has no selection to copy, and Ctrl+C would stop the program running in it. So, **only
-while a Windows Terminal window is in front**, the program follows the keys you type there (letters,
+while a Windows Terminal or classic console window is in front**, the program follows the keys you type there (letters,
 digits, space and signs: the key codes, never written anywhere), so that F10 knows what to fix.
 - **Memory only**: locked in memory (never in the page file) and left out of crash dumps; never in
   `debug.log` (the journal only says how many characters were replaced, or why nothing was done).
@@ -64,7 +64,8 @@ digits, space and signs: the key codes, never written anywhere), so that F10 kno
   shown as `****` is never shown as typed: nothing is done, and it is forgotten on Enter.
 - **What F10 sends**: Backspaces, then the converted text, in one go. Never Ctrl+C, never the
   clipboard, never Enter, Tab or any control character.
-- **Off**: untick *Also fix in Windows Terminal* in the settings (Advanced page). On a PC managed by
+- In the classic console the text is checked by reading the console itself (the console API), attached only for that moment.
+- **Off**: untick *Also fix in terminals* in the settings (Advanced page). On a PC managed by
   an administrator it is always off and the option is hidden.
 - Not available in administrator (elevated) terminal windows.
 

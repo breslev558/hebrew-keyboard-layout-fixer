@@ -62,7 +62,19 @@ $results = @()
 
 Add-Type @'
 using System; using System.Runtime.InteropServices;
-public static class W { [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindow(string c, string t); }
+public static class W {
+  public delegate bool EnumProc(IntPtr h, IntPtr l);
+  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc f, IntPtr l);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, System.Text.StringBuilder s, int n);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr h, System.Text.StringBuilder s, int n);
+  // 1.9.6 (1st trial): cmd adds « Administrator: » and the command to the title: the title CONTAINS the mark
+  public static IntPtr Find(string mark) {
+    IntPtr found = IntPtr.Zero;
+    EnumWindows((h, l) => { var c = new System.Text.StringBuilder(64); GetClassName(h, c, 64); if (c.ToString() != "ConsoleWindowClass") return true;
+      var t = new System.Text.StringBuilder(512); GetWindowText(h, t, 512); if (t.ToString().Contains(mark)) { found = h; return false; } return true; }, IntPtr.Zero);
+    return found;
+  }
+}
 '@
 # ouvre une console conhost (titre fixe) sur un script ou une commande ; ferme seulement la précédente de l'essai
 $titre = 'KLF-CONSOLE-ESSAI'
@@ -82,7 +94,7 @@ function Ouvrir($script, $cmd = $false) {
   $script:h = [IntPtr]::Zero; $t = 0
   while ($script:h -eq [IntPtr]::Zero) {
     Start-Sleep -Milliseconds 500
-    $script:h = [W]::FindWindow('ConsoleWindowClass', $titre)
+    $script:h = [W]::Find($titre)
     if (++$t -gt 40) { Fail 'fenêtre de console (ConsoleWindowClass) introuvable' }
   }
   Start-Sleep 3   # invite affichée

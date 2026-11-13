@@ -190,14 +190,18 @@ pub fn sync_passthrough(hwnd: HWND) {
 }
 
 fn note_foreground(hwnd: HWND) {
+    // 1.9.5: the run in the terminal is kept only if this event is about the window still in
+    // front (one of its inner windows); any other window, even briefly (A → B → A), forgets it
+    // SAFETY: plain window handles.
+    let same = !hwnd.is_null() && unsafe { GetAncestor(hwnd, GA_ROOT) == GetForegroundWindow() };
     // SAFETY: IsWindowVisible has no pointers.
     if hwnd.is_null() || unsafe { IsWindowVisible(hwnd) } == 0 {
-        refresh_terminal_watch(std::ptr::null_mut()); // 1.9.5: never follows keys elsewhere
+        refresh_terminal_watch(same);
         return;
     }
     sync_passthrough(hwnd);
     crate::typing::reset(); // another window: the words kept are forgotten
-    refresh_terminal_watch(hwnd);
+    refresh_terminal_watch(same);
     let class = sys::class_name(hwnd);
     crate::typing::run_dialog(hwnd, &class); // 1.8.6: Win+R in English (one-language option)
     crate::typing::left_run_dialog(hwnd);
@@ -477,18 +481,23 @@ pub fn apply_settings(new: AppSettings) {
     update_tray();
     crate::typing::apply();
     // SAFETY: no pointers.
-    refresh_terminal_watch(unsafe { GetForegroundWindow() });
+    refresh_terminal_watch(false);
 }
 
 /// 1.9.5: Windows Terminal in front and the option on: its keys are followed for F10 (memory
 /// only); the run is forgotten at every change of window. Classic consoles count as terminals
 /// for the typing suggestions (never looked at there).
-fn refresh_terminal_watch(fg: HWND) {
+/// (The window really in front is asked: the foreground event of Windows Terminal can name one of
+/// its inner windows, seen in the 1.9.5 Windows test; also checked every 5 s.)
+/// `keep`: the same window is still followed (5 s check, or an event about one of its windows).
+fn refresh_terminal_watch(keep: bool) {
+    // SAFETY: no pointers.
+    let fg = unsafe { GetForegroundWindow() };
     let class = if fg.is_null() { String::new() } else { sys::class_name(fg) };
     let wt = class == "CASCADIA_HOSTING_WINDOW_CLASS";
     // (every console or terminal window: Windows Terminal, conhost, PuTTY, mintty…)
     crate::platform::input::set_terminal_front(klf_core::policy::console_kind(&class).is_some());
-    crate::platform::input::set_terminal_watch(wt && settings().terminal_support, fg as usize);
+    crate::platform::input::set_terminal_watch(wt && settings().terminal_support, fg as usize, keep);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1716,6 +1725,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             // SAFETY: no pointers.
             sync_passthrough(unsafe { GetForegroundWindow() });
             crate::platform::input::terminal_expire(); // 1.9.5: a run left for 15 s is wiped
+            refresh_terminal_watch(true); // 1.9.5: a missed foreground event is caught up
             // 1.8.5: hooks removed by Windows are put back; an alert on the icon if they cannot be
             forget_quick_if_old();
             let ok = crate::platform::input::check_hooks() & crate::typing::check_hooks();

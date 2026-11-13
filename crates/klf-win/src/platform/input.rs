@@ -464,7 +464,9 @@ pub fn terminal_front() -> bool {
 }
 
 /// 1.9.5: follow (or not) the keys typed in the terminal window `hwnd`; the run is always forgotten.
-pub fn set_terminal_watch(on: bool, hwnd: usize) {
+/// `keep`: the 5 s check (the run is kept if the same window is still followed); a foreground
+/// event always forgets it, even when the same window came back (A → B → A).
+pub fn set_terminal_watch(on: bool, hwnd: usize, keep: bool) {
     use std::sync::atomic::Ordering::SeqCst;
     static ONCE: std::sync::Once = std::sync::Once::new();
     if on {
@@ -491,7 +493,12 @@ pub fn set_terminal_watch(on: bool, hwnd: usize) {
             }
         });
     }
-    TERM_HWND.store(if on { hwnd } else { 0 }, SeqCst);
+    let hwnd = if on { hwnd } else { 0 };
+    // the same window still in front (5 s check): nothing changes, the run is kept
+    if keep && TERM_WATCH.load(SeqCst) == on && TERM_HWND.load(SeqCst) == hwnd {
+        return;
+    }
+    TERM_HWND.store(hwnd, SeqCst);
     if TERM_WATCH.swap(on, SeqCst) != on {
         crate::util::log(if on { "Terminal: Windows Terminal in front, keys followed for F10 (memory only)" } else { "Terminal: keys no longer followed" });
     }

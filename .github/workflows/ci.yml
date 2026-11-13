@@ -144,7 +144,9 @@ jobs:
     # vrai essai sous Windows : installeur, Bloc-notes, « akuo » + F10 = « שלום ».
     # Non bloquant tant qu'il n'a pas prouvé sa fiabilité sur les machines de GitHub.
     runs-on: windows-latest
-    timeout-minutes: 15
+    # 1.9.5: 40 min (Edge + Chrome, Windows Terminal, audit visuel : la limite de 15 min coupait
+    # l'essai Windows Terminal au bout de 32 s, sans message)
+    timeout-minutes: 40
     needs: coeur-et-compilation
     continue-on-error: true
     steps:

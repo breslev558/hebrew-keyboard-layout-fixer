@@ -391,4 +391,33 @@ impl Host for WinHost {
     fn send_replace(&self, backspaces: usize, text: &str) -> bool {
         input::replace(backspaces, text)
     }
+    fn terminal_typed(&self) -> Option<(String, u64)> {
+        let (typed, generation) = input::terminal_snapshot()?;
+        match typed {
+            klf_core::terminal::Typed::Text(t) => Some((t, generation)),
+            klf_core::terminal::Typed::Keys(mut keys) => {
+                let text = input::caps_lock_on_now(self.target.get()).and_then(|caps| layouts::keys_to_text(&keys, caps));
+                for k in keys.iter_mut() {
+                    // SAFETY: plain value through a valid &mut (volatile: not optimized away).
+                    unsafe { std::ptr::write_volatile(k, klf_core::terminal::KeyStroke::default()) };
+                }
+                text.map(|t| (t, generation))
+            }
+        }
+    }
+    fn terminal_generation(&self) -> u64 {
+        input::terminal_generation()
+    }
+    fn terminal_before_caret(&self, n: usize) -> Result<String, &'static str> {
+        let mut pid = 0u32;
+        // SAFETY: the pid is written.
+        unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId(self.target.get(), &mut pid) };
+        crate::platform::uia::terminal_before_caret(n, pid, 150)
+    }
+    fn terminal_adopt(&self, text: &str) {
+        input::terminal_adopt(text);
+    }
+    fn terminal_forget(&self) {
+        input::terminal_forget();
+    }
 }

@@ -192,10 +192,12 @@ pub fn sync_passthrough(hwnd: HWND) {
 fn note_foreground(hwnd: HWND) {
     // SAFETY: IsWindowVisible has no pointers.
     if hwnd.is_null() || unsafe { IsWindowVisible(hwnd) } == 0 {
+        refresh_terminal_watch(std::ptr::null_mut()); // 1.9.5: never follows keys elsewhere
         return;
     }
     sync_passthrough(hwnd);
     crate::typing::reset(); // another window: the words kept are forgotten
+    refresh_terminal_watch(hwnd);
     let class = sys::class_name(hwnd);
     crate::typing::run_dialog(hwnd, &class); // 1.8.6: Win+R in English (one-language option)
     crate::typing::left_run_dialog(hwnd);
@@ -474,6 +476,19 @@ pub fn apply_settings(new: AppSettings) {
     crate::indicator::configure();
     update_tray();
     crate::typing::apply();
+    // SAFETY: no pointers.
+    refresh_terminal_watch(unsafe { GetForegroundWindow() });
+}
+
+/// 1.9.5: Windows Terminal in front and the option on: its keys are followed for F10 (memory
+/// only); the run is forgotten at every change of window. Classic consoles count as terminals
+/// for the typing suggestions (never looked at there).
+fn refresh_terminal_watch(fg: HWND) {
+    let class = if fg.is_null() { String::new() } else { sys::class_name(fg) };
+    let wt = class == "CASCADIA_HOSTING_WINDOW_CLASS";
+    // (every console or terminal window: Windows Terminal, conhost, PuTTY, mintty…)
+    crate::platform::input::set_terminal_front(klf_core::policy::console_kind(&class).is_some());
+    crate::platform::input::set_terminal_watch(wt && settings().terminal_support, fg as usize);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1700,6 +1715,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
         WM_TIMER if wparam == TIMER_HOOKS => {
             // SAFETY: no pointers.
             sync_passthrough(unsafe { GetForegroundWindow() });
+            crate::platform::input::terminal_expire(); // 1.9.5: a run left for 15 s is wiped
             // 1.8.5: hooks removed by Windows are put back; an alert on the icon if they cannot be
             forget_quick_if_old();
             let ok = crate::platform::input::check_hooks() & crate::typing::check_hooks();
@@ -1764,6 +1780,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             let away = msg == WM_WTSSESSION_CHANGE && matches!(wparam as u32, 2 | 4 | 7); // console/remote disconnect, lock
             if suspend || away {
                 crate::typing::reset();
+                crate::platform::input::terminal_reset(); // 1.9.5
             }
             // SAFETY: default handling.
             unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }

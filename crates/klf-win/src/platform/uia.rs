@@ -159,10 +159,127 @@ fn ask_selection_empty(automation: *mut c_void) -> Option<bool> {
     }
 }
 
-#[derive(Clone, Copy)]
+/// 1.9.5: UIA_ProcessIdPropertyId, UIA_ClassNamePropertyId, VT_BSTR; Windows Terminal's text
+/// control is "TermControl"
+const PROCESS_ID: i32 = 30002;
+const CLASS_NAME: i32 = 30012;
+const VT_BSTR: u16 = 8;
+
+/// A BSTR as a String (None if null).
+unsafe fn bstr(p: *const u16) -> Option<String> {
+    if p.is_null() {
+        return None;
+    }
+    // SAFETY (caller): `p` is a valid BSTR (its length is stored before it).
+    unsafe {
+        let n = windows_sys::Win32::Foundation::SysStringLen(p) as usize;
+        Some(String::from_utf16_lossy(std::slice::from_raw_parts(p, n)))
+    }
+}
+
+/// 1.9.5: the text just before the cursor in the focused Windows Terminal control of process
+/// `pid` (at least `n` characters when there are). Refused when the focus is elsewhere (command
+/// palette, search box, settings: XAML fields of the same window), when there is no
+/// cursor range or a selection is active.
+fn ask_terminal(automation: *mut c_void, n: usize, pid: u32) -> Result<String, &'static str> {
+    type GetPatternAs = unsafe extern "system" fn(*mut c_void, i32, *const GUID, *mut *mut c_void) -> i32;
+    type GetSelection = unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> i32;
+    type GetLength = unsafe extern "system" fn(*mut c_void, *mut i32) -> i32;
+    type GetElement = unsafe extern "system" fn(*mut c_void, i32, *mut *mut c_void) -> i32;
+    type CompareEndpoints = unsafe extern "system" fn(*mut c_void, i32, *mut c_void, i32, *mut i32) -> i32;
+    type CloneRange = unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> i32;
+    type MoveEndpoint = unsafe extern "system" fn(*mut c_void, i32, i32, i32, *mut i32) -> i32;
+    type GetText = unsafe extern "system" fn(*mut c_void, i32, *mut *const u16) -> i32;
+    // SAFETY: vtable indices from UIAutomationClient.h: IUIAutomation::GetFocusedElement 8;
+    // IUIAutomationElement::GetCurrentPropertyValue 10, GetCurrentPatternAs 14;
+    // IUIAutomationTextPattern::GetSelection 5; IUIAutomationTextRangeArray::get_Length 3,
+    // GetElement 4; IUIAutomationTextRange::Clone 3, CompareEndpoints 5, GetText 12,
+    // MoveEndpointByUnit 14 (endpoint Start = 0, End = 1; unit Character = 0). Every reference
+    // obtained is released once; VARIANTs and BSTRs are freed.
+    unsafe {
+        let mut el: *mut c_void = std::ptr::null_mut();
+        let get_focused: GetFocused = method(automation, 8);
+        if get_focused(automation, &mut el) < 0 || el.is_null() {
+            return Err("no focused element");
+        }
+        let release_el: Release = method(el, 2);
+        let get_prop: GetProperty = method(el, 10);
+        let mut v = [0u64; 3];
+        let hr = get_prop(el, PROCESS_ID, &mut v);
+        let el_pid = if hr >= 0 && (v[0] & 0xFFFF) as u16 == VT_I4 { Some((v[1] & 0xFFFF_FFFF) as u32) } else { None };
+        clear(&mut v);
+        let hr = get_prop(el, CLASS_NAME, &mut v);
+        let class = if hr >= 0 && (v[0] & 0xFFFF) as u16 == VT_BSTR { bstr(v[1] as *const u16) } else { None };
+        clear(&mut v);
+        if el_pid != Some(pid) || class.as_deref() != Some("TermControl") {
+            release_el(el);
+            return Err("focus not in the terminal text");
+        }
+        let mut pat: *mut c_void = std::ptr::null_mut();
+        let get_pattern: GetPatternAs = method(el, 14);
+        let hr_p = get_pattern(el, TEXT_PATTERN, &IID_TEXT_PATTERN, &mut pat);
+        release_el(el);
+        if hr_p < 0 || pat.is_null() {
+            return Err("no text pattern");
+        }
+        let release_pat: Release = method(pat, 2);
+        let mut arr: *mut c_void = std::ptr::null_mut();
+        let get_sel: GetSelection = method(pat, 5);
+        let hr_s = get_sel(pat, &mut arr);
+        release_pat(pat);
+        if hr_s < 0 || arr.is_null() {
+            return Err("no cursor range");
+        }
+        let release_arr: Release = method(arr, 2);
+        let mut count = 0i32;
+        let get_len: GetLength = method(arr, 3);
+        let mut r: *mut c_void = std::ptr::null_mut();
+        let get_el: GetElement = method(arr, 4);
+        let ok = get_len(arr, &mut count) >= 0 && count == 1 && get_el(arr, 0, &mut r) >= 0 && !r.is_null();
+        release_arr(arr);
+        if !ok {
+            return Err("no single cursor range");
+        }
+        let release_r: Release = method(r, 2);
+        let cmp: CompareEndpoints = method(r, 5);
+        let mut c = 0i32;
+        if cmp(r, 0, r, 1, &mut c) < 0 || c != 0 {
+            release_r(r);
+            return Err("selection active");
+        }
+        let mut r2: *mut c_void = std::ptr::null_mut();
+        let clone: CloneRange = method(r, 3);
+        let hr_c = clone(r, &mut r2);
+        release_r(r);
+        if hr_c < 0 || r2.is_null() {
+            return Err("no cursor range");
+        }
+        let release_r2: Release = method(r2, 2);
+        let mv: MoveEndpoint = method(r2, 14);
+        let mut moved = 0i32;
+        // a few characters more than typed: display line breaks may count as characters
+        let back = -((n.min(400) + 8) as i32);
+        let hr_m = mv(r2, 0, 0, back, &mut moved);
+        let mut text: *const u16 = std::ptr::null();
+        let get_text: GetText = method(r2, 12);
+        let hr_t = if hr_m >= 0 { get_text(r2, 2048, &mut text) } else { -1 };
+        release_r2(r2);
+        let s = if hr_t >= 0 { bstr(text) } else { None };
+        if !text.is_null() {
+            // the screen text is wiped before it is freed
+            let len = windows_sys::Win32::Foundation::SysStringLen(text) as usize;
+            std::ptr::write_bytes(text as *mut u16, 0, len);
+            windows_sys::Win32::Foundation::SysFreeString(text);
+        }
+        s.ok_or("text not read")
+    }
+}
+
 enum Kind {
     Password,
     SelectionEmpty,
+    /// 1.9.5: the text before the cursor in Windows Terminal (characters, process, reply)
+    Terminal(usize, u32, Sender<Result<String, &'static str>>),
 }
 
 /// where each question goes: what is asked, and the reply channel of the caller
@@ -180,6 +297,15 @@ pub fn selection_empty(ms: u64) -> Option<bool> {
     let (tx, rx) = channel();
     send(Kind::SelectionEmpty, tx);
     rx.recv_timeout(std::time::Duration::from_millis(ms)).ok().flatten()
+}
+
+/// 1.9.5: the text just before the cursor in the focused Windows Terminal control of process
+/// `pid`, waiting at most `ms` (worker thread only). Err(why) when it cannot be told.
+pub fn terminal_before_caret(n: usize, pid: u32, ms: u64) -> Result<String, &'static str> {
+    let (tx, rx) = channel();
+    let (dummy, _r) = channel();
+    send(Kind::Terminal(n, pid, tx), dummy);
+    rx.recv_timeout(std::time::Duration::from_millis(ms)).unwrap_or(Err("no answer in time"))
 }
 
 /// 1.9.3: the UI Automation thread is answering a question.
@@ -222,15 +348,25 @@ fn send(kind: Kind, reply: Sender<Option<bool>>) {
                 // only the latest question is answered (older askers gave up already)
                 while let Ok(newer) = rx.try_recv() {
                     let _ = q.1.send(None);
+                    if let Kind::Terminal(_, _, r) = &q.0 {
+                        let _ = r.send(Err("superseded"));
+                    }
                     q = newer;
                 }
                 BUSY.store(true, std::sync::atomic::Ordering::SeqCst);
                 let answer = if automation.is_null() {
                     None
                 } else {
-                    match q.0 {
+                    match &q.0 {
                         Kind::Password => ask(automation),
                         Kind::SelectionEmpty => ask_selection_empty(automation),
+                        Kind::Terminal(n, pid, r) => {
+                            // an answer nobody waits for any more is wiped
+                            if let Err(std::sync::mpsc::SendError(Ok(late))) = r.send(ask_terminal(automation, *n, *pid)) {
+                                klf_core::terminal::wipe_string(late);
+                            }
+                            None
+                        }
                     }
                 };
                 BUSY.store(false, std::sync::atomic::Ordering::SeqCst);

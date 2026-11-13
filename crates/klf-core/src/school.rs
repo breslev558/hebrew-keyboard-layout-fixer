@@ -258,6 +258,11 @@ pub fn effective(user: &AppSettings, p: &Policy) -> (AppSettings, Locked) {
         s.case_hotkey_key = crate::settings::KEY_NONE;
         s.case_hotkey_modifiers = 0;
     }
+    // 1.9.5: F10 in the terminal follows the keys typed there: never on a PC managed by an
+    // administrator (school), whatever the user file says
+    if !p.is_empty() {
+        s.terminal_support = false;
+    }
     for r in &p.app_rules {
         s.app_rules.retain(|x| x.process != r.process);
         s.app_rules.push(r.clone());
@@ -331,6 +336,14 @@ mod tests {
     }
 
     #[test]
+    fn terminal_support_is_never_on_with_an_administrator_policy() {
+        let user = AppSettings { terminal_support: true, ..AppSettings::default() };
+        assert!(effective(&user, &Policy::default()).0.terminal_support, "no policy: the user's choice");
+        let p = Policy { require_selection: Some(false), ..Policy::default() };
+        assert!(!effective(&user, &p).0.terminal_support, "any policy (school): off");
+    }
+
+    #[test]
     fn audit_a05_machine_rule_survives_200_user_rules() {
         let user: Vec<String> = (0..MAX_RULES).map(|i| format!("prog{i}.exe=Disabled")).collect();
         // HKCU is read first, HKLM last (platform/school.rs)
@@ -391,7 +404,8 @@ mod tests {
         assert!(p.app_rules.is_empty());
         assert_eq!(p.ignored.len(), 8, "{:?}", p.ignored);
         let (s, l) = effective(&AppSettings::default(), &p);
-        assert_eq!(s, AppSettings::default());
+        // (a policy key, even with only wrong values: a managed PC, so no terminal following)
+        assert_eq!(s, AppSettings { terminal_support: false, ..AppSettings::default() });
         assert!(!l.any());
     }
 

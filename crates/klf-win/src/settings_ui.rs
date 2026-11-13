@@ -76,7 +76,7 @@ const ID_CHECK_UPDATE: i32 = 264;
 /// 1.8.9: every control of the window has its own id (checked when compiling; 1.8.9 first gave the
 /// new button the id of the bubble position list).
 const _: () = {
-    let ids = [ID_STATUS, ID_PAUSE, ID_TAB, ID_ABOUT, ID_SAVE, ID_CLOSE, ID_LBL_HOTKEY, ID_HOTKEY, ID_LBL_HOTKEY_CASE, ID_HOTKEY_CASE, ID_LBL_WORK, ID_WORK_MODE, ID_COPY_RESULT, ID_LBL_TRY, ID_TRY, ID_LBL_RESULT, ID_RESULT, ID_LBL_LANG, ID_LANG, ID_AUTOSTART, ID_LBL_DIRECTION, ID_DIRECTION, ID_SWITCH, ID_BUBBLE, ID_SOUND, ID_CAREFUL, ID_CAPSOFF, ID_CONSOLE, ID_LASTWORD, ID_LBL_LIMIT, ID_LIMIT, ID_LBL_DELAY, ID_DELAY, ID_LBL_EXCLUDED, ID_EXCLUDED, ID_LAYOUTS, ID_DIAG_LAST, ID_DIAG_TEXT, ID_DIAG_COPY, ID_DIAG_REFRESH, ID_INDICATOR, ID_EXPORT, ID_IMPORT, ID_UNDO_IMPORT, ID_CHECK_UPDATE, ID_BUBBLE_POS];
+    let ids = [ID_STATUS, ID_PAUSE, ID_TAB, ID_ABOUT, ID_SAVE, ID_CLOSE, ID_LBL_HOTKEY, ID_HOTKEY, ID_LBL_HOTKEY_CASE, ID_HOTKEY_CASE, ID_LBL_WORK, ID_WORK_MODE, ID_COPY_RESULT, ID_LBL_TRY, ID_TRY, ID_LBL_RESULT, ID_RESULT, ID_LBL_LANG, ID_LANG, ID_AUTOSTART, ID_LBL_DIRECTION, ID_DIRECTION, ID_SWITCH, ID_BUBBLE, ID_SOUND, ID_CAREFUL, ID_CAPSOFF, ID_CONSOLE, ID_LASTWORD, ID_LBL_LIMIT, ID_LIMIT, ID_LBL_DELAY, ID_DELAY, ID_LBL_EXCLUDED, ID_EXCLUDED, ID_LAYOUTS, ID_DIAG_LAST, ID_DIAG_TEXT, ID_DIAG_COPY, ID_DIAG_REFRESH, ID_INDICATOR, ID_EXPORT, ID_IMPORT, ID_UNDO_IMPORT, ID_CHECK_UPDATE, ID_BUBBLE_POS, ID_TERMINAL];
     let mut i = 0;
     while i < ids.len() {
         let mut j = i + 1;
@@ -88,10 +88,12 @@ const _: () = {
     }
 };
 const ID_BUBBLE_POS: i32 = 263;
+/// 1.9.5: F10 in Windows Terminal (hidden on a PC managed by an administrator)
+const ID_TERMINAL: i32 = 265;
 
 const PAGE_SIMPLE: &[i32] = &[ID_LBL_HOTKEY, ID_HOTKEY, ID_LBL_HOTKEY_CASE, ID_HOTKEY_CASE, ID_LBL_WORK, ID_WORK_MODE, ID_COPY_RESULT, ID_LBL_TRY, ID_TRY, ID_LBL_RESULT, ID_RESULT, ID_LBL_LANG, ID_LANG, ID_AUTOSTART, ID_INDICATOR];
 const PAGE_ADVANCED: &[i32] = &[
-    ID_LBL_DIRECTION, ID_DIRECTION, ID_SWITCH, ID_BUBBLE, ID_BUBBLE_POS, ID_SOUND, ID_CAREFUL, ID_LASTWORD, ID_CAPSOFF, ID_CONSOLE, ID_LBL_LIMIT, ID_LIMIT, ID_LBL_DELAY, ID_DELAY, ID_LBL_EXCLUDED, ID_EXCLUDED,
+    ID_LBL_DIRECTION, ID_DIRECTION, ID_SWITCH, ID_BUBBLE, ID_BUBBLE_POS, ID_SOUND, ID_CAREFUL, ID_LASTWORD, ID_CAPSOFF, ID_CONSOLE, ID_TERMINAL, ID_LBL_LIMIT, ID_LIMIT, ID_LBL_DELAY, ID_DELAY, ID_LBL_EXCLUDED, ID_EXCLUDED,
 ];
 const PAGE_DIAG: &[i32] = &[ID_DIAG_LAST, ID_DIAG_TEXT, ID_LAYOUTS, ID_DIAG_COPY, ID_DIAG_REFRESH, ID_EXPORT, ID_IMPORT, ID_UNDO_IMPORT, ID_CHECK_UPDATE];
 
@@ -282,8 +284,9 @@ fn layout() -> Vec<(i32, i32, i32, i32, i32)> {
     v.push((ID_LBL_DIRECTION, x0, y + 2, lw - 6, 22));
     v.push((ID_DIRECTION, cx, y, cw, 200));
     y += 28;
-    let step = 20 - (k + 6) / 7; // 20 .. 16
-    for id in [ID_SWITCH, ID_BUBBLE, ID_SOUND, ID_CAREFUL, ID_LASTWORD, ID_CAPSOFF, ID_CONSOLE] {
+    // 1.9.5: 8 check boxes (Windows Terminal added): 18 .. 16 high, the page keeps its height
+    let step = 18 - (k + 12) / 14;
+    for id in [ID_SWITCH, ID_BUBBLE, ID_SOUND, ID_CAREFUL, ID_LASTWORD, ID_CAPSOFF, ID_CONSOLE, ID_TERMINAL] {
         if id == ID_BUBBLE {
             // bubble: check box + position list on the same line (1.5.2), a little more room
             v.push((id, x0, y + 1, lw + 56, step));
@@ -353,13 +356,19 @@ fn apply_layout() {
 }
 
 /// Shows the controls of one tab, hides the others.
+/// 1.9.5: a PC managed by an administrator (any policy): F10 in the terminal is hidden there.
+fn school_pc() -> bool {
+    !app::policy().is_empty()
+}
+
 fn show_page(page: usize) {
     PAGE.with(|p| p.set(page));
     send(ID_TAB, TCM_SETCURSEL, page, 0);
     for (i, ids) in [PAGE_SIMPLE, PAGE_ADVANCED, PAGE_DIAG].iter().enumerate() {
         for id in *ids {
+            let show = i == page && !(*id == ID_TERMINAL && school_pc());
             // SAFETY: our child windows.
-            unsafe { ShowWindow(item(*id), if i == page { SW_SHOW } else { SW_HIDE }) };
+            unsafe { ShowWindow(item(*id), if show { SW_SHOW } else { SW_HIDE }) };
         }
     }
     if page == 2 {
@@ -576,6 +585,7 @@ fn fill_controls() {
     set_text(ID_LASTWORD, text(l, Msg::CheckLastWord));
     set_text(ID_CAPSOFF, text(l, Msg::CheckCapsOff));
     set_text(ID_CONSOLE, text(l, Msg::CheckConsole));
+    set_text(ID_TERMINAL, text(l, Msg::CheckTerminal));
     set_text(ID_LBL_LIMIT, text(l, Msg::LabelLimit));
     set_text(ID_LBL_DELAY, text(l, Msg::LabelDelay));
     set_text(ID_DIAG_COPY, text(l, Msg::ButtonCopyDiag));
@@ -622,6 +632,7 @@ fn fill_controls() {
     set_checked(ID_LASTWORD, s.last_word_only);
     set_checked(ID_CAPSOFF, s.turn_off_caps_lock);
     set_checked(ID_CONSOLE, s.console_support);
+    set_checked(ID_TERMINAL, s.terminal_support);
     set_checked(ID_INDICATOR, s.indicator);
     set_text(ID_LIMIT, &s.max_character_limit.to_string());
     set_text(ID_DELAY, &s.paste_delay_ms.to_string());
@@ -733,6 +744,8 @@ fn read_controls() -> Option<AppSettings> {
     s.last_word_only = keep(lk.last_word_only, old.last_word_only, ID_LASTWORD);
     s.turn_off_caps_lock = keep(lk.turn_off_caps_lock, old.turn_off_caps_lock, ID_CAPSOFF);
     s.console_support = keep(lk.console_support, old.console_support, ID_CONSOLE);
+    // 1.9.5: hidden (and forced off) on a PC managed by an administrator
+    s.terminal_support = keep(school_pc(), old.terminal_support, ID_TERMINAL);
     s.indicator = keep(lk.indicator, old.indicator, ID_INDICATOR);
     if !lk.ui_language {
         s.ui_language = match send(ID_LANG, CB_GETCURSEL, 0, 0) {
@@ -1196,7 +1209,7 @@ pub fn open() {
         // Advanced
         create("STATIC", "", stat, 0, ID_LBL_DIRECTION);
         create("COMBOBOX", "", CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL, 0, ID_DIRECTION);
-        for id in [ID_SWITCH, ID_BUBBLE, ID_SOUND, ID_CAREFUL, ID_LASTWORD, ID_CAPSOFF, ID_CONSOLE] {
+        for id in [ID_SWITCH, ID_BUBBLE, ID_SOUND, ID_CAREFUL, ID_LASTWORD, ID_CAPSOFF, ID_CONSOLE, ID_TERMINAL] {
             create("BUTTON", "", BS_AUTOCHECKBOX | WS_TABSTOP, 0, id);
             if id == ID_BUBBLE {
                 create("COMBOBOX", "", CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL, 0, ID_BUBBLE_POS);

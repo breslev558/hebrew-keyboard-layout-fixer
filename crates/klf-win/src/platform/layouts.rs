@@ -34,6 +34,36 @@ fn handle(hkl32: u32) -> Option<HKL> {
     list.iter().take(n.clamp(0, 64) as usize).copied().find(|h| *h as usize as u32 == hkl32)
 }
 
+/// 1.9.5: the keys followed in the terminal as text (Shift as recorded, Caps Lock as now, never
+/// Ctrl/Alt). None if one key gives no character, a dead key or several characters.
+pub fn keys_to_text(keys: &[klf_core::terminal::KeyStroke], caps_on: bool) -> Option<String> {
+    let mut out = String::with_capacity(keys.len() * 2);
+    for k in keys {
+        let mut state = [0u8; 256];
+        if k.shift {
+            state[0x10] = 0x80;
+            state[0xA0] = 0x80;
+        }
+        if caps_on {
+            state[0x14] = 0x01;
+        }
+        let mut buf = [0u16; 8];
+        // SAFETY: plain values; the buffer is ours and its size is passed; the HKL came from
+        // GetKeyboardLayout (a layout handle, never dereferenced by us).
+        let n = unsafe { ToUnicodeEx(k.vk as u32, k.scan as u32, state.as_ptr(), buf.as_mut_ptr(), buf.len() as i32, TU_NO_STATE_CHANGE, k.hkl as HKL) };
+        let c = if n == 1 { char::from_u32(buf[0] as u32) } else { None };
+        buf.fill(0);
+        match c {
+            Some(c) => out.push(c),
+            None => {
+                klf_core::terminal::wipe_string(out);
+                return None;
+            }
+        }
+    }
+    Some(out)
+}
+
 /// Unshifted level of every character key of an installed layout.
 pub fn read_layout(hkl32: u32) -> Option<Vec<KeyChar>> {
     read_level(hkl32, false)

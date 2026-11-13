@@ -90,6 +90,7 @@ pub fn report() -> String {
             (t("mode prudent", "careful mode"), s.require_selection.to_string()),
             (t("éteindre Verr. Maj après F9", "Caps Lock off after F9"), s.turn_off_caps_lock.to_string()),
             (t("console expérimentale", "experimental console"), s.console_support.to_string()),
+            (t("terminal (Windows Terminal)", "terminal (Windows Terminal)"), s.terminal_support.to_string()),
             (t("changer la langue après", "switch language after"), s.switch_language_after_convert.to_string()),
             (t("limite de caractères", "character limit"), s.max_character_limit.to_string()),
             (t("délai avant remise (ms)", "delay before restore (ms)"), s.paste_delay_ms.to_string()),

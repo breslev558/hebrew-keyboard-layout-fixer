@@ -305,6 +305,25 @@ pub trait Host {
     fn send_right(&self, n: usize) -> bool;
     /// ONE SendInput: `backspaces` x Backspace then `text` as Unicode characters.
     fn send_replace(&self, backspaces: usize, text: &str) -> bool;
+    /// 1.9.5 terminal: what was typed in the terminal (turned into text now) and the generation
+    /// of the run; None when nothing is followed or a key cannot be turned into one character.
+    fn terminal_typed(&self) -> Option<(String, u64)> {
+        None
+    }
+    /// 1.9.5: the generation of the run now (changes with every key of the user).
+    fn terminal_generation(&self) -> u64 {
+        0
+    }
+    /// 1.9.5: the text just before the cursor in the focused terminal control (at least `n`
+    /// characters when there are), read on the screen (UI Automation); Err(why) when it cannot
+    /// be read (not the terminal control, selection active, no answer).
+    fn terminal_before_caret(&self, _n: usize) -> Result<String, &'static str> {
+        Err("not available")
+    }
+    /// 1.9.5: the converted text was confirmed on the screen (a second F10 toggles it back).
+    fn terminal_adopt(&self, _text: &str) {}
+    /// 1.9.5: the run is forgotten (not confirmed: nothing more is done until retyped).
+    fn terminal_forget(&self) {}
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -435,6 +454,13 @@ pub fn run_traced(host: &mut dyn Host, s: &AppSettings, trace: &mut Trace) -> Ou
             ConsoleKind::Classic if s.console_support => {
                 trace.mark(Step::Console, host.now_ms());
                 run_console(host, s, &map, target)
+            }
+            ConsoleKind::Terminal if s.terminal_support && s.require_selection => {
+                Outcome::say(Msg::SelectText, "Terminal and careful mode on: nothing done")
+            }
+            ConsoleKind::Terminal if s.terminal_support => {
+                trace.mark(Step::Console, host.now_ms());
+                run_terminal(host, s, &map, target)
             }
             _ => Outcome::say(Msg::ConsoleUnsupported, format!("Console window ({}), nothing done", info.window_class)),
         };
@@ -911,6 +937,133 @@ fn select_last_word(host: &mut dyn Host, target: usize, st: &mut ClipState, trac
 }
 
 // ---------------------------------------------------------------------------------------------
+// 1.9.5: Windows Terminal (terminal.rs): the keys followed since the last reset, checked on the
+// screen, replaced by Backspaces + the converted text in ONE SendInput. Never Ctrl+C, never the
+// clipboard, never Enter or a control character. The typed text is wiped from memory after use.
+
+/// Polls the screen (every 30 ms, 300 ms at most) until `text` is just before the cursor.
+/// A slow first answer of the screen reader (Windows Terminal not asked yet) is waited for; any
+/// other refusal stops at once. Never a replacement without a matching reading.
+fn terminal_shows(host: &mut dyn Host, text: &str) -> Result<(), &'static str> {
+    let n = text.chars().count();
+    let mut why = "not shown";
+    // about 1 s at most in all, whatever the time of each reading
+    let end = host.now_ms() + 1_000;
+    for i in 0..40 {
+        if i > 0 {
+            if host.now_ms() >= end {
+                break;
+            }
+            host.sleep(30);
+        }
+        match host.terminal_before_caret(n) {
+            Ok(screen) => {
+                let ok = crate::terminal::shown(&screen, text);
+                crate::terminal::wipe_string(screen);
+                if ok {
+                    return Ok(());
+                }
+                why = "not shown";
+            }
+            Err(w @ ("no answer in time" | "superseded")) => why = w,
+            Err(w) => return Err(w),
+        }
+    }
+    Err(why)
+}
+
+/// The window, the field, the run and the keys did not move (None) or why it stops.
+fn terminal_still(host: &mut dyn Host, target: usize, generation: u64) -> Option<Outcome> {
+    if let Some((msg, why)) = change_reason(host, target) {
+        return Some(Outcome::say(msg, format!("Terminal: window or field changed ({why}), nothing done")));
+    }
+    if host.terminal_generation() != generation {
+        return Some(Outcome::say(Msg::UserMoved, "Terminal: a key was typed meanwhile, nothing done"));
+    }
+    if host.modifiers_down() {
+        return Some(Outcome::say(Msg::KeysHeld, "Terminal: Shift/Ctrl/Alt held, nothing done"));
+    }
+    None
+}
+
+fn run_terminal(host: &mut dyn Host, s: &AppSettings, map: &KeyMap, target: usize) -> Outcome {
+    if !host.wait_keys_released(true) {
+        return Outcome::say(Msg::KeysHeld, "Keys still held after 1.5 s, nothing done");
+    }
+    host.sleep(20);
+    if host.foreground() != target {
+        return Outcome::say(Msg::WindowChanged, "Target window changed, nothing done");
+    }
+    let Some((typed, generation)) = host.terminal_typed() else {
+        return Outcome::say(Msg::TerminalRetype, "Terminal: nothing followed (Enter, Tab, arrow, click, special key or idle), nothing done");
+    };
+    let o = terminal_inner(host, s, map, target, &typed, generation);
+    crate::terminal::wipe_string(typed);
+    o
+}
+
+fn terminal_inner(host: &mut dyn Host, s: &AppSettings, map: &KeyMap, target: usize, typed: &str, generation: u64) -> Outcome {
+    let n = match crate::terminal::check_text(typed) {
+        Ok(n) => n,
+        Err(r) => return Outcome::say(Msg::TerminalRetype, format!("Terminal: typed text refused ({r:?}), nothing done")),
+    };
+    if let Err(why) = terminal_shows(host, typed) {
+        // (never the number of characters: it would tell the length of a password)
+        return Outcome::say(Msg::TerminalNotShown, format!("Terminal: the typed text is not seen before the cursor ({why}), nothing done"));
+    }
+    let out = transform(&*host, s, map, typed);
+    let o = terminal_send(host, s, target, typed, generation, n, &out);
+    crate::terminal::wipe_string(out);
+    o
+}
+
+fn terminal_send(host: &mut dyn Host, s: &AppSettings, target: usize, typed: &str, generation: u64, n: usize, out: &str) -> Outcome {
+    if out == typed {
+        return Outcome::say(Msg::NothingToConvert, "Terminal: text unchanged");
+    }
+    if let Err(r) = crate::terminal::check_text(out) {
+        return Outcome::say(Msg::NothingToConvert, format!("Terminal: converted text refused ({r:?}), nothing done"));
+    }
+    // last checks, right before the keys: same window and field, no key or click of the user,
+    // the same run, and the text still there; window, run and keys checked AGAIN
+    // after the reading of the screen, which can take 150 ms
+    if let Some(o) = terminal_still(host, target, generation) {
+        return o;
+    }
+    match host.terminal_before_caret(n) {
+        Ok(screen) => {
+            let ok = crate::terminal::shown(&screen, typed);
+            crate::terminal::wipe_string(screen);
+            if !ok {
+                return Outcome::say(Msg::TerminalNotShown, "Terminal: the text changed on the screen, nothing done");
+            }
+        }
+        Err(why) => return Outcome::say(Msg::TerminalNotShown, format!("Terminal: screen not read again ({why}), nothing done")),
+    }
+    if let Some(o) = terminal_still(host, target, generation) {
+        return o;
+    }
+    // ONE SendInput: n Backspaces, then the converted text (printable characters only)
+    if !host.send_replace(n, out) {
+        host.terminal_forget(); // perhaps partly sent: what is on the screen is not known
+        return Outcome::say(Msg::KeysBlocked, "Terminal: keys not sent");
+    }
+    if s.switch_language_after_convert && s.action == Action::Layout {
+        host.switch_language(target, contains_hebrew(out));
+    }
+    // confirmed on the screen: a second F10 toggles it back; otherwise forgotten
+    let confirmed = terminal_shows(host, out).is_ok();
+    // (adopted only if the user typed nothing since: our own keys never change the run)
+    if confirmed && host.terminal_generation() == generation {
+        host.terminal_adopt(out);
+    } else {
+        host.terminal_forget();
+    }
+    let m = out.chars().count();
+    Outcome::say(Msg::Converted, format!("Terminal: {n} characters replaced by {m}{}", if confirmed { "" } else { " (not confirmed on the screen)" }))
+}
+
+// ---------------------------------------------------------------------------------------------
 // Classic console: no clipboard, no Ctrl+C. Only line-editing keys (Home, End, Backspace) and
 // Unicode characters are sent, and only when cmd/PowerShell is waiting for a command.
 
@@ -1186,6 +1339,13 @@ mod tests {
         c_cursor: Cell<(i32, i32, i32)>,
         c_selection: bool,
         c_replaced: RefCell<Option<(usize, String)>>,
+        /// 1.9.5 terminal: run followed, generation, screen answers (one per read, the last repeats)
+        t_typed: RefCell<Option<(String, u64)>>,
+        t_gen: Cell<u64>,
+        t_screen: RefCell<Vec<Result<String, &'static str>>>,
+        t_reads: Cell<usize>,
+        t_adopted: RefCell<Option<String>>,
+        t_forgot: Cell<bool>,
         attached: Cell<bool>,
         /// key map given by key_map (None = the US table)
         map: Option<Result<KeyMap, String>>,
@@ -1255,6 +1415,12 @@ mod tests {
                 c_cursor: Cell::new((8, 10, 120)),
                 c_selection: false,
                 c_replaced: RefCell::new(None),
+                t_typed: RefCell::new(None),
+                t_gen: Cell::new(0),
+                t_screen: RefCell::new(Vec::new()),
+                t_reads: Cell::new(0),
+                t_adopted: RefCell::new(None),
+                t_forgot: Cell::new(false),
                 attached: Cell::new(false),
                 map: None,
                 clock: Cell::new(0),
@@ -1558,6 +1724,112 @@ mod tests {
             *self.c_replaced.borrow_mut() = Some((n, text.into()));
             true
         }
+        fn terminal_typed(&self) -> Option<(String, u64)> {
+            self.t_typed.borrow().clone()
+        }
+        fn terminal_generation(&self) -> u64 {
+            self.t_gen.get()
+        }
+        fn terminal_before_caret(&self, _n: usize) -> Result<String, &'static str> {
+            let i = self.t_reads.get();
+            self.t_reads.set(i + 1);
+            let v = self.t_screen.borrow();
+            v.get(i).or(v.last()).cloned().unwrap_or(Err("no answer"))
+        }
+        fn terminal_adopt(&self, text: &str) {
+            *self.t_adopted.borrow_mut() = Some(text.into());
+        }
+        fn terminal_forget(&self) {
+            self.t_forgot.set(true);
+        }
+    }
+
+    /// 1.9.5: a Windows Terminal window with the option on, "akuo" typed and shown.
+    fn terminal_mock() -> (Mock, AppSettings) {
+        let mut m = Mock::new();
+        m.info.window_class = "CASCADIA_HOSTING_WINDOW_CLASS".into();
+        m.info.exe_name = "WindowsTerminal.exe".into();
+        *m.t_typed.borrow_mut() = Some(("akuo".into(), 7));
+        m.t_gen.set(7);
+        // shown before F10, still there right before the keys, then the converted text
+        *m.t_screen.borrow_mut() = vec![Ok("PS C:\\> akuo".into()), Ok("PS C:\\> akuo".into()), Ok("PS C:\\> שלום".into())];
+        (m, AppSettings { terminal_support: true, ..settings() })
+    }
+
+    #[test]
+    fn terminal_replaces_the_typed_run_without_clipboard_or_ctrl_c() {
+        let (mut m, s) = terminal_mock();
+        let o = run(&mut m, &s);
+        assert_eq!(o.msg, Some(Msg::Converted), "{}", o.log);
+        assert_eq!(m.c_replaced.borrow().clone(), Some((4, "שלום".to_string())));
+        assert!(!m.happened("copy") && m.pasted.borrow().is_none(), "never Ctrl+C nor Ctrl+V");
+        assert_eq!(m.clip_text().as_deref(), Some("USER CLIPBOARD"), "clipboard untouched");
+        assert_eq!(m.t_adopted.borrow().as_deref(), Some("שלום"), "confirmed: a second F10 toggles");
+        assert!(!o.log.contains("akuo") && !o.log.contains("שלום"), "never the text in the journal: {}", o.log);
+    }
+
+    #[test]
+    fn terminal_does_nothing_when_off_not_followed_or_not_on_the_screen() {
+        // option off (unticked, or a school PC): refused as before
+        let (mut m, _) = terminal_mock();
+        let o = run(&mut m, &AppSettings { terminal_support: false, ..settings() });
+        assert_eq!(o.msg, Some(Msg::ConsoleUnsupported), "{}", o.log);
+        // nothing followed
+        let (mut m, s) = terminal_mock();
+        *m.t_typed.borrow_mut() = None;
+        assert_eq!(run(&mut m, &s).msg, Some(Msg::TerminalRetype));
+        // not on the screen (hidden password: nothing, or stars)
+        for screen in ["Password: ", "Password: ****"] {
+            let (mut m, s) = terminal_mock();
+            *m.t_screen.borrow_mut() = vec![Ok(screen.into())];
+            let o = run(&mut m, &s);
+            assert_eq!(o.msg, Some(Msg::TerminalNotShown), "{}", o.log);
+            assert!(m.c_replaced.borrow().is_none(), "nothing erased or typed");
+        }
+        // the screen cannot be read: never a blind replacement
+        let (mut m, s) = terminal_mock();
+        *m.t_screen.borrow_mut() = vec![Err("not the terminal control")];
+        assert_eq!(run(&mut m, &s).msg, Some(Msg::TerminalNotShown));
+        assert!(m.c_replaced.borrow().is_none());
+        // careful mode
+        let (mut m, mut s) = terminal_mock();
+        s.require_selection = true;
+        assert_eq!(run(&mut m, &s).msg, Some(Msg::SelectText));
+    }
+
+    #[test]
+    fn terminal_stops_when_something_moves_before_the_keys() {
+        // a key typed meanwhile (the run changed)
+        let (mut m, s) = terminal_mock();
+        m.t_gen.set(8);
+        let o = run(&mut m, &s);
+        assert_eq!(o.msg, Some(Msg::UserMoved), "{}", o.log);
+        assert!(m.c_replaced.borrow().is_none());
+        // a click during the fix
+        let (mut m, s) = terminal_mock();
+        m.moving.set(true);
+        assert_eq!(run(&mut m, &s).msg, Some(Msg::UserMoved));
+        assert!(m.c_replaced.borrow().is_none());
+        // the text changed on the screen right before the keys
+        let (mut m, s) = terminal_mock();
+        *m.t_screen.borrow_mut() = vec![Ok("> akuo".into()), Ok("> akuoX".into())];
+        assert_eq!(run(&mut m, &s).msg, Some(Msg::TerminalNotShown));
+        assert!(m.c_replaced.borrow().is_none());
+        // a typed text with a line break or a control character is never sent
+        let (mut m, s) = terminal_mock();
+        *m.t_typed.borrow_mut() = Some(("ak\nuo".into(), 7));
+        assert_eq!(run(&mut m, &s).msg, Some(Msg::TerminalRetype));
+        assert!(m.c_replaced.borrow().is_none());
+    }
+
+    #[test]
+    fn terminal_not_confirmed_forgets_the_run() {
+        let (mut m, s) = terminal_mock();
+        *m.t_screen.borrow_mut() = vec![Ok("> akuo".into()), Ok("> akuo".into()), Ok("> ???".into())];
+        let o = run(&mut m, &s);
+        assert_eq!(o.msg, Some(Msg::Converted), "{}", o.log);
+        assert!(o.log.contains("not confirmed"), "{}", o.log);
+        assert!(m.t_forgot.get() && m.t_adopted.borrow().is_none());
     }
 
     /// Settings of the tests: defaults, console path switched on (off by default since 1.3.2).
@@ -1922,7 +2194,8 @@ mod tests {
         assert_eq!(run(&mut m, &s).msg, Some(Msg::ConsoleUnsupported));
         let mut m = console();
         m.info.window_class = "CASCADIA_HOSTING_WINDOW_CLASS".into();
-        assert_eq!(go(&mut m).msg, Some(Msg::ConsoleUnsupported));
+        let s = AppSettings { terminal_support: false, ..settings() }; // 1.9.5: on by default
+        assert_eq!(run(&mut m, &s).msg, Some(Msg::ConsoleUnsupported));
         assert!(m.events.borrow().is_empty());
     }
 

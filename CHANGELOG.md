@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.9.5 (November 2026)
+- **F10 now works in Windows Terminal** (PowerShell, cmd, SSH to a server, programs that run in the terminal). A terminal has no selection to copy and Ctrl+C would stop the running program, so it works differently there: while Windows Terminal is in front, the program follows the keys you type (memory only, forgotten on Enter, Tab, arrows, a click, another window or within 20 seconds). On F10 it first checks on the screen that exactly this text is just before the cursor, then replaces it with Backspaces and the converted text. Never Ctrl+C, never the clipboard, never Enter.
+- A password typed blind (sudo, ssh) or shown as `****` is never touched: it is not shown as typed, so F10 does nothing. See PRIVACY.md.
+- On by default; untick *Also fix in Windows Terminal* in the settings (Advanced page) to turn it off. Always off and hidden on a PC managed by an administrator. Not in administrator (elevated) terminal windows.
+- The typing suggestions never look at keys typed in a terminal.
+
 ## 1.9.4 (November 2026)
 - **F10 is no longer cancelled for nothing** ("Window changed: cancelled" right after F10, the text not fixed): an Enter, Tab or click made BEFORE F10 (sending a message, then clicking in the field) was still reported by Windows and taken for a key or click during the fix: at the press only the first of these reports was cleared. Now all are cleared at the press, and the clicks and keys made after F10 are also counted by the program itself.
 - A click or key during the fix now says so ("Click or key during the fix: cancelled") instead of "Window changed", and the journal names it (which button or key).

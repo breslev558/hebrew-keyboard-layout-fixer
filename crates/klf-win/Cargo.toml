@@ -1,6 +1,6 @@
 [package]
 name = "KeyboardLayoutFixer"
-version = "1.9.4"
+version = "1.9.5"
 edition = "2021"
 license = "MIT"
 publish = false
@@ -21,7 +21,7 @@ windows-sys = { version = "0.61", features = [
   "Win32_UI_Controls", "Win32_UI_HiDpi", "Win32_System_Console", "Win32_Storage_FileSystem",
   "Win32_Security", "Win32_System_Diagnostics_Debug", "Win32_Globalization", "Win32_Media_Audio",
   "Win32_System_SystemInformation", "Win32_System_Performance", "Win32_System_ProcessStatus", "Win32_UI_Accessibility", "Win32_UI_Controls_Dialogs",
-  "Win32_Networking_WinHttp", "Win32_Security_Cryptography", "Win32_System_RemoteDesktop", "Win32_System_Com", "Win32_System_Variant", "Win32_System_Ole",
+  "Win32_Networking_WinHttp", "Win32_Security_Cryptography", "Win32_System_RemoteDesktop", "Win32_System_Com", "Win32_System_Variant", "Win32_System_Ole", "Win32_System_ErrorReporting",
 ] }
 
 [build-dependencies]

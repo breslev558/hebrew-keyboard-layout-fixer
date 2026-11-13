@@ -8,12 +8,16 @@ pub enum ConsoleKind {
     /// Windows Terminal, ConEmu, mintty...: a simulated Ctrl+C would be an interrupt, and the
     /// console API cannot reach the right tab -> nothing is done.
     Unsupported,
+    /// 1.9.5: Windows Terminal: its own path, keys followed + screen check (terminal.rs)
+    Terminal,
 }
 
 pub fn console_kind(window_class: &str) -> Option<ConsoleKind> {
     match window_class {
         "ConsoleWindowClass" => Some(ConsoleKind::Classic),
-        "CASCADIA_HOSTING_WINDOW_CLASS" | "VirtualConsoleClass" | "mintty" | "PuTTY" => Some(ConsoleKind::Unsupported),
+        // 1.9.5: Windows Terminal has its own path (option TerminalSupport, terminal.rs)
+        "CASCADIA_HOSTING_WINDOW_CLASS" => Some(ConsoleKind::Terminal),
+        "VirtualConsoleClass" | "mintty" | "PuTTY" => Some(ConsoleKind::Unsupported),
         _ => None,
     }
 }
@@ -279,7 +283,7 @@ mod tests {
     #[test]
     fn consoles() {
         assert_eq!(console_kind("ConsoleWindowClass"), Some(ConsoleKind::Classic));
-        assert_eq!(console_kind("CASCADIA_HOSTING_WINDOW_CLASS"), Some(ConsoleKind::Unsupported));
+        assert_eq!(console_kind("CASCADIA_HOSTING_WINDOW_CLASS"), Some(ConsoleKind::Terminal));
         assert_eq!(console_kind("Notepad"), None);
     }
 

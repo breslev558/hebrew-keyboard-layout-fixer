@@ -36,6 +36,10 @@ pub enum Msg {
     WindowChanged,
     /// 1.9.4: a click or a key (Tab, Enter, arrow…) during the fix
     UserMoved,
+    /// 1.9.5 terminal: nothing followed (retype, then F10)
+    TerminalRetype,
+    /// 1.9.5 terminal: the typed text is not seen just before the cursor
+    TerminalNotShown,
     ExcludedProgram,
     KeysHeld,
     TooLong,
@@ -81,6 +85,8 @@ pub enum Msg {
     BubbleCaret,
     CheckSound,
     CheckConsole,
+    /// 1.9.5
+    CheckTerminal,
     CheckAutostart,
     AutostartManaged,
     LabelLanguage,
@@ -198,14 +204,14 @@ pub enum Msg {
 
 pub const ALL_MSGS: &[Msg] = &[
     Msg::Converted, Msg::NothingToConvert, Msg::SelectText, Msg::ConsoleUnsupported, Msg::ConsoleBusy,
-    Msg::AdminWindow, Msg::PasswordField, Msg::ClipboardBusy, Msg::ClipboardTooBig, Msg::WindowChanged, Msg::UserMoved,
+    Msg::AdminWindow, Msg::PasswordField, Msg::ClipboardBusy, Msg::ClipboardTooBig, Msg::WindowChanged, Msg::UserMoved, Msg::TerminalRetype, Msg::TerminalNotShown,
     Msg::ExcludedProgram, Msg::KeysHeld, Msg::TooLong, Msg::PasteFailed, Msg::KeysBlocked, Msg::NewCopyKept, Msg::ClipboardNotRestored, Msg::LayoutUnsupported, Msg::HotkeyBusy, Msg::CaseKeyBusy,
     Msg::MenuPause, Msg::MenuResume, Msg::MenuSettings, Msg::MenuAbout, Msg::MenuExit, Msg::MenuRuleDisable, Msg::MenuRuleSelection, Msg::MenuRuleRemove, Msg::MenuPause10, Msg::MenuResumeAt,
     Msg::TipReady, Msg::TipPaused, Msg::TipUnavailable,
     Msg::WindowTitle, Msg::StatusReady, Msg::StatusPaused, Msg::StatusUnavailable, Msg::ButtonPause,
     Msg::ButtonResume, Msg::LabelHotkey, Msg::LabelDirection, Msg::DirectionAuto, Msg::DirectionToHebrew,
     Msg::DirectionToEnglish, Msg::LabelTry, Msg::LabelResult, Msg::CheckSwitchLanguage, Msg::CheckBubble, Msg::BubbleTop, Msg::BubbleBottom, Msg::BubbleCaret,
-    Msg::CheckSound, Msg::CheckConsole, Msg::CheckAutostart, Msg::AutostartManaged, Msg::LabelLanguage,
+    Msg::CheckSound, Msg::CheckConsole, Msg::CheckTerminal, Msg::CheckAutostart, Msg::AutostartManaged, Msg::LabelLanguage,
     Msg::LanguageAuto, Msg::ButtonSave, Msg::ButtonClose, Msg::ButtonAbout, Msg::HotkeyInvalid, Msg::SaveFailed, Msg::AutostartFailed, Msg::AboutText, Msg::IndicatorCapsOn, Msg::IndicatorCapsOff, Msg::CheckIndicator, Msg::SchoolManaged, Msg::ButtonExport, Msg::ButtonImport, Msg::ButtonUndoImport, Msg::ImportConfirm, Msg::ImportNothing, Msg::ImportFailed, Msg::ImportTooBig, Msg::ImportNotJson, Msg::ImportUnknownFormat, Msg::ImportNewerFormat, Msg::ImportUnreadable, Msg::MenuRestoreClipboard, Msg::MenuCheckUpdates, Msg::MenuPreview, Msg::WelcomeTitle, Msg::WelcomeText, Msg::WelcomeTry, Msg::WelcomeClose, Msg::WelcomeNoMore, Msg::MenuInstallUpdate, Msg::UpdateAvailable, Msg::UpdateInstalling, Msg::UpdateFailed, Msg::ClipboardRestoredLater, Msg::ClipboardNotRestoredNewCopy, Msg::ImportDone, Msg::ExportDone, Msg::UndoConfirm, Msg::UndoNone, Msg::CheckLastWord, Msg::TabSimple, Msg::TabAdvanced, Msg::TabDiagnostic, Msg::LabelHotkeyLayout, Msg::LabelHotkeyCase, Msg::LabelWorkshop, Msg::WorkFollow, Msg::WorkToLatin, Msg::WorkToHebrew, Msg::WorkCase, Msg::ButtonCopyResult, Msg::LabelText, Msg::CheckCareful, Msg::CheckCapsOff, Msg::LabelLimit, Msg::LabelDelay, Msg::LabelExcluded, Msg::NumberInvalid, Msg::DiagNone, Msg::DiagLast, Msg::ButtonCopyDiag, Msg::ButtonRefresh, Msg::DiagCopied, Msg::CopyFailed, Msg::LayoutsLine, Msg::MenuReports, Msg::MenuReportProblem, Msg::MenuSendReport, Msg::MenuReportAlways, Msg::MenuReportNever, Msg::ReportAskTitle, Msg::ReportAskText, Msg::ReportSent, Msg::ReportFailed, Msg::ReportDialogText, Msg::ReportPreviewLabel, Msg::ReportSend, Msg::ReportCancel, Msg::MenuTyping, Msg::TypingReady, Msg::TypingFailed, Msg::MenuTypingWords, Msg::TypingUndone, Msg::TypingWordsHelp, Msg::MenuDoubleShift, Msg::MenuTypingSound, Msg::QuickBrake, Msg::HookBrake, Msg::MenuCtrlTap, Msg::MenuMessengerGuard, Msg::MessengerWarning, Msg::MenuOneLanguage, Msg::MenuOneLanguageFile, Msg::OneLanguageHelp, Msg::TypingRestored, Msg::HookLost, Msg::MenuF10WrongWords, Msg::DormantFullscreen, Msg::DormantExcluded, Msg::DormantCodeEditor, Msg::DormantSensitive, Msg::MenuReplacements, Msg::MenuReplacementsFile, Msg::ReplacementsHelp, Msg::ButtonCheckUpdate, Msg::UpdateUpToDate, Msg::UpdateCheckFailed, Msg::UpdatesManaged,
 ];
 
@@ -247,6 +253,12 @@ pub fn text(lang: Lang, m: Msg) -> &'static str {
         (UserMoved, He) => "לחיצת מקש או עכבר: הפעולה בוטלה",
         (UserMoved, Fr) => "Clic ou touche pendant la correction : annulée",
         (UserMoved, En) => "Click or key during the fix: cancelled",
+        (TerminalRetype, He) => "טרמינל: הטקסט לא נקלט, הקלידו אותו שוב ואז F10\u{200F}",
+        (TerminalRetype, Fr) => "Terminal : texte non suivi, retapez-le puis F10",
+        (TerminalRetype, En) => "Terminal: text not followed, type it again, then F10",
+        (TerminalNotShown, He) => "טרמינל: הטקסט לא מופיע לפני הסמן, לא נעשה דבר",
+        (TerminalNotShown, Fr) => "Terminal : texte non visible avant le curseur, rien fait",
+        (TerminalNotShown, En) => "Terminal: text not seen before the cursor, nothing done",
         (ExcludedProgram, He) => "לא פעיל בתוכנה זו",
         (ExcludedProgram, Fr) => "Désactivé dans ce programme",
         (ExcludedProgram, En) => "Disabled in this program",
@@ -376,6 +388,9 @@ pub fn text(lang: Lang, m: Msg) -> &'static str {
         (CheckConsole, He) => "תקן גם ב-cmd/PowerShell (ניסיוני)",
         (CheckConsole, Fr) => "Corriger aussi dans cmd/PowerShell (expérimental)",
         (CheckConsole, En) => "Also fix in cmd/PowerShell (experimental)",
+        (CheckTerminal, He) => "תקן גם ב-Windows Terminal (המקשים נשמרים בזיכרון בלבד)",
+        (CheckTerminal, Fr) => "Corriger aussi dans Windows Terminal (touches en mémoire seulement)",
+        (CheckTerminal, En) => "Also fix in Windows Terminal (keys kept in memory only)",
         (CheckAutostart, He) => "הפעל בעת הכניסה ל-Windows\u{200F}",
         (CheckAutostart, Fr) => "Démarrer avec Windows",
         (CheckAutostart, En) => "Start with Windows",

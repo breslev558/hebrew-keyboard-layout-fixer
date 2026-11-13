@@ -171,6 +171,13 @@ jobs:
         run: |
           powershell -NoProfile -ExecutionPolicy Bypass -File tests-e2e\vitesse-navigateur.ps1
           exit $LASTEXITCODE
+      - name: F10 dans Windows Terminal (correction, aller-retour, mot de passe caché, Tab, palette, clic pendant)
+        if: success() || failure()
+        timeout-minutes: 10
+        shell: powershell
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File tests-e2e\terminal.ps1
+          exit $LASTEXITCODE
       - name: Audit visuel (toutes les fenêtres, 3 langues, 150 % et 200 %, contraste élevé, désinstallation)
         if: success() || failure()
         timeout-minutes: 15

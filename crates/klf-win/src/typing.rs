@@ -551,6 +551,11 @@ fn on_key(vk: u32, sc: u32) -> bool {
     if !want_t && !want_r {
         return false;
     }
+    // 1.9.5: never in a terminal (a password may be typed there without being shown)
+    if input::terminal_front() {
+        BUF.with(|b| b.borrow_mut().clear());
+        return false;
+    }
     let now = tick();
     let (fg, hkl) = focus_and_layout();
     // Backspace right after a fix: undo it (and never fix those words again)

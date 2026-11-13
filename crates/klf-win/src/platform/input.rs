@@ -145,7 +145,15 @@ pub fn replace(backspaces: usize, text: &str) -> bool {
         v.push(unicode(unit, false));
         v.push(unicode(unit, true));
     }
-    send(&v)
+    let ok = send(&v);
+    // 1.9.5: the characters sent are not left in memory (terminal text)
+    for i in v.iter_mut() {
+        // SAFETY: writing zeros over plain data (INPUT is a C struct of integers); volatile, so
+        // that it is not left out before the vector is freed.
+        unsafe { std::ptr::write_volatile(i as *mut INPUT, std::mem::zeroed()) };
+    }
+    std::hint::black_box(&v);
+    ok
 }
 
 /// 1.8.5: the same, at a gentle pace (the Windows 11 Notepad loses characters sent too fast):
@@ -403,6 +411,13 @@ unsafe extern "system" fn click_hook(code: i32, wp: usize, lp: isize) -> isize {
         // SAFETY: for code >= 0, lp points to a MSLLHOOKSTRUCT (contract of WH_MOUSE_LL).
         let m = unsafe { &*(lp as *const MSLLHOOKSTRUCT) };
         LAST_CLICK_AT.store(stamp(m.time), std::sync::atomic::Ordering::SeqCst);
+        // 1.9.5: a click in the terminal (a right click pastes there): the run is forgotten
+        if TERM_WATCH.load(std::sync::atomic::Ordering::Relaxed) {
+            match TERM.try_lock() {
+                Ok(mut t) => t.reset(),
+                Err(_) => TERM_DIRTY.store(true, std::sync::atomic::Ordering::SeqCst),
+            }
+        }
         USER_CLICKS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         LAST_CHAR.store(false, std::sync::atomic::Ordering::Relaxed);
     }
@@ -418,6 +433,147 @@ static WANTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::ne
 pub fn activity_watched() -> bool {
     use std::sync::atomic::Ordering::SeqCst;
     CAPS_HOOK_ON.load(SeqCst) && CLICK_HOOK_ON.load(SeqCst)
+}
+
+// 1.9.5: F10 in Windows Terminal (klf_core::terminal). The keys typed while Windows Terminal is in
+// front are followed in memory only (virtual keys, never characters), wiped on reset; never
+// written anywhere. TERM_WATCH is on only when the option is on and Windows Terminal is in front.
+static TERM: std::sync::Mutex<klf_core::terminal::Tracker> = std::sync::Mutex::new(klf_core::terminal::Tracker::new());
+static TERM_WATCH: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// the Windows Terminal window followed: keys are followed only while IT is in front
+static TERM_HWND: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+/// test builds of the Windows test only (environment KLF_TEST_TERMINAL=1 at start): keys injected
+/// with this mark count as typed by the user (the test cannot type for real)
+pub const TEST_TERMINAL_MARK: usize = 0x4B4C_4654;
+static TERM_TEST: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// the hook met the tracker busy (F10 reading it): the run is forgotten at the next look
+static TERM_DIRTY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn term() -> std::sync::MutexGuard<'static, klf_core::terminal::Tracker> {
+    TERM.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// 1.9.5: a terminal window (Windows Terminal or a classic console) is in front: the typing
+/// suggestions never look at the keys there (a password typed blind).
+static TERM_FRONT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub fn set_terminal_front(on: bool) {
+    TERM_FRONT.store(on, std::sync::atomic::Ordering::SeqCst);
+}
+pub fn terminal_front() -> bool {
+    TERM_FRONT.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// 1.9.5: follow (or not) the keys typed in the terminal window `hwnd`; the run is always forgotten.
+pub fn set_terminal_watch(on: bool, hwnd: usize) {
+    use std::sync::atomic::Ordering::SeqCst;
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    if on {
+        ONCE.call_once(|| {
+            TERM_TEST.store(std::env::var("KLF_TEST_TERMINAL").is_ok_and(|v| v == "1"), SeqCst);
+            // the run never goes to the page file nor to a crash dump
+            let g = term();
+            let p = &*g as *const klf_core::terminal::Tracker as *const core::ffi::c_void;
+            let size = std::mem::size_of::<klf_core::terminal::Tracker>();
+            // SAFETY: the address and size of a static that lives as long as the process.
+            if unsafe { windows_sys::Win32::System::Memory::VirtualLock(p, size) } == 0 {
+                crate::util::log("Terminal: memory of the followed keys could not be locked (kept anyway, memory only)");
+            }
+            // WerRegisterExcludedMemoryBlock exists since Windows 10 1703: looked up, never imported
+            type Exclude = unsafe extern "system" fn(*const core::ffi::c_void, u32) -> i32;
+            let name: Vec<u16> = "kernel32.dll\0".encode_utf16().collect();
+            // SAFETY: a module of every process; the function has the documented signature.
+            unsafe {
+                let m = windows_sys::Win32::System::LibraryLoader::GetModuleHandleW(name.as_ptr());
+                if let Some(f) = windows_sys::Win32::System::LibraryLoader::GetProcAddress(m, c"WerRegisterExcludedMemoryBlock".as_ptr() as *const u8) {
+                    let f: Exclude = std::mem::transmute(f);
+                    f(p, size as u32);
+                }
+            }
+        });
+    }
+    TERM_HWND.store(if on { hwnd } else { 0 }, SeqCst);
+    TERM_WATCH.store(on, SeqCst);
+    term().reset();
+}
+
+/// 1.9.5: a run left for 15 s is wiped even without a next key (timer of the UI thread).
+pub fn terminal_expire() {
+    if let Ok(mut t) = TERM.try_lock() {
+        t.expire(tick64());
+    }
+}
+
+/// 1.9.5: the run is forgotten (click, another window, session locked…).
+pub fn terminal_reset() {
+    if TERM_WATCH.load(std::sync::atomic::Ordering::SeqCst) {
+        term().reset();
+    }
+}
+
+/// 1.9.5: what F10 can convert in the terminal now, and the generation of the run.
+pub fn terminal_snapshot() -> Option<(klf_core::terminal::Typed, u64)> {
+    if !TERM_WATCH.load(std::sync::atomic::Ordering::SeqCst) {
+        return None;
+    }
+    let mut t = term();
+    if TERM_DIRTY.swap(false, std::sync::atomic::Ordering::SeqCst) {
+        t.break_run();
+    }
+    t.snapshot(tick64())
+}
+/// (a key or click the hook could not record also changes it)
+pub fn terminal_generation() -> u64 {
+    let g = term().generation();
+    if TERM_DIRTY.load(std::sync::atomic::Ordering::SeqCst) { g.wrapping_add(1) } else { g }
+}
+pub fn terminal_adopt(text: &str) {
+    term().adopt(text, tick64());
+}
+pub fn terminal_forget() {
+    term().break_run();
+}
+fn tick64() -> u64 {
+    // SAFETY: no arguments.
+    unsafe { windows_sys::Win32::System::SystemInformation::GetTickCount64() }
+}
+
+/// 1.9.5 (keyboard hook): one key press while Windows Terminal is in front.
+fn terminal_key(k: &windows_sys::Win32::UI::WindowsAndMessaging::KBDLLHOOKSTRUCT) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId, LLKHF_INJECTED};
+    let injected = k.flags & LLKHF_INJECTED != 0;
+    if injected && k.dwExtraInfo == OUR_MARK {
+        return; // our own Backspaces and characters
+    }
+    // never wait in the hook: a busy tracker (F10 reading it) = the run is not sure any more
+    let Ok(mut t) = TERM.try_lock() else {
+        TERM_DIRTY.store(true, std::sync::atomic::Ordering::SeqCst);
+        return;
+    };
+    if injected && !(TERM_TEST.load(std::sync::atomic::Ordering::SeqCst) && k.dwExtraInfo == TEST_TERMINAL_MARK) {
+        t.break_run(); // typed by another program: not followed
+        return;
+    }
+    // SAFETY: no pointers.
+    let fg = unsafe { GetForegroundWindow() };
+    if fg as usize != TERM_HWND.load(std::sync::atomic::Ordering::SeqCst) {
+        t.reset(); // another window is in front (its foreground event not handled yet)
+        return;
+    }
+    // the modifiers of the F10 hotkey (Ctrl+F10…) pressed for it are not "other keys"
+    let hotkey_mod = match k.vkCode as u16 {
+        VK_CONTROL | VK_LCONTROL | VK_RCONTROL => HOTKEY_MODS.load(std::sync::atomic::Ordering::SeqCst) & 2 != 0,
+        VK_MENU | VK_LMENU | VK_RMENU => HOTKEY_MODS.load(std::sync::atomic::Ordering::SeqCst) & 1 != 0,
+        VK_LWIN | VK_RWIN => HOTKEY_MODS.load(std::sync::atomic::Ordering::SeqCst) & 8 != 0,
+        _ => false,
+    };
+    if hotkey_mod {
+        return;
+    }
+    let ctrl_alt_win = [VK_CONTROL, VK_MENU, VK_LWIN, VK_RWIN].iter().any(|v| down(*v));
+    // SAFETY: no pointers (null pid).
+    let hkl = unsafe { windows_sys::Win32::UI::Input::KeyboardAndMouse::GetKeyboardLayout(GetWindowThreadProcessId(fg, std::ptr::null_mut())) } as usize;
+    let stroke = klf_core::terminal::KeyStroke { vk: k.vkCode as u16, scan: k.scanCode as u16, shift: down(VK_SHIFT), hkl };
+    t.key(stroke, ctrl_alt_win, tick64());
 }
 
 unsafe extern "system" fn caps_hook(code: i32, wp: usize, lp: isize) -> isize {
@@ -453,6 +609,9 @@ unsafe extern "system" fn caps_hook(code: i32, wp: usize, lp: isize) -> isize {
             if !HOTKEY_HELD.swap(true, std::sync::atomic::Ordering::SeqCst) || stale {
                 HOTKEY_DOWN_AT.store(stamp(k.time), std::sync::atomic::Ordering::SeqCst);
             }
+        }
+        if !is_hotkey && TERM_WATCH.load(std::sync::atomic::Ordering::Relaxed) {
+            terminal_key(k);
         }
         if k.vkCode == VK_CAPITAL as u32 {
             CAPS_PRESSES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);

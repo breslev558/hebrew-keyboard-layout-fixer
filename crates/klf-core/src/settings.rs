@@ -208,6 +208,10 @@ pub struct AppSettings {
     /// Off by default since 1.3.2 (audit: not yet tried in real consoles; "experimental").
     #[serde(rename = "ConsoleSupport", deserialize_with = "de_bool_false")]
     pub console_support: bool,
+    /// 1.9.5: F10 in Windows Terminal (see terminal.rs). On by default (choice of the owner,
+    /// 13/11); never with an administrator policy (school::effective), where it is also hidden.
+    #[serde(rename = "TerminalSupport", deserialize_with = "de_bool_true")]
+    pub terminal_support: bool,
     /// Time between Ctrl+V and putting the user's clipboard back (slow PCs need more).
     #[serde(rename = "PasteDelayMs", deserialize_with = "de_i64")]
     pub paste_delay_ms: i64,
@@ -323,6 +327,7 @@ impl Default for AppSettings {
             update_skip_at: 0,
             ui_language: UiLanguage::Auto,
             console_support: false,
+            terminal_support: true,
             paste_delay_ms: DEFAULT_PASTE_DELAY_MS,
             excluded_processes: Vec::new(),
             app_rules: Vec::new(),

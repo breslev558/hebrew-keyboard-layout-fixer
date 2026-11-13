@@ -508,6 +508,11 @@ fn refresh_terminal_watch(keep: bool) {
     // (every console or terminal window: Windows Terminal, conhost, PuTTY, mintty…)
     crate::platform::input::set_terminal_front(klf_core::policy::console_kind(&class).is_some());
     crate::platform::input::set_terminal_watch(followed, fg as usize, keep);
+    // 1.9.6: the Caps Lock state is noted at every change of window, while it can be read (any
+    // window; see input::caps_lock_guess)
+    if !keep && !fg.is_null() {
+        let _ = crate::platform::input::caps_lock_on_now(fg);
+    }
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -611,6 +611,9 @@ unsafe extern "system" fn caps_hook(code: i32, wp: usize, lp: isize) -> isize {
         if hotkey_key(k.vkCode) {
             HOTKEY_HELD.store(false, std::sync::atomic::Ordering::SeqCst);
         }
+        if k.vkCode == VK_CAPITAL as u32 {
+            CAPS_HELD.store(false, std::sync::atomic::Ordering::SeqCst);
+        }
     }
     if code >= 0 && (wp as u32 == WM_KEYDOWN || wp as u32 == WM_SYSKEYDOWN) {
         // SAFETY: for code >= 0, lp points to a KBDLLHOOKSTRUCT (contract of WH_KEYBOARD_LL).
@@ -630,7 +633,10 @@ unsafe extern "system" fn caps_hook(code: i32, wp: usize, lp: isize) -> isize {
             terminal_key(k);
         }
         if k.vkCode == VK_CAPITAL as u32 {
-            CAPS_PRESSES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            // 1.9.6: only the first key-down (a held Caps Lock repeats, but switches once)
+            if !CAPS_HELD.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                CAPS_PRESSES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
         } else if (k.flags & windows_sys::Win32::UI::WindowsAndMessaging::LLKHF_INJECTED == 0 || k.dwExtraInfo != OUR_MARK)
             && !is_hotkey
             && !matches!(k.vkCode as u16, VK_SHIFT | VK_LSHIFT | VK_RSHIFT | VK_CONTROL | VK_LCONTROL | VK_RCONTROL | VK_MENU | VK_LMENU | VK_RMENU | VK_LWIN | VK_RWIN)
@@ -706,8 +712,29 @@ pub fn caps_lock_on_now(hwnd: windows_sys::Win32::Foundation::HWND) -> Option<bo
         }
         let on = (GetKeyState(VK_CAPITAL as i32) & 1) != 0;
         AttachThreadInput(me, them, 0);
+        CAPS_KNOWN.store(((on as u64) << 63) | (1 << 62) | caps_presses_now() as u64, std::sync::atomic::Ordering::SeqCst);
         Some(on)
     }
+}
+
+/// 1.9.6: the last Caps Lock state read for sure, with the number of Caps Lock presses counted by
+/// the hook at that moment (bit 63: on, bit 62: known). A console window run by a program without
+/// a message queue (cmd) cannot be read: its state is the last one known, switched by every press
+/// seen since. A wrong guess is harmless there: the typed text would not match the screen.
+static CAPS_KNOWN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static CAPS_HELD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+fn caps_presses_now() -> u32 {
+    CAPS_PRESSES.load(std::sync::atomic::Ordering::SeqCst)
+}
+pub fn caps_lock_guess(hwnd: windows_sys::Win32::Foundation::HWND) -> Option<bool> {
+    caps_lock_on_now(hwnd).or_else(|| {
+        let k = CAPS_KNOWN.load(std::sync::atomic::Ordering::SeqCst);
+        if k & (1 << 62) == 0 || !activity_watched() {
+            return None;
+        }
+        let presses = caps_presses_now().wrapping_sub(k as u32);
+        Some(((k >> 63) == 1) ^ (presses % 2 == 1))
+    })
 }
 
 /// One press of Caps Lock (switches it off when it was on).

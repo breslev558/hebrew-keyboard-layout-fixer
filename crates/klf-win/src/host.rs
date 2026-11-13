@@ -402,7 +402,8 @@ impl Host for WinHost {
         match typed {
             klf_core::terminal::Typed::Text(t) => Some((t, generation)),
             klf_core::terminal::Typed::Keys(mut keys) => {
-                let caps = input::caps_lock_on_now(self.target.get());
+                // (checked against the screen anyway: a wrong guess is refused there)
+                let caps = input::caps_lock_guess(self.target.get());
                 let text = caps.and_then(|caps| layouts::keys_to_text(&keys, caps));
                 if text.is_none() {
                     crate::util::log(if caps.is_none() { "Terminal: Caps Lock state unknown" } else { "Terminal: a key gives no single character (dead key?)" });

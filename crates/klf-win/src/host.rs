@@ -392,11 +392,18 @@ impl Host for WinHost {
         input::replace(backspaces, text)
     }
     fn terminal_typed(&self) -> Option<(String, u64)> {
-        let (typed, generation) = input::terminal_snapshot()?;
+        let Some((typed, generation)) = input::terminal_snapshot() else {
+            crate::util::log(&format!("Terminal: {}", input::terminal_why_not()));
+            return None;
+        };
         match typed {
             klf_core::terminal::Typed::Text(t) => Some((t, generation)),
             klf_core::terminal::Typed::Keys(mut keys) => {
-                let text = input::caps_lock_on_now(self.target.get()).and_then(|caps| layouts::keys_to_text(&keys, caps));
+                let caps = input::caps_lock_on_now(self.target.get());
+                let text = caps.and_then(|caps| layouts::keys_to_text(&keys, caps));
+                if text.is_none() {
+                    crate::util::log(if caps.is_none() { "Terminal: Caps Lock state unknown" } else { "Terminal: a key gives no single character (dead key?)" });
+                }
                 for k in keys.iter_mut() {
                     // SAFETY: plain value through a valid &mut (volatile: not optimized away).
                     unsafe { std::ptr::write_volatile(k, klf_core::terminal::KeyStroke::default()) };

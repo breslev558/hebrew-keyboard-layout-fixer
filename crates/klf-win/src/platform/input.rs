@@ -492,7 +492,9 @@ pub fn set_terminal_watch(on: bool, hwnd: usize) {
         });
     }
     TERM_HWND.store(if on { hwnd } else { 0 }, SeqCst);
-    TERM_WATCH.store(on, SeqCst);
+    if TERM_WATCH.swap(on, SeqCst) != on {
+        crate::util::log(if on { "Terminal: Windows Terminal in front, keys followed for F10 (memory only)" } else { "Terminal: keys no longer followed" });
+    }
     term().reset();
 }
 
@@ -520,6 +522,13 @@ pub fn terminal_snapshot() -> Option<(klf_core::terminal::Typed, u64)> {
         t.break_run();
     }
     t.snapshot(tick64())
+}
+/// 1.9.5: why the terminal run is not usable now (journal only, never the keys).
+pub fn terminal_why_not() -> &'static str {
+    if !TERM_WATCH.load(std::sync::atomic::Ordering::SeqCst) {
+        return "keys not followed (option off, managed PC, or Windows Terminal not seen in front)";
+    }
+    term().why_not(tick64()).unwrap_or("followed")
 }
 /// (a key or click the hook could not record also changes it)
 pub fn terminal_generation() -> u64 {

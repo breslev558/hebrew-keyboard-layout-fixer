@@ -156,6 +156,19 @@ impl Tracker {
         }
     }
 
+    /// 1.9.5: why nothing can be converted now, for the journal (never the keys): None if there is.
+    pub fn why_not(&self, now: u64) -> Option<&'static str> {
+        if self.broken {
+            Some("run broken (key injected by another program, Backspace before the run, or too long)")
+        } else if self.len == 0 && self.adopted.is_none() {
+            Some("no key followed since the last reset")
+        } else if now.saturating_sub(self.last_ms) > IDLE_MS {
+            Some("more than 15 s without a key")
+        } else {
+            None
+        }
+    }
+
     /// Changes each time the run changes.
     pub fn generation(&self) -> u64 {
         self.generation

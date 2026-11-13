@@ -97,8 +97,8 @@ $lire = '$x = Read-Host "T"; Set-Content -Encoding UTF8 "' + $out + '" $x'
 
 Write-Host "Programme lancé (KLF_TEST_TERMINAL=1)"
 # 1. correction, puis aller-retour (2e et 3e F10)
+$n0 = @(Get-Content $log).Count   # (from before the window opens: « keys followed » must appear)
 Ouvrir $lire
-$n0 = @(Get-Content $log).Count
 [T]::Word('akuo'); Start-Sleep -Milliseconds 500
 F10
 $j = Journal $n0

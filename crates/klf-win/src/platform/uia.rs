@@ -211,7 +211,8 @@ fn ask_terminal(automation: *mut c_void, n: usize, pid: u32) -> Result<String, &
         let hr = get_prop(el, CLASS_NAME, &mut v);
         let class = if hr >= 0 && (v[0] & 0xFFFF) as u16 == VT_BSTR { bstr(v[1] as *const u16) } else { None };
         clear(&mut v);
-        if el_pid != Some(pid) || class.as_deref() != Some("TermControl") {
+        // (pid 0, 1.9.7: any focused text element, for the character before the caret)
+        if pid != 0 && (el_pid != Some(pid) || class.as_deref() != Some("TermControl")) {
             release_el(el);
             return Err("focus not in the terminal text");
         }
@@ -306,6 +307,12 @@ pub fn terminal_before_caret(n: usize, pid: u32, ms: u64) -> Result<String, &'st
     let (dummy, _r) = channel();
     send(Kind::Terminal(n, pid, tx), dummy);
     rx.recv_timeout(std::time::Duration::from_millis(ms)).unwrap_or(Err("no answer in time"))
+}
+
+/// 1.9.7: the characters just before the caret in the focused field of any program (TextPattern),
+/// waiting at most `ms`; Err(why) when it cannot be told (no text pattern, selection, no answer).
+pub fn before_caret(n: usize, ms: u64) -> Result<String, &'static str> {
+    terminal_before_caret(n, 0, ms)
 }
 
 /// 1.9.3: the UI Automation thread is answering a question.

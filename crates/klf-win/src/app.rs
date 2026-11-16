@@ -1265,6 +1265,7 @@ fn start_hotkey(hwnd: HWND, action: Action, delayed: bool) {
     s.action = action;
     if delayed {
         s.require_selection = true;
+        s.delayed_press = true; // 1.9.7: its refusal does not blame the careful mode
     }
     let owner = hwnd as usize;
     let vk = key_to_vk(if action == Action::Case { s.case_hotkey_key } else { s.hotkey_key }) as u16;

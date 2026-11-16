@@ -324,6 +324,11 @@ pub trait Host {
     fn terminal_before_caret(&self, _n: usize) -> Result<String, &'static str> {
         Err("not available")
     }
+    /// 1.9.7: the few characters just before the caret in the focused field (UI Automation),
+    /// None when it cannot be told. Only used to decide whether a line above may be taken.
+    fn chars_before_caret(&self, _n: usize) -> Option<String> {
+        None
+    }
     /// 1.9.5: the converted text was confirmed on the screen (a second F10 toggles it back).
     fn terminal_adopt(&self, _text: &str) {}
     /// 1.9.5: the run is forgotten (not confirmed: nothing more is done until retyped).
@@ -428,7 +433,7 @@ pub fn run_traced(host: &mut dyn Host, s: &AppSettings, trace: &mut Trace) -> Ou
     }
     let careful;
     let s: &AppSettings = if rule == Some(RuleMode::SelectionOnly) && !s.require_selection {
-        careful = AppSettings { require_selection: true, ..s.clone() };
+        careful = AppSettings { require_selection: true, careful_by_rule: true, ..s.clone() };
         &careful
     } else {
         s
@@ -452,14 +457,14 @@ pub fn run_traced(host: &mut dyn Host, s: &AppSettings, trace: &mut Trace) -> Ou
         return match kind {
             // 1.9.6: the classic console uses the keys followed, like Windows Terminal
             ConsoleKind::Classic if s.terminal_support && s.conhost_support && s.require_selection => {
-                Outcome::say(Msg::SelectText, "Console and careful mode on: nothing done")
+                careful_refusal(s, "Console and careful mode on: nothing done")
             }
             ConsoleKind::Classic if s.terminal_support && s.conhost_support => {
                 trace.mark(Step::Console, host.now_ms());
                 run_conhost(host, s, &map, target)
             }
             ConsoleKind::Terminal if s.terminal_support && s.require_selection => {
-                Outcome::say(Msg::SelectText, "Terminal and careful mode on: nothing done")
+                careful_refusal(s, "Terminal and careful mode on: nothing done")
             }
             ConsoleKind::Terminal if s.terminal_support => {
                 trace.mark(Step::Console, host.now_ms());
@@ -639,6 +644,61 @@ fn function_key_alone(s: &AppSettings) -> bool {
     s.action == Action::Layout && s.hotkey_modifiers == 0 && crate::settings::key_is_function(s.hotkey_key)
 }
 
+/// 1.9.7: see the Copy::NoChange case after Shift+Home in convert_window_inner.
+fn take_line_above(host: &mut dyn Host, s: &AppSettings, info: &TargetInfo, target: usize, st: &mut ClipState, web: bool) -> Result<(), Outcome> {
+    let nothing = || Outcome::say(Msg::NothingToConvert, "No clipboard change after Ctrl+C (no text?)");
+    let field = web || policy::paragraph_field(&info.focus_class, &info.exe_name);
+    if !field || (s.last_word_only && policy::last_word_field(&info.window_class, &info.focus_class)) {
+        return Err(nothing());
+    }
+    let before = host.chars_before_caret(1);
+    let mid_paragraph = before.as_deref().and_then(|t| t.chars().last()).is_some_and(|c| c != '\n' && c != '\r' && c != '\u{2029}' && c != '\u{2028}');
+    if !mid_paragraph {
+        return Err(nothing());
+    }
+    if let Some((msg, why)) = change_reason(host, target) {
+        return Err(Outcome::say(msg, format!("Target window or field changed ({why}), stopped")));
+    }
+    if !host.send_extend_up() {
+        return Err(Outcome::say(Msg::KeysBlocked, "Shift+Up not sent, stopped"));
+    }
+    st.our_selection = true;
+    match copy_selection_within(host, target, st, if web { COPY_WAIT_UNKNOWN_WEB_MS } else { COPY_WAIT_MS }) {
+        Copy::Text(t) if !policy::contains_line_break(&t) => {
+            st.captured = Some(t);
+            Ok(())
+        }
+        Copy::Text(_) => {
+            collapse_ours(host, st, target);
+            Err(Outcome::say(Msg::SelectText, "Caret at a line start: the line above holds a line break, nothing pasted"))
+        }
+        Copy::Stopped(o) => {
+            collapse_ours(host, st, target);
+            Err(o)
+        }
+        Copy::NoChange | Copy::NoText => {
+            collapse_ours(host, st, target);
+            Err(nothing())
+        }
+    }
+}
+
+/// 1.9.7: the refusal of the careful mode says where it comes from (the settings, a rule for the
+/// program, or a press kept during the previous conversion), so that it can be turned off.
+fn careful_refusal(s: &AppSettings, log: &str) -> Outcome {
+    // a press kept during the previous conversion (the user pressed again because the first one
+    // was slow or did nothing): ignored without a bubble, never "select the text" (16/11)
+    if s.delayed_press {
+        return Outcome::quiet(format!("{log} (press kept during the previous conversion: ignored)"));
+    }
+    let (msg, why) = if s.careful_by_rule {
+        (Msg::CarefulRule, "rule for this program")
+    } else {
+        (Msg::CarefulMode, "careful mode of the settings")
+    };
+    Outcome::say(msg, format!("{log} ({why})"))
+}
+
 /// 1.9.3: which check stopped the conversion (the journal said only "window or field changed");
 /// 1.9.4: with the message to show (a click or key is not "window changed").
 fn change_reason(host: &dyn Host, target: usize) -> Option<(Msg, &'static str)> {
@@ -700,7 +760,7 @@ fn convert_window_inner(
 
     if st.captured.is_none() && s.require_selection {
         // careful mode: never the "caret -> start of the line" fallback
-        return Outcome::say(Msg::SelectText, "Nothing selected and careful mode on: nothing done");
+        return careful_refusal(s, "Nothing selected and careful mode on: nothing done");
     }
     if st.captured.is_none() {
         // nothing selected (or the application refuses copying): caret -> start of the line
@@ -737,7 +797,18 @@ fn convert_window_inner(
                     }
                 }
             }
-            Copy::NoChange => return Outcome::say(Msg::NothingToConvert, "No clipboard change after Ctrl+C (no text?)"),
+            Copy::NoChange => {
+                // 1.9.7: Shift+Home took nothing. In a field that wraps lines (Chrome, Electron,
+                // chat boxes) the caret may be at the start of a DISPLAYED line, in the middle of a
+                // paragraph (seen on 15/11: four F10 that did nothing). Only when the screen reader
+                // shows a character right before the caret that is not a line break: one Shift+Up
+                // (+ Home), copied again; a line break in it = refused and collapsed. Never in a
+                // single-line box (the address bar of a browser: Shift+Up would pick a suggestion,
+                // and nothing is before its caret anyway).
+                if let Err(o) = take_line_above(host, s, info, target, st, web) {
+                    return o;
+                }
+            }
             Copy::NoText => return Outcome::say(Msg::NothingToConvert, NO_TEXT_LOG),
             Copy::Stopped(o) => return o,
         }
@@ -1314,6 +1385,8 @@ mod tests {
         c_screen: RefCell<String>,
         c_truetype: bool,
         c_read_fails_after: Cell<Option<i32>>,
+        /// 1.9.7: what the screen reader shows just before the caret
+        before_caret: RefCell<Option<String>>,
         c_mode_unknown: bool,
         c_replaced: RefCell<Option<(usize, String)>>,
         /// 1.9.5 terminal: run followed, generation, screen answers (one per read, the last repeats)
@@ -1393,6 +1466,7 @@ mod tests {
                 c_screen: RefCell::new("C:\\>akuo".into()),
                 c_truetype: true,
                 c_read_fails_after: Cell::new(None),
+                before_caret: RefCell::new(None),
                 c_mode_unknown: false,
                 c_replaced: RefCell::new(None),
                 t_typed: RefCell::new(None),
@@ -1687,6 +1761,9 @@ mod tests {
         fn console_truetype(&self) -> Option<bool> {
             Some(self.c_truetype)
         }
+        fn chars_before_caret(&self, _n: usize) -> Option<String> {
+            self.before_caret.borrow().clone()
+        }
         fn send_home(&self) -> bool {
             let c = self.c_cursor.get();
             self.c_cursor.set((self.c_prompt + 1, c.1, c.2));
@@ -1785,7 +1862,7 @@ mod tests {
         // careful mode
         let (mut m, mut s) = terminal_mock();
         s.require_selection = true;
-        assert_eq!(run(&mut m, &s).msg, Some(Msg::SelectText));
+        assert_eq!(run(&mut m, &s).msg, Some(Msg::CarefulMode));
     }
 
     #[test]
@@ -2201,7 +2278,7 @@ mod tests {
         assert_eq!(go(&mut m).msg, Some(Msg::TerminalRetype));
         // careful mode
         let mut m = console();
-        assert_eq!(run(&mut m, &AppSettings { require_selection: true, ..settings() }).msg, Some(Msg::SelectText));
+        assert_eq!(run(&mut m, &AppSettings { require_selection: true, ..settings() }).msg, Some(Msg::CarefulMode));
     }
 
     #[test]
@@ -2223,6 +2300,44 @@ mod tests {
         let o = go(&mut m);
         assert_eq!(o.msg, Some(Msg::Converted), "{}", o.log);
         assert_eq!(m.c_replaced.borrow().clone(), Some((4, "שלום".to_string())));
+    }
+
+    /// 1.9.7: the caret at the start of a wrapped (displayed) line: Shift+Home takes nothing.
+    fn wrapped_line_start() -> Mock {
+        let mut m = Mock::new();
+        m.info.focus_class = "Chrome_WidgetWin_1".into();
+        *m.selected.borrow_mut() = None; // nothing selected, the page copies nothing for Ctrl+C
+        m.line = None; // Shift+Home selects nothing (caret at the start of the displayed line)
+        m.above = vec!["akuo".into()]; // the displayed line above, same paragraph
+        *m.before_caret.borrow_mut() = Some("o".into());
+        m
+    }
+
+    #[test]
+    fn caret_at_a_wrapped_line_start_takes_the_line_above() {
+        let mut m = wrapped_line_start();
+        let o = go(&mut m);
+        assert_eq!(o.msg, Some(Msg::Converted), "{}", o.log);
+        assert_eq!(m.pasted.borrow().as_deref(), Some("שלום"));
+        assert!(m.happened("extend-up"));
+    }
+
+    #[test]
+    fn caret_after_a_line_break_or_unknown_takes_nothing_above() {
+        for before in [Some("o\n"), Some("\r"), None] {
+            let mut m = wrapped_line_start();
+            *m.before_caret.borrow_mut() = before.map(String::from);
+            let o = go(&mut m);
+            assert_eq!(o.msg, Some(Msg::NothingToConvert), "{before:?}: {}", o.log);
+            assert!(!m.happened("extend-up"), "{before:?}: never Shift+Up (address bar suggestions)");
+            assert!(m.pasted.borrow().is_none());
+        }
+        // the line above holds a line break: refused, collapsed back
+        let mut m = wrapped_line_start();
+        m.above = vec!["a\r\nkuo".into()];
+        let o = go(&mut m);
+        assert_eq!(o.msg, Some(Msg::SelectText), "{}", o.log);
+        assert!(m.happened("collapse") && m.pasted.borrow().is_none());
     }
 
     #[test]
@@ -2396,7 +2511,14 @@ mod tests {
         *m.selected.borrow_mut() = None;
         let mut s = settings();
         s.require_selection = true;
-        assert_eq!(run(&mut m, &s).msg, Some(Msg::SelectText));
+        assert_eq!(run(&mut m, &s).msg, Some(Msg::CarefulMode), "1.9.7: the bubble names the careful mode");
+        assert!(!m.happened("shifthome"));
+        // a press kept during the previous conversion: no bubble at all (it never blames the settings)
+        let mut m = Mock::new();
+        *m.selected.borrow_mut() = None;
+        let s = AppSettings { require_selection: true, delayed_press: true, ..settings() };
+        let o = run(&mut m, &s);
+        assert_eq!(o.msg, None, "{}", o.log);
         assert!(!m.happened("shifthome"));
         assert_eq!(m.clip_text().as_deref(), Some("USER CLIPBOARD"));
     }
@@ -2789,7 +2911,7 @@ mod tests {
         m.line = Some("akuo".into());
         assert!(s.set_rule("notepad.exe", Some(RuleMode::SelectionOnly)));
         let o = run(&mut m, &s);
-        assert_eq!(o.msg, Some(Msg::SelectText), "{}", o.log);
+        assert_eq!(o.msg, Some(Msg::CarefulRule), "{}", o.log);
         // a selected text is still converted
         let mut m = Mock::new();
         let o = run(&mut m, &s);

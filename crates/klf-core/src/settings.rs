@@ -237,6 +237,12 @@ pub struct AppSettings {
     /// Which action this run does (set by the hotkey pressed, never saved).
     #[serde(skip)]
     pub action: Action,
+    /// 1.9.7 (never saved): this run is careful because of a rule for the program (tray menu), or
+    /// because it is a press kept during the previous conversion: the refusal says which.
+    #[serde(skip)]
+    pub careful_by_rule: bool,
+    #[serde(skip)]
+    pub delayed_press: bool,
     // --- new in 1.4.0 : rules per program (tray menu), format ready for the administrator profiles ---
     /// Per-program rules; they can only RESTRICT (never lift the password, administrator or
     /// console protections). "ExcludedProcesses" stays (older versions read it) = Disabled.
@@ -343,6 +349,8 @@ impl Default for AppSettings {
             case_hotkey_key: KEY_F9,
             turn_off_caps_lock: true,
             action: Action::Layout,
+            careful_by_rule: false,
+            delayed_press: false,
             settings_version: SETTINGS_VERSION,
             migrated: false,
         }

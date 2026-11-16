@@ -36,6 +36,10 @@ pub enum Msg {
     WindowChanged,
     /// 1.9.4: a click or a key (Tab, Enter, arrow…) during the fix
     UserMoved,
+    /// 1.9.7: nothing selected and the careful mode of the settings is on
+    CarefulMode,
+    /// 1.9.7: nothing selected and a rule "only with a selection" is set for this program
+    CarefulRule,
     /// 1.9.5 terminal: nothing followed (retype, then F10)
     TerminalRetype,
     /// 1.9.5 terminal: the typed text is not seen just before the cursor
@@ -204,7 +208,7 @@ pub enum Msg {
 
 pub const ALL_MSGS: &[Msg] = &[
     Msg::Converted, Msg::NothingToConvert, Msg::SelectText, Msg::ConsoleUnsupported, Msg::ConsoleBusy,
-    Msg::AdminWindow, Msg::PasswordField, Msg::ClipboardBusy, Msg::ClipboardTooBig, Msg::WindowChanged, Msg::UserMoved, Msg::TerminalRetype, Msg::TerminalNotShown,
+    Msg::AdminWindow, Msg::PasswordField, Msg::ClipboardBusy, Msg::ClipboardTooBig, Msg::WindowChanged, Msg::UserMoved, Msg::TerminalRetype, Msg::TerminalNotShown, Msg::CarefulMode, Msg::CarefulRule,
     Msg::ExcludedProgram, Msg::KeysHeld, Msg::TooLong, Msg::PasteFailed, Msg::KeysBlocked, Msg::NewCopyKept, Msg::ClipboardNotRestored, Msg::LayoutUnsupported, Msg::HotkeyBusy, Msg::CaseKeyBusy,
     Msg::MenuPause, Msg::MenuResume, Msg::MenuSettings, Msg::MenuAbout, Msg::MenuExit, Msg::MenuRuleDisable, Msg::MenuRuleSelection, Msg::MenuRuleRemove, Msg::MenuPause10, Msg::MenuResumeAt,
     Msg::TipReady, Msg::TipPaused, Msg::TipUnavailable,
@@ -253,6 +257,12 @@ pub fn text(lang: Lang, m: Msg) -> &'static str {
         (UserMoved, He) => "לחיצת מקש או עכבר: הפעולה בוטלה",
         (UserMoved, Fr) => "Clic ou touche pendant la correction : annulée",
         (UserMoved, En) => "Click or key during the fix: cancelled",
+        (CarefulMode, He) => "מצב זהיר פעיל: סמנו את הטקסט, או בטלו אותו בהגדרות > מתקדם",
+        (CarefulMode, Fr) => "Mode prudent activé : sélectionnez le texte, ou décochez-le dans Paramètres > Avancé",
+        (CarefulMode, En) => "Careful mode is on: select the text, or untick it in Settings > Advanced",
+        (CarefulRule, He) => "בתוכנה הזו מוגדר תיקון רק עם טקסט מסומן: סמנו את הטקסט, או בטלו את הכלל בתפריט הסמל",
+        (CarefulRule, Fr) => "Règle « seulement avec une sélection » pour ce programme : sélectionnez le texte, ou retirez la règle dans le menu de l'icône",
+        (CarefulRule, En) => "Rule \"only with a selection\" for this program: select the text, or remove the rule in the icon menu",
         (TerminalRetype, He) => "טרמינל: הטקסט לא נקלט, הקלידו אותו שוב ואז F10\u{200F}",
         (TerminalRetype, Fr) => "Terminal : texte non suivi, retapez-le puis F10",
         (TerminalRetype, En) => "Terminal: text not followed, type it again, then F10",

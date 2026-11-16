@@ -256,6 +256,58 @@ foreach ($n in $navs) {
   [void](Mesure 'nouvelle' "$v, F10 tenu 1 s avec répétitions" $sans $shalom $null 800 1000)
   # the focus must still be in the box after the repeats (F10 reaching the browser opens its menu)
   [void](Mesure 'nouvelle' "$v, après F10 tenu 1 s" $sans $shalom $null)
+  if ($v -eq 'Edge') {
+    # 1.9.7 a) curseur au DEBUT d'une ligne repliee (affichee) au milieu d'un paragraphe : Maj+Debut ne
+    # prend rien ; F10 prend la ligne du dessus (UI Automation voit un caractere avant le curseur)
+    $n3 = @(Get-Content $log).Count
+    & $vider; [System.Windows.Forms.SendKeys]::SendWait('akuo ' * 40); Start-Sleep -Milliseconds 800
+    $avant = Texte
+    [N]::Key(0x24); Start-Sleep -Milliseconds 500   # Debut : debut de la ligne AFFICHEE
+    [N]::Key(0x79); Start-Sleep 3
+    $j3 = @(Get-Content $log) | Select-Object -Skip $n3
+    $j3 | Where-Object { $_ -match 'Ctrl\+V sent|No clipboard|line break|Timing' } | ForEach-Object { Write-Host "       $(($_ -split '\] ', 2)[1])" }
+    $apres = Texte
+    Write-Host "MESURE Edge, debut de ligne repliee : texte change $($apres -ne $avant), hebreu $([bool]($apres -match '[\u05D0-\u05EA]'))"
+    if (-not ($j3 -match 'Ctrl\+V sent')) { Fail 'debut de ligne repliee : rien corrige' }
+    if ($apres -eq $avant -or $apres -notmatch '[\u05D0-\u05EA]') { Fail 'debut de ligne repliee : texte non converti' }
+    $resultats += 'OK    nouvelle Edge, debut de ligne repliee, ligne du dessus corrigee'
+
+    # 1.9.7 b) F10 appuye deux fois de suite : le 2e (pendant la correction) est ignore, sans bulle « selectionnez »
+    $n3 = @(Get-Content $log).Count
+    & $sans; Start-Sleep -Milliseconds 800
+    [N]::Key(0x79); Start-Sleep -Milliseconds 30; [N]::Key(0x79); Start-Sleep 3
+    $j3 = @(Get-Content $log) | Select-Object -Skip $n3
+    $j3 | Where-Object { $_ -match 'ignored|careful|Ctrl\+V sent|selection only' } | ForEach-Object { Write-Host "       $(($_ -split '\] ', 2)[1])" }
+    if ($j3 -match 'careful mode on: nothing done \((careful mode of the settings|rule)') { Fail 'appui garde : il accuse le mode prudent' }
+    $resultats += 'OK    nouvelle Edge, 2e F10 pendant la correction, sans bulle trompeuse'
+
+    # 1.9.7 c) barre d'adresse : Ctrl+L, « akuo », Debut, F10 : jamais de Maj+Haut (suggestions)
+    $n3 = @(Get-Content $log).Count
+    [N]::English($h); Start-Sleep -Milliseconds 300
+    [System.Windows.Forms.SendKeys]::SendWait('^l'); Start-Sleep -Milliseconds 500
+    [System.Windows.Forms.SendKeys]::SendWait('akuo'); Start-Sleep -Milliseconds 500
+    [N]::Key(0x24); Start-Sleep -Milliseconds 300
+    [N]::Key(0x79); Start-Sleep 3
+    $j3 = @(Get-Content $log) | Select-Object -Skip $n3
+    $j3 | Where-Object { $_ -match 'Ctrl\+V sent|No clipboard|line break|Shift\+Up|Timing' } | ForEach-Object { Write-Host "       $(($_ -split '\] ', 2)[1])" }
+    if ($j3 -match 'Ctrl\+V sent') { Fail 'barre d''adresse, curseur au debut : un texte a ete colle' }
+    [N]::Key(0x1B); Start-Sleep -Milliseconds 300; [N]::Key(0x1B); Start-Sleep -Milliseconds 300
+    Cliquer; Start-Sleep -Milliseconds 500
+    $resultats += 'OK    nouvelle Edge, barre d''adresse curseur au debut, rien colle'
+
+    # 1.9.7 d) mode prudent coche : la nouvelle bulle (le journal dit « careful mode of the settings »)
+    $garde = $reglages
+    $script:reglages = $reglages.Replace('"UiLanguage": "en"', '"UiLanguage": "en", "RequireSelection": true')
+    Lancer $exe
+    $n3 = @(Get-Content $log).Count
+    & $sans; Start-Sleep -Milliseconds 800; [N]::Key(0x79); Start-Sleep 2
+    $j3 = @(Get-Content $log) | Select-Object -Skip $n3
+    $j3 | Where-Object { $_ -match 'careful' } | ForEach-Object { Write-Host "       $(($_ -split '\] ', 2)[1])" }
+    if (-not ($j3 -match 'careful mode of the settings')) { Fail 'mode prudent : refus attendu « careful mode of the settings »' }
+    $script:reglages = $garde
+    Lancer $exe
+    $resultats += 'OK    nouvelle Edge, mode prudent coche, bulle explicite'
+  }
   $vus = @(Get-Content $log) | Select-Object -Skip $nlog | Where-Object { $_ -match 'Focus moved|Text caret moved|User input during' }
   Write-Host "INFO $v : $($vus.Count) changement(s) de focus vus par la nouvelle version"; $vus | ForEach-Object { Write-Host "       $(($_ -split '\] ', 2)[1])" }
   Fermer $n.Exe

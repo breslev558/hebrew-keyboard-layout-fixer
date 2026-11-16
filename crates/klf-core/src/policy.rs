@@ -261,6 +261,14 @@ pub fn no_paragraph_extension(exe: &str) -> bool {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn line_breaks_of_word_richedit_and_unicode() {
+        for t in ["a\nb", "a\rb", "a\u{0B}b", "a\u{07}b", "a\u{85}b", "a\u{2028}b", "a\u{2029}b"] {
+            assert!(contains_line_break(t), "{t:?}");
+        }
+        assert!(!contains_line_break("akuo שלום"));
+    }
+
+    #[test]
     fn chromium_focus_swap_and_hotkey_up() {
         assert!(same_chromium_field("Chrome_WidgetWin_1", "Chrome_RenderWidgetHostHWND"));
         assert!(same_chromium_field("Chrome_RenderWidgetHostHWND", "Chrome_WidgetWin_1"));

@@ -426,7 +426,7 @@ impl Host for WinHost {
         crate::platform::uia::terminal_before_caret(n, pid, 150)
     }
     fn chars_before_caret(&self, n: usize) -> Result<String, &'static str> {
-        crate::platform::uia::before_caret(n, 120)
+        crate::platform::uia::before_caret(n, 250)
     }
     fn note(&self, line: &str) {
         crate::util::log(line);

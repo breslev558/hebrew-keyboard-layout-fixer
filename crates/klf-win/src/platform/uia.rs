@@ -227,7 +227,8 @@ fn ask_terminal(automation: *mut c_void, n: usize, pid: u32) -> Result<String, &
             let hr = get_prop(el, ARIA_PROPERTIES, &mut v);
             let aria = if hr >= 0 && (v[0] & 0xFFFF) as u16 == VT_BSTR { bstr(v[1] as *const u16).unwrap_or_default() } else { String::new() };
             clear(&mut v);
-            if !matches!(control, Some(EDIT | DOCUMENT)) || aria.to_ascii_lowercase().contains("autocomplete=") {
+            let aria = aria.to_ascii_lowercase();
+            if !matches!(control, Some(EDIT | DOCUMENT)) || (aria.contains("autocomplete=") && !aria.contains("autocomplete=none")) {
                 release_el(el);
                 return Err("not a plain text field (combo box or suggestions)");
             }

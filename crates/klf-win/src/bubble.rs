@@ -204,10 +204,21 @@ fn ensure_window() -> HWND {
 }
 
 /// 1.9.7: the mouse pointer, a little below it (the bubble must not sit under the pointer).
-fn mouse_point() -> Option<(i32, i32)> {
-    let mut p = windows_sys::Win32::Foundation::POINT { x: 0, y: 0 };
-    // SAFETY: the point is written.
-    (unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut p) } != 0).then_some((p.x, p.y + 20))
+/// Only on the screen of the target window (a pointer left on another screen: None, the bubble
+/// stays on the target's screen).
+fn mouse_point(target: usize) -> Option<(i32, i32)> {
+    let mut p = POINT { x: 0, y: 0 };
+    // SAFETY: the point is written; plain handles (a closed target only gives no monitor).
+    unsafe {
+        if GetCursorPos(&mut p) == 0 {
+            return None;
+        }
+        let t = target as HWND;
+        if !t.is_null() && IsWindow(t) != 0 && MonitorFromPoint(p, MONITOR_DEFAULTTONEAREST) != MonitorFromWindow(t, MONITOR_DEFAULTTONEAREST) {
+            return None;
+        }
+    }
+    Some((p.x, p.y + 20))
 }
 
 /// Shows the bubble. `caret`: screen point under the text caret, if known.
@@ -227,7 +238,7 @@ fn show_at(pos: u32, message: &str, rtl: bool, caret: Option<(i32, i32)>, target
     }
     // 1.9.7: "near the caret" with the text caret unknown (Chrome, Edge, Electron have no Windows
     // caret): near the mouse pointer, never silently at the top of the screen (16/11)
-    let caret = if pos == klf_core::settings::BUBBLE_CARET && caret.is_none() { mouse_point() } else { caret };
+    let caret = if pos == klf_core::settings::BUBBLE_CARET && caret.is_none() { mouse_point(target) } else { caret };
     let mon = monitor_for(caret, target);
     let dpi = dpi_of(mon);
     let old = FONT.with(|f| f.replace(make_font(dpi)));

@@ -2,7 +2,7 @@
 
 ## 1.9.7 (November 2026)
 - **When careful mode refuses, the bubble now says so**: "Careful mode is on: select the text, or untick it in Settings > Advanced" (or names the rule set for the program in the icon menu), instead of a bare "Select the text". With careful mode off (the default), F10 takes the text before the cursor by itself.
-- **F10 at the start of a wrapped line** (chat boxes, browsers, Electron apps): when the cursor was at the start of a displayed line in the middle of a paragraph, Shift+Home took nothing and nothing was fixed. Now, only when Windows accessibility shows text right before the cursor (no line break), the line above is taken; a line break there is refused.
+- **F10 at the start of a wrapped line** (Edge and apps that expose their text to Windows accessibility): when the cursor was at the start of a displayed line in the middle of a paragraph, Shift+Home took nothing and nothing was fixed. Now, only when Windows accessibility shows text right before the cursor (no line break), the line above is taken; a line break there is refused.
 - A second F10 pressed while a fix is still running no longer shows "Select the text": it is ignored.
 - **Bubble "near the cursor"**: in Chrome, Edge and Electron apps (which have no Windows text cursor) the bubble went to the top of the screen; it now appears near the mouse pointer when the text cursor cannot be found, for every kind of bubble.
 

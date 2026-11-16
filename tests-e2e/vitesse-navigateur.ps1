@@ -46,6 +46,8 @@ public static class N {
   public static void F10ThenClick(IntPtr h, int dx, int dy) { keybd_event(0x79, 0, 0, UIntPtr.Zero); System.Threading.Thread.Sleep(10); ClickIn(h, dx, dy); System.Threading.Thread.Sleep(150); keybd_event(0x79, 0, 2, UIntPtr.Zero); }
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindow(string c, string t);
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+  // 1.9.7: two F10 presses 20 ms apart (timing kept here, avis Fable)
+  public static void F10Twice() { Key(0x79); System.Threading.Thread.Sleep(20); Key(0x79); }
   public static bool Front(IntPtr h) {
     uint me = GetCurrentThreadId(), fg = GetWindowThreadProcessId(GetForegroundWindow(), IntPtr.Zero);
     AttachThreadInput(me, fg, true); keybd_event(0x12, 0, 0, UIntPtr.Zero); keybd_event(0x12, 0, 2, UIntPtr.Zero);
@@ -66,7 +68,7 @@ $edge = @("${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe", "$en
 $chrome = @("$env:ProgramFiles\Google\Chrome\Application\chrome.exe", "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe", "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
 # the page title shows the text of the box (« T:akuo… »): read through the window title, never through
 # the clipboard (both reads came back empty in the 2nd 1.9.2 trial)
-$html = '<!doctype html><title>T::F</title><body style="margin:0"><textarea id=t autofocus oninput="document.title=''T:''+this.value+'':F''" onselect="document.title=''T:''+this.value+'':F sel''" style="position:fixed;left:0;top:0;width:100%;height:100%;font-size:20px"></textarea></body>'
+$html = '<!doctype html><title>T::F</title><body style="margin:0"><textarea id=t autofocus oninput="document.title=''T:''+this.value+'':F''" onselect="document.title=''T:''+this.value+'':F sel''" style="position:fixed;left:0;top:0;width:100%;height:100%;font-size:20px"></textarea><div id=d contenteditable style="position:fixed;right:20px;bottom:20px;width:300px;height:120px;font-size:20px;background:#eef;z-index:2"></div><label style="position:fixed;left:20px;bottom:20px;z-index:2;background:#ffe">Ville <input id=c role=combobox aria-autocomplete=list style="width:200px;font-size:20px"></label></body>'
 $page = 'data:text/html;base64,' + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($html))   # (avis Fable : # % " cassent une URL brute)
 $script:h = [IntPtr]::Zero
 # opens the test page in its own profile and new window; the window is the one of THIS browser's exe
@@ -280,7 +282,7 @@ foreach ($n in $navs) {
     # 1.9.7 b) F10 appuye deux fois de suite : le 2e (pendant la correction) est ignore, sans bulle « selectionnez »
     $n3 = @(Get-Content $log).Count
     & $sans; Start-Sleep -Milliseconds 800
-    [N]::Key(0x79); Start-Sleep -Milliseconds 30; [N]::Key(0x79); Start-Sleep 3
+    [N]::F10Twice(); Start-Sleep 3
     $j3 = @(Get-Content $log) | Select-Object -Skip $n3
     $j3 | Where-Object { $_ -match 'ignored|careful|Ctrl\+V sent|selection only' } | ForEach-Object { Write-Host "       $(($_ -split '\] ', 2)[1])" }
     if ($j3 -match 'careful mode on: nothing done \((careful mode of the settings|rule)') { Fail 'appui garde : il accuse le mode prudent' }
@@ -301,6 +303,7 @@ foreach ($n in $navs) {
     if ($j3 -match 'Shift\+Up sent') { Fail 'barre d''adresse : Maj+Haut envoye (suggestions)' }
     [N]::Key(0x1B); Start-Sleep -Milliseconds 300; [N]::Key(0x1B); Start-Sleep -Milliseconds 300
     Cliquer; Start-Sleep -Milliseconds 500
+    if ((Texte) -ne $shalom) { Fail "barre d'adresse non atteinte : la page a change ('$(Texte)')" }
     $resultats += 'OK    nouvelle Edge, barre d''adresse curseur au debut, rien colle'
 
     # 1.9.7 d) mode prudent coche : la nouvelle bulle (le journal dit « careful mode of the settings »)
@@ -328,7 +331,25 @@ foreach ($n in $navs) {
     if ($j3 -match 'Shift\+Up sent') { Fail 'vraie ligne : Maj+Haut envoye' }
     if ($j3 -match 'Ctrl\+V sent') { Fail 'vraie ligne : texte colle' }
     if ((Texte) -ne $avant) { Fail "vraie ligne : texte change '$(Texte)'" }
+    if (-not ($j3 -match 'line above not tried')) { Fail 'vraie ligne : refus attendu « line above not tried »' }
     $resultats += 'OK    nouvelle Edge, debut de vraie ligne, rien ne bouge'
+
+    # 1.9.7 e2) zone riche (contenteditable, une <div> par ligne) et champ a suggestions (combobox)
+    $r = New-Object N+RECT; [void][N]::GetWindowRect($h, [ref]$r)
+    foreach ($z in @(@('zone riche, debut de vraie ligne', ($r.R - 180), ($r.B - 90), 'akuo{ENTER}akuo'), @('champ a suggestions, curseur au debut', ($r.L + 160), ($r.B - 40), 'akuo'))) {
+      [N]::ClickIn($h, $z[1] - $r.L, $z[2] - $r.T); Start-Sleep -Milliseconds 500
+      [N]::English($h); Start-Sleep -Milliseconds 300
+      $n3 = @(Get-Content $log).Count
+      [System.Windows.Forms.SendKeys]::SendWait($z[3]); Start-Sleep -Milliseconds 500
+      [N]::Key(0x24); Start-Sleep -Milliseconds 300; [N]::Key(0x79); Start-Sleep 3
+      $j3 = @(Get-Content $log) | Select-Object -Skip $n3
+      $j3 | Where-Object { $_ -match 'Ctrl\+V sent|No clipboard|line above|Shift\+Up|Timing' } | ForEach-Object { Write-Host "       $(($_ -split '\] ', 2)[1])" }
+      if ($j3 -match 'Shift\+Up sent') { Fail "$($z[0]) : Maj+Haut envoye" }
+      if ($j3 -match 'Ctrl\+V sent') { Fail "$($z[0]) : texte colle" }
+      if (-not ($j3 -match 'line above not tried')) { Fail "$($z[0]) : refus attendu « line above not tried »" }
+      $resultats += "OK    nouvelle Edge, $($z[0]), rien ne bouge"
+    }
+    Cliquer; Start-Sleep -Milliseconds 500
 
     # 1.9.7 f) bulle « pres du curseur » : dans une page (pas de curseur de texte Windows), pres de la souris
     $garde = $reglages
@@ -340,9 +361,13 @@ foreach ($n in $navs) {
     $mx = $r.L + 300; $my = $r.T + 400
     & $sans; Start-Sleep -Milliseconds 800
     [void][N]::SetCursorPos($mx, $my); Start-Sleep -Milliseconds 300
-    [N]::Key(0x79); Start-Sleep -Milliseconds 900
-    $b = [N]::FindWindow('KBLayoutFixerBubble', $null)
-    $br = New-Object N+RECT; $vis = ($b -ne [IntPtr]::Zero) -and [N]::IsWindowVisible($b)
+    [N]::Key(0x79)
+    $br = New-Object N+RECT; $vis = $false; $sw4 = [Diagnostics.Stopwatch]::StartNew()
+    while (-not $vis -and $sw4.ElapsedMilliseconds -lt 3000) {
+      Start-Sleep -Milliseconds 50
+      $b = [N]::FindWindow('KBLayoutFixerBubble', $null)
+      $vis = ($b -ne [IntPtr]::Zero) -and [N]::IsWindowVisible($b)
+    }
     if ($vis) { [void][N]::GetWindowRect($b, [ref]$br) }
     Write-Host "MESURE bulle : visible $vis, position $($br.L),$($br.T) ; souris $mx,$my"
     Remove-Item Env:KLF_TEST_CAPTURE -ErrorAction SilentlyContinue

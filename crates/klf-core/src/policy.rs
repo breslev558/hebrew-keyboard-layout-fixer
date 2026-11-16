@@ -127,8 +127,15 @@ pub fn line_copy_suspect(text: &str, selection: Selection, focus_class: &str) ->
     }
 }
 
+/// 1.9.7: also the line separators of Word / RichEdit (vertical tab = Shift+Enter, cell mark) and
+/// Unicode (NEL, U+2028, U+2029), avis Fable.
 pub fn contains_line_break(text: &str) -> bool {
-    text.contains(['\r', '\n'])
+    text.chars().any(is_line_break)
+}
+
+/// 1.9.7: a character that ends a line (or a paragraph).
+pub fn is_line_break(c: char) -> bool {
+    matches!(c, '\r' | '\n' | '\u{0B}' | '\u{0C}' | '\u{07}' | '\u{85}' | '\u{2028}' | '\u{2029}')
 }
 
 // ---- console (classic conhost) ----

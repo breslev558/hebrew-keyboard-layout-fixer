@@ -164,6 +164,8 @@ fn ask_selection_empty(automation: *mut c_void) -> Option<bool> {
 const PROCESS_ID: i32 = 30002;
 const CLASS_NAME: i32 = 30012;
 const VT_BSTR: u16 = 8;
+/// 1.9.7: UIA_AriaPropertiesPropertyId
+const ARIA_PROPERTIES: i32 = 30102;
 
 /// A BSTR as a String (None if null).
 unsafe fn bstr(p: *const u16) -> Option<String> {
@@ -216,6 +218,20 @@ fn ask_terminal(automation: *mut c_void, n: usize, pid: u32) -> Result<String, &
             release_el(el);
             return Err("focus not in the terminal text");
         }
+        if pid == 0 {
+            // 1.9.7: only a text field or a document; never a box with suggestions (combo box, or
+            // ARIA autocomplete: Shift+Up would pick a suggestion there)
+            let hr = get_prop(el, CONTROL_TYPE, &mut v);
+            let control = if hr >= 0 && (v[0] & 0xFFFF) as u16 == VT_I4 { Some((v[1] & 0xFFFF_FFFF) as i32) } else { None };
+            clear(&mut v);
+            let hr = get_prop(el, ARIA_PROPERTIES, &mut v);
+            let aria = if hr >= 0 && (v[0] & 0xFFFF) as u16 == VT_BSTR { bstr(v[1] as *const u16).unwrap_or_default() } else { String::new() };
+            clear(&mut v);
+            if !matches!(control, Some(EDIT | DOCUMENT)) || aria.to_ascii_lowercase().contains("autocomplete=") {
+                release_el(el);
+                return Err("not a plain text field (combo box or suggestions)");
+            }
+        }
         let mut pat: *mut c_void = std::ptr::null_mut();
         let get_pattern: GetPatternAs = method(el, 14);
         let hr_p = get_pattern(el, TEXT_PATTERN, &IID_TEXT_PATTERN, &mut pat);
@@ -227,8 +243,28 @@ fn ask_terminal(automation: *mut c_void, n: usize, pid: u32) -> Result<String, &
         let mut arr: *mut c_void = std::ptr::null_mut();
         let get_sel: GetSelection = method(pat, 5);
         let hr_s = get_sel(pat, &mut arr);
+        // 1.9.7: the whole text of the field (IUIAutomationTextPattern::get_DocumentRange, 7): the
+        // character read before the caret must belong to it
+        let mut doc: *mut c_void = std::ptr::null_mut();
+        if pid == 0 {
+            let get_doc: GetSelection = method(pat, 7);
+            if get_doc(pat, &mut doc) < 0 {
+                doc = std::ptr::null_mut();
+            }
+        }
         release_pat(pat);
-        if hr_s < 0 || arr.is_null() {
+        let release_doc = |d: *mut c_void| {
+            if !d.is_null() {
+                let rel: Release = method(d, 2);
+                rel(d);
+            }
+        };
+        if hr_s < 0 || arr.is_null() || (pid == 0 && doc.is_null()) {
+            release_doc(doc);
+            if !arr.is_null() {
+                let rel: Release = method(arr, 2);
+                rel(arr);
+            }
             return Err("no cursor range");
         }
         let release_arr: Release = method(arr, 2);
@@ -239,6 +275,7 @@ fn ask_terminal(automation: *mut c_void, n: usize, pid: u32) -> Result<String, &
         let ok = get_len(arr, &mut count) >= 0 && count == 1 && get_el(arr, 0, &mut r) >= 0 && !r.is_null();
         release_arr(arr);
         if !ok {
+            release_doc(doc);
             return Err("no single cursor range");
         }
         let release_r: Release = method(r, 2);
@@ -246,6 +283,7 @@ fn ask_terminal(automation: *mut c_void, n: usize, pid: u32) -> Result<String, &
         let mut c = 0i32;
         if cmp(r, 0, r, 1, &mut c) < 0 || c != 0 {
             release_r(r);
+            release_doc(doc);
             return Err("selection active");
         }
         let mut r2: *mut c_void = std::ptr::null_mut();
@@ -253,14 +291,24 @@ fn ask_terminal(automation: *mut c_void, n: usize, pid: u32) -> Result<String, &
         let hr_c = clone(r, &mut r2);
         release_r(r);
         if hr_c < 0 || r2.is_null() {
+            release_doc(doc);
             return Err("no cursor range");
         }
         let release_r2: Release = method(r2, 2);
         let mv: MoveEndpoint = method(r2, 14);
         let mut moved = 0i32;
-        // a few characters more than typed: display line breaks may count as characters
-        let back = -((n.min(400) + 8) as i32);
-        let hr_m = mv(r2, 0, 0, back, &mut moved);
+        // a few characters more than typed: display line breaks may count as characters; for any
+        // field (pid 0) exactly ONE character, which must be inside the field's own text
+        let back = if pid == 0 { -1 } else { -((n.min(400) + 8) as i32) };
+        let mut hr_m = mv(r2, 0, 0, back, &mut moved);
+        if pid == 0 && hr_m >= 0 {
+            let cmp2: CompareEndpoints = method(r2, 5);
+            let mut c2 = 0i32;
+            if moved != -1 || cmp2(r2, 0, doc, 0, &mut c2) < 0 || c2 < 0 {
+                hr_m = -1; // the caret is at the start of the field (or outside it)
+            }
+        }
+        release_doc(doc);
         let mut text: *const u16 = std::ptr::null();
         let get_text: GetText = method(r2, 12);
         let hr_t = if hr_m >= 0 { get_text(r2, 2048, &mut text) } else { -1 };

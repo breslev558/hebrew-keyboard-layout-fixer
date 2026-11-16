@@ -324,10 +324,12 @@ pub trait Host {
     fn terminal_before_caret(&self, _n: usize) -> Result<String, &'static str> {
         Err("not available")
     }
-    /// 1.9.7: the few characters just before the caret in the focused field (UI Automation),
-    /// None when it cannot be told. Only used to decide whether a line above may be taken.
-    fn chars_before_caret(&self, _n: usize) -> Option<String> {
-        None
+    /// 1.9.7: a line for the journal in the middle of a fix (never any text).
+    fn note(&self, _line: &str) {}
+    /// 1.9.7: the character just before the caret in the focused field (UI Automation), Err(why)
+    /// when it cannot be told. Only used to decide whether a line above may be taken.
+    fn chars_before_caret(&self, _n: usize) -> Result<String, &'static str> {
+        Err("not available")
     }
     /// 1.9.5: the converted text was confirmed on the screen (a second F10 toggles it back).
     fn terminal_adopt(&self, _text: &str) {}
@@ -651,14 +653,19 @@ fn take_line_above(host: &mut dyn Host, s: &AppSettings, info: &TargetInfo, targ
     if !field || (s.last_word_only && policy::last_word_field(&info.window_class, &info.focus_class)) {
         return Err(nothing());
     }
-    let before = host.chars_before_caret(1);
-    let mid_paragraph = before.as_deref().and_then(|t| t.chars().last()).is_some_and(|c| c != '\n' && c != '\r' && c != '\u{2029}' && c != '\u{2028}');
-    if !mid_paragraph {
-        return Err(nothing());
+    //
+    let last = match host.chars_before_caret(1) {
+        Ok(t) => t.chars().last(),
+        Err(why) => return Err(Outcome::say(Msg::NothingToConvert, format!("No clipboard change after Ctrl+C (no text?); line above not tried: {why}"))),
+    };
+    match last {
+        Some(c) if !c.is_control() && !policy::is_line_break(c) && c != '\u{FFFC}' => {}
+        _ => return Err(Outcome::say(Msg::NothingToConvert, "No clipboard change after Ctrl+C (no text?); line above not tried: line start")),
     }
     if let Some((msg, why)) = change_reason(host, target) {
         return Err(Outcome::say(msg, format!("Target window or field changed ({why}), stopped")));
     }
+    host.note("Line above: Shift+Up sent (caret at the start of a wrapped line)");
     if !host.send_extend_up() {
         return Err(Outcome::say(Msg::KeysBlocked, "Shift+Up not sent, stopped"));
     }
@@ -1761,8 +1768,11 @@ mod tests {
         fn console_truetype(&self) -> Option<bool> {
             Some(self.c_truetype)
         }
-        fn chars_before_caret(&self, _n: usize) -> Option<String> {
-            self.before_caret.borrow().clone()
+        fn note(&self, line: &str) {
+            self.ev(if line.starts_with("Line above: Shift+Up sent") { "note-shift-up" } else { "note" });
+        }
+        fn chars_before_caret(&self, _n: usize) -> Result<String, &'static str> {
+            self.before_caret.borrow().clone().ok_or("no text pattern")
         }
         fn send_home(&self) -> bool {
             let c = self.c_cursor.get();
@@ -2319,7 +2329,7 @@ mod tests {
         let o = go(&mut m);
         assert_eq!(o.msg, Some(Msg::Converted), "{}", o.log);
         assert_eq!(m.pasted.borrow().as_deref(), Some("שלום"));
-        assert!(m.happened("extend-up"));
+        assert!(m.happened("extend-up") && m.happened("note-shift-up"), "Shift+Up written to the journal");
     }
 
     #[test]

@@ -425,8 +425,11 @@ impl Host for WinHost {
         unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId(self.target.get(), &mut pid) };
         crate::platform::uia::terminal_before_caret(n, pid, 150)
     }
-    fn chars_before_caret(&self, n: usize) -> Option<String> {
-        crate::platform::uia::before_caret(n, 120).ok()
+    fn chars_before_caret(&self, n: usize) -> Result<String, &'static str> {
+        crate::platform::uia::before_caret(n, 120)
+    }
+    fn note(&self, line: &str) {
+        crate::util::log(line);
     }
     fn terminal_adopt(&self, text: &str) {
         input::terminal_adopt(text);

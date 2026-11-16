@@ -44,6 +44,8 @@ public static class N {
   // 1.9.4: F10 pressed, a click 10 ms later while F10 is still down, then F10 released (timing kept
   // here, not in PowerShell where a 5 ms sleep lasts 15-20 ms, avis Fable)
   public static void F10ThenClick(IntPtr h, int dx, int dy) { keybd_event(0x79, 0, 0, UIntPtr.Zero); System.Threading.Thread.Sleep(10); ClickIn(h, dx, dy); System.Threading.Thread.Sleep(150); keybd_event(0x79, 0, 2, UIntPtr.Zero); }
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindow(string c, string t);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
   public static bool Front(IntPtr h) {
     uint me = GetCurrentThreadId(), fg = GetWindowThreadProcessId(GetForegroundWindow(), IntPtr.Zero);
     AttachThreadInput(me, fg, true); keybd_event(0x12, 0, 0, UIntPtr.Zero); keybd_event(0x12, 0, 2, UIntPtr.Zero);
@@ -260,6 +262,7 @@ foreach ($n in $navs) {
     # 1.9.7 a) curseur au DEBUT d'une ligne repliee (affichee) au milieu d'un paragraphe : Maj+Debut ne
     # prend rien ; F10 prend la ligne du dessus (UI Automation voit un caractere avant le curseur)
     $n3 = @(Get-Content $log).Count
+    [N]::English($h); Start-Sleep -Milliseconds 300
     & $vider; [System.Windows.Forms.SendKeys]::SendWait('akuo ' * 40); Start-Sleep -Milliseconds 800
     $avant = Texte
     [N]::Key(0x24); Start-Sleep -Milliseconds 500   # Debut : debut de la ligne AFFICHEE
@@ -270,6 +273,8 @@ foreach ($n in $navs) {
     Write-Host "MESURE Edge, debut de ligne repliee : texte change $($apres -ne $avant), hebreu $([bool]($apres -match '[\u05D0-\u05EA]'))"
     if (-not ($j3 -match 'Ctrl\+V sent')) { Fail 'debut de ligne repliee : rien corrige' }
     if ($apres -eq $avant -or $apres -notmatch '[\u05D0-\u05EA]') { Fail 'debut de ligne repliee : texte non converti' }
+    if ($apres.Length -ne $avant.Length -or $apres -notmatch 'akuo') { Fail 'debut de ligne repliee : trop (ou mal) converti' }
+    if (-not ($j3 -match 'Line above: Shift\+Up sent')) { Fail 'debut de ligne repliee : Maj+Haut non trace' }
     $resultats += 'OK    nouvelle Edge, debut de ligne repliee, ligne du dessus corrigee'
 
     # 1.9.7 b) F10 appuye deux fois de suite : le 2e (pendant la correction) est ignore, sans bulle « selectionnez »
@@ -279,6 +284,8 @@ foreach ($n in $navs) {
     $j3 = @(Get-Content $log) | Select-Object -Skip $n3
     $j3 | Where-Object { $_ -match 'ignored|careful|Ctrl\+V sent|selection only' } | ForEach-Object { Write-Host "       $(($_ -split '\] ', 2)[1])" }
     if ($j3 -match 'careful mode on: nothing done \((careful mode of the settings|rule)') { Fail 'appui garde : il accuse le mode prudent' }
+    if (-not ($j3 -match 'press kept during the previous conversion: ignored')) { Fail 'appui garde : 2e appui non garde ou non ignore' }
+    if ((Texte) -ne $shalom) { Fail "appui garde : texte '$(Texte)'" }
     $resultats += 'OK    nouvelle Edge, 2e F10 pendant la correction, sans bulle trompeuse'
 
     # 1.9.7 c) barre d'adresse : Ctrl+L, « akuo », Debut, F10 : jamais de Maj+Haut (suggestions)
@@ -291,6 +298,7 @@ foreach ($n in $navs) {
     $j3 = @(Get-Content $log) | Select-Object -Skip $n3
     $j3 | Where-Object { $_ -match 'Ctrl\+V sent|No clipboard|line break|Shift\+Up|Timing' } | ForEach-Object { Write-Host "       $(($_ -split '\] ', 2)[1])" }
     if ($j3 -match 'Ctrl\+V sent') { Fail 'barre d''adresse, curseur au debut : un texte a ete colle' }
+    if ($j3 -match 'Shift\+Up sent') { Fail 'barre d''adresse : Maj+Haut envoye (suggestions)' }
     [N]::Key(0x1B); Start-Sleep -Milliseconds 300; [N]::Key(0x1B); Start-Sleep -Milliseconds 300
     Cliquer; Start-Sleep -Milliseconds 500
     $resultats += 'OK    nouvelle Edge, barre d''adresse curseur au debut, rien colle'
@@ -298,6 +306,7 @@ foreach ($n in $navs) {
     # 1.9.7 d) mode prudent coche : la nouvelle bulle (le journal dit « careful mode of the settings »)
     $garde = $reglages
     $script:reglages = $reglages.Replace('"UiLanguage": "en"', '"UiLanguage": "en", "RequireSelection": true')
+    if ($script:reglages -eq $garde) { Fail 'mode prudent : reglage non injecte' }
     Lancer $exe
     $n3 = @(Get-Content $log).Count
     & $sans; Start-Sleep -Milliseconds 800; [N]::Key(0x79); Start-Sleep 2
@@ -307,6 +316,41 @@ foreach ($n in $navs) {
     $script:reglages = $garde
     Lancer $exe
     $resultats += 'OK    nouvelle Edge, mode prudent coche, bulle explicite'
+
+    # 1.9.7 e) curseur au debut d'une VRAIE ligne (apres Entree) : rien ne bouge, jamais Maj+Haut
+    $n3 = @(Get-Content $log).Count
+    [N]::English($h); Start-Sleep -Milliseconds 300
+    & $vider; [System.Windows.Forms.SendKeys]::SendWait('akuo{ENTER}akuo'); Start-Sleep -Milliseconds 800
+    $avant = Texte
+    [N]::Key(0x24); Start-Sleep -Milliseconds 300; [N]::Key(0x79); Start-Sleep 3
+    $j3 = @(Get-Content $log) | Select-Object -Skip $n3
+    $j3 | Where-Object { $_ -match 'Ctrl\+V sent|No clipboard|line above|Shift\+Up' } | ForEach-Object { Write-Host "       $(($_ -split '\] ', 2)[1])" }
+    if ($j3 -match 'Shift\+Up sent') { Fail 'vraie ligne : Maj+Haut envoye' }
+    if ($j3 -match 'Ctrl\+V sent') { Fail 'vraie ligne : texte colle' }
+    if ((Texte) -ne $avant) { Fail "vraie ligne : texte change '$(Texte)'" }
+    $resultats += 'OK    nouvelle Edge, debut de vraie ligne, rien ne bouge'
+
+    # 1.9.7 f) bulle « pres du curseur » : dans une page (pas de curseur de texte Windows), pres de la souris
+    $garde = $reglages
+    $script:reglages = $reglages.Replace('"ShowBubble": false', '"ShowBubble": true, "BubblePosition": 2')
+    if ($script:reglages -eq $garde) { Fail 'bulle : reglage non injecte' }
+    $env:KLF_TEST_CAPTURE = '1'
+    Lancer $exe
+    $r = New-Object N+RECT; [void][N]::GetWindowRect($h, [ref]$r)
+    $mx = $r.L + 300; $my = $r.T + 400
+    & $sans; Start-Sleep -Milliseconds 800
+    [void][N]::SetCursorPos($mx, $my); Start-Sleep -Milliseconds 300
+    [N]::Key(0x79); Start-Sleep -Milliseconds 900
+    $b = [N]::FindWindow('KBLayoutFixerBubble', $null)
+    $br = New-Object N+RECT; $vis = ($b -ne [IntPtr]::Zero) -and [N]::IsWindowVisible($b)
+    if ($vis) { [void][N]::GetWindowRect($b, [ref]$br) }
+    Write-Host "MESURE bulle : visible $vis, position $($br.L),$($br.T) ; souris $mx,$my"
+    Remove-Item Env:KLF_TEST_CAPTURE -ErrorAction SilentlyContinue
+    $script:reglages = $garde
+    Lancer $exe
+    if (-not $vis) { Fail 'bulle : pas visible' }
+    if ([Math]::Abs($br.T - $my) -gt 200 -or [Math]::Abs($br.L - $mx) -gt 400) { Fail "bulle : loin de la souris ($($br.L),$($br.T))" }
+    $resultats += 'OK    nouvelle Edge, bulle pres de la souris (curseur de texte inconnu)'
   }
   $vus = @(Get-Content $log) | Select-Object -Skip $nlog | Where-Object { $_ -match 'Focus moved|Text caret moved|User input during' }
   Write-Host "INFO $v : $($vus.Count) changement(s) de focus vus par la nouvelle version"; $vus | ForEach-Object { Write-Host "       $(($_ -split '\] ', 2)[1])" }

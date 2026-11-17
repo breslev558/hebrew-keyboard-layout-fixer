@@ -201,9 +201,10 @@ pub struct AppSettings {
     pub update_skip_at: u64,
     // --- new in 1.5.2 ---
     /// Where the bubble appears: BUBBLE_TOP, BUBBLE_BOTTOM or BUBBLE_CARET. 2.0.0: near the text
-    /// (BUBBLE_CARET) by default, for a new install only: a file written before always holds its
-    /// value (every field is written), which is kept.
-    #[serde(rename = "BubblePosition", deserialize_with = "de_bubble_position")]
+    /// (BUBBLE_CARET) for a NEW install only (Default, no file yet: the first file written holds
+    /// 2); a file without the field (before 1.5.2, partial, old export) or with a wrong value keeps
+    /// the old place, at the top.
+    #[serde(rename = "BubblePosition", default = "bubble_top", deserialize_with = "de_bubble_position")]
     pub bubble_position: u32,
     #[serde(rename = "UiLanguage", deserialize_with = "de_lang", serialize_with = "ser_lang")]
     pub ui_language: UiLanguage,
@@ -462,20 +463,29 @@ impl AppSettings {
     /// 2.0.0 (choice of the owner): the « Excluded » list is gone from the settings window; its
     /// programs become « fix nothing in these programs » rules (Disabled), each once, a rule
     /// « only with a selection » for the same program becoming Disabled. True if something moved.
+    /// Run before validate() (which then normalises the rules); a name refused for a rule stays.
     /// (The administrator's excluded programs are not here: they are added on top, as before.)
     pub fn merge_excluded_into_rules(&mut self) -> bool {
-        if self.excluded_processes.is_empty() {
-            return false;
-        }
+        let mut moved = false;
+        let mut kept: Vec<String> = Vec::new();
         for p in std::mem::take(&mut self.excluded_processes) {
             let n = crate::policy::exe_base_name(p.trim());
-            if n.is_empty() || !crate::policy::rule_allowed_for(&n) {
+            if n.is_empty() {
+                continue;
+            }
+            // a name no rule may take stays excluded (still applied by F10): never lost
+            if !crate::policy::rule_allowed_for(&n) {
+                if !kept.contains(&n) {
+                    kept.push(n);
+                }
                 continue;
             }
             self.app_rules.retain(|r| r.process != n);
             self.app_rules.push(AppRule { process: n, mode: RuleMode::Disabled });
+            moved = true;
         }
-        true
+        self.excluded_processes = kept;
+        moved
     }
 
     /// The rule of a program (None: no rule).
@@ -561,7 +571,12 @@ fn de_value<'de, D: Deserializer<'de>>(d: D) -> Result<serde_json::Value, D::Err
 
 fn de_bubble_position<'de, D: Deserializer<'de>>(d: D) -> Result<u32, D::Error> {
     let v = de_value(d)?;
-    Ok(v.as_u64().and_then(|n| u32::try_from(n).ok()).filter(|n| *n <= BUBBLE_CARET).unwrap_or(BUBBLE_CARET))
+    Ok(v.as_u64().and_then(|n| u32::try_from(n).ok()).filter(|n| *n <= BUBBLE_CARET).unwrap_or(BUBBLE_TOP))
+}
+
+/// A file without BubblePosition: the place it always had (top).
+fn bubble_top() -> u32 {
+    BUBBLE_TOP
 }
 
 fn de_u32<'de, D: Deserializer<'de>>(d: D) -> Result<u32, D::Error> {
@@ -679,20 +694,23 @@ fn de_strings<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> 
     })
 }
 
-/// 2.0.0: the paste delay shown in SECONDS ("1", "0,5" with a comma in French), stored in ms.
+/// 2.0.0: the paste delay shown in SECONDS ("1", "0,5", "1,25" with a comma in French), stored
+/// in ms; exact both ways (a value set in the file, e.g. 1250 ms, is never rounded by « Apply »).
 pub fn delay_text(ms: i64, comma: bool) -> String {
-    let t = if ms % 1000 == 0 { (ms / 1000).to_string() } else { format!("{}.{}", ms / 1000, (ms % 1000) / 100) };
+    let (int, frac) = (ms / 1000, ms % 1000);
+    let t = if frac == 0 { int.to_string() } else { format!("{int}.{}", format!("{frac:03}").trim_end_matches('0')) };
     if comma { t.replace('.', ",") } else { t }
 }
 
-/// 2.0.0: seconds typed by the user ("1", "1.5", "0,5") -> ms, only from 0.1 to 10 s, tenths only.
+/// 2.0.0: seconds typed by the user ("1", "1.5", "0,25") -> ms, only from 0.1 to 10 s, to the ms.
 pub fn parse_delay_seconds(t: &str) -> Option<i64> {
     let t = t.trim().replace(',', ".");
     let (int, frac) = t.split_once('.').unwrap_or((&t, ""));
-    if int.is_empty() && frac.is_empty() || !int.chars().all(|c| c.is_ascii_digit()) || !frac.chars().all(|c| c.is_ascii_digit()) || frac.len() > 1 || int.len() > 3 {
+    if int.is_empty() && frac.is_empty() || !int.chars().all(|c| c.is_ascii_digit()) || !frac.chars().all(|c| c.is_ascii_digit()) || frac.len() > 3 || int.len() > 3 {
         return None;
     }
-    let ms = int.parse::<i64>().unwrap_or(0) * 1000 + frac.parse::<i64>().unwrap_or(0) * 100;
+    let frac_ms = if frac.is_empty() { 0 } else { format!("{frac:0<3}").parse::<i64>().unwrap_or(0) };
+    let ms = int.parse::<i64>().unwrap_or(0) * 1000 + frac_ms;
     (100..=10_000).contains(&ms).then_some(ms)
 }
 
@@ -754,13 +772,15 @@ mod tests {
 
     #[test]
     fn bubble_position_defaults_to_near_the_text_and_keeps_a_saved_value() {
-        // 2.0.0: near the text for a new install (absent from the file), a saved value kept
+        // 2.0.0: near the text for a new install (no file: the defaults, written as they are), the
+        // top for any existing file that does not say otherwise (missing or wrong value)
         assert_eq!(AppSettings::default().bubble_position, BUBBLE_CARET);
-        assert_eq!(AppSettings::from_json("{}").0.bubble_position, BUBBLE_CARET);
+        assert!(AppSettings::default().to_json().contains("\"BubblePosition\": 2"), "the first file written holds 2");
+        assert_eq!(AppSettings::from_json("{}").0.bubble_position, BUBBLE_TOP);
         assert_eq!(AppSettings::from_json("{\"BubblePosition\":0}").0.bubble_position, BUBBLE_TOP);
         assert_eq!(AppSettings::from_json("{\"BubblePosition\":2}").0.bubble_position, BUBBLE_CARET);
-        assert_eq!(AppSettings::from_json("{\"BubblePosition\":9}").0.bubble_position, BUBBLE_CARET);
-        assert_eq!(AppSettings::from_json("{\"BubblePosition\":\"x\"}").0.bubble_position, BUBBLE_CARET);
+        assert_eq!(AppSettings::from_json("{\"BubblePosition\":9}").0.bubble_position, BUBBLE_TOP);
+        assert_eq!(AppSettings::from_json("{\"BubblePosition\":\"x\"}").0.bubble_position, BUBBLE_TOP);
         // a file of an older version always holds the field: written again unchanged
         let old = AppSettings { bubble_position: BUBBLE_TOP, ..AppSettings::default() }.to_json();
         assert_eq!(AppSettings::from_json(&old).0.bubble_position, BUBBLE_TOP);
@@ -827,7 +847,8 @@ mod tests {
         let (s, ok) = AppSettings::from_json(net);
         assert!(ok);
         assert!(s.migrated, "a .NET file has no SettingsVersion: written again once");
-        assert_eq!(AppSettings { migrated: false, ..s }, AppSettings::default());
+        // 2.0.0: an existing file without BubblePosition keeps the top (only a new install is near the text)
+        assert_eq!(AppSettings { migrated: false, ..s }, AppSettings { bubble_position: BUBBLE_TOP, ..AppSettings::default() });
     }
 
     #[test]
@@ -1006,11 +1027,15 @@ mod tests {
         assert_eq!(delay_text(1500, true), "1,5");
         assert_eq!(delay_text(1500, false), "1.5");
         assert_eq!(delay_text(100, false), "0.1");
-        for (t, ms) in [("1", Some(1000)), ("1,5", Some(1500)), (" 0.5 ", Some(500)), ("10", Some(10_000)), ("0,1", Some(100)), (".5", Some(500)), ("0", None), ("11", None), ("1.25", None), ("abc", None), ("", None), ("-1", None), ("1,5,5", None)] {
+        assert_eq!(delay_text(1250, false), "1.25");
+        assert_eq!(delay_text(1001, true), "1,001");
+        for (t, ms) in [("1", Some(1000)), ("1,5", Some(1500)), (" 0.5 ", Some(500)), ("10", Some(10_000)), ("0,1", Some(100)), (".5", Some(500)), ("1.25", Some(1250)), ("0", None), ("11", None), ("1.2345", None), ("0.05", None), ("abc", None), ("", None), ("-1", None), ("1,5,5", None)] {
             assert_eq!(parse_delay_seconds(t), ms, "{t}");
         }
-        for ms in (100..=10_000).step_by(100) {
-            assert_eq!(parse_delay_seconds(&delay_text(ms, true)), Some(ms));
+        // every allowed value comes back exactly
+        for ms in 100..=10_000 {
+            assert_eq!(parse_delay_seconds(&delay_text(ms, true)), Some(ms), "{ms}");
+            assert_eq!(parse_delay_seconds(&delay_text(ms, false)), Some(ms), "{ms}");
         }
     }
 
@@ -1049,5 +1074,23 @@ mod tests {
         assert_eq!(again.app_rules, s.app_rules);
         let (none, _) = AppSettings::from_json(r#"{"SettingsVersion":4}"#);
         assert!(!none.migrated);
+    }
+
+    /// 2.0.0: an excluded name that no rule may take stays excluded (never lost), and
+    /// such a file is not « moved » again at every start.
+    #[test]
+    fn excluded_name_refused_for_a_rule_stays_excluded() {
+        let own = "keyboardlayoutfixer.exe";
+        assert!(!crate::policy::rule_allowed_for(own));
+        let j = format!(r#"{{"ExcludedProcesses":["{own}","game.exe"],"SettingsVersion":4}}"#);
+        let (s, _) = AppSettings::from_json(&j);
+        assert!(s.migrated);
+        assert_eq!(s.excluded_processes, vec![own.to_string()]);
+        assert_eq!(s.rule_for("game.exe"), Some(RuleMode::Disabled));
+        let mut again = s.clone();
+        assert!(!again.merge_excluded_into_rules(), "nothing moved");
+        assert_eq!(again.excluded_processes, vec![own.to_string()]);
+        let (s2, _) = AppSettings::from_json(&j.replace(",\"game.exe\"", ""));
+        assert!(!s2.migrated, "only a name that cannot move: nothing to write again");
     }
 }

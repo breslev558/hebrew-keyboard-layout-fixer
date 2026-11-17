@@ -103,6 +103,30 @@ pub fn differences(old: &AppSettings, new: &AppSettings, locked: &Locked) -> Vec
     v
 }
 
+/// 2.0.0: what a settings file (import, « previous settings ») never changes: the notices the
+/// program already showed once (welcome, « 6 tabs ») stay shown, or they would come back.
+pub fn keep_program_marks(current: &AppSettings, mut new: AppSettings) -> AppSettings {
+    new.welcome_done |= current.welcome_done;
+    new.tabs_notice_done |= current.tabs_notice_done;
+    new
+}
+
+/// What an imported profile never changes: the user's own choices about watching the keys and
+/// sending reports, and the notices already shown.
+pub fn keep_own_choices(current: &AppSettings, mut new: AppSettings) -> AppSettings {
+    new.report_mode = current.report_mode; // a file never turns on "send reports without asking"
+    new.typing_suggestions = current.typing_suggestions; // watching the keys is the user's own choice
+    new.double_shift_convert = current.double_shift_convert;
+    new.typing_sound = current.typing_sound;
+    new.f10_only_wrong_words = current.f10_only_wrong_words; // downloads the word lists: the user's choice
+    new.ctrl_tap_language = current.ctrl_tap_language; // these watch the keys: the user's own choices
+    new.messenger_guard = current.messenger_guard;
+    new.one_language_programs = current.one_language_programs;
+    new.text_replacements = current.text_replacements; // also watches the keys
+    new.typing_skip_code_editors = current.typing_skip_code_editors;
+    keep_program_marks(current, new)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -167,5 +191,21 @@ mod tests {
         assert!(d.iter().any(|x| x.starts_with("mode prudent : false → true")));
         assert!(d.iter().any(|x| x.contains("délai (ms) : 1000 → 2000 (sans effet")));
         assert!(differences(&old, &old, &locked).is_empty());
+    }
+
+    /// 2.0.0: an old file (import or « previous settings ») never brings back the « 6 tabs » notice
+    /// nor the welcome, nor changes the choices about the keys and reports.
+    #[test]
+    fn import_keeps_the_marks_and_own_choices() {
+        let current = AppSettings { tabs_notice_done: true, welcome_done: true, report_mode: crate::report::NEVER, typing_suggestions: true, ..AppSettings::default() };
+        let old_file = import(r#"{"RequireSelection":true,"ReportMode":1}"#).unwrap();
+        assert!(!old_file.tabs_notice_done);
+        let n = keep_own_choices(&current, old_file.clone());
+        assert!(n.tabs_notice_done && n.welcome_done && n.require_selection);
+        assert_eq!(n.report_mode, crate::report::NEVER);
+        assert!(n.typing_suggestions);
+        let back = keep_program_marks(&current, old_file);
+        assert!(back.tabs_notice_done && back.welcome_done);
+        assert_eq!(back.report_mode, crate::report::ALWAYS, "« previous settings » are the user's own: kept");
     }
 }

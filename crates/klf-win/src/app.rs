@@ -63,9 +63,13 @@ pub fn tabs_notice_at_start(file_existed: bool) {
     let last_word = u.last_word_only;
     let mut done = u;
     done.tabs_notice_done = true;
-    if save_settings(&done) {
-        STATE.with(|s| *s.settings.borrow_mut() = done);
+    // shown only if remembered (otherwise it would come back at every start)
+    if !save_settings(&done) {
+        log("Notice « 6 tabs » not shown: settings.json could not be written");
+        return;
     }
+    STATE.with(|s| *s.settings.borrow_mut() = done);
+    share_settings();
     if due {
         let h = STATE.with(|s| s.hwnd.get());
         // SAFETY: posting a message without pointers to our window (shown once the loop runs).
@@ -91,7 +95,8 @@ fn show_tabs_notice(last_word: bool) {
             nid.hWnd = main_window();
             nid.uID = TRAY_ID;
             nid.uFlags = NIF_INFO;
-            nid.dwInfoFlags = NIIF_INFO | NIIF_RESPECT_QUIET_TIME;
+            // (not NIIF_RESPECT_QUIET_TIME: the notice is already remembered as shown)
+            nid.dwInfoFlags = NIIF_INFO;
             copy_wide(&mut nid.szInfoTitle, text(l, Msg::WindowTitle));
             copy_wide(&mut nid.szInfo, &body);
             Shell_NotifyIconW(NIM_MODIFY, &nid) != 0

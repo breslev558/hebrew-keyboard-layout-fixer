@@ -251,7 +251,8 @@ function Attendre([scriptblock]$cond, $ms) {
 function Demarrer($json, $dpi) {
   Get-Process KeyboardLayoutFixer -ErrorAction SilentlyContinue | Stop-Process -Force
   Start-Sleep 1
-  $json | Set-Content -Encoding UTF8 (Join-Path $dir 'settings.json')
+  # 2.0.0: $null = a really new install (no settings.json: the program writes its own defaults)
+  if ($null -eq $json) { Remove-Item (Join-Path $dir 'settings.json') -ErrorAction SilentlyContinue } else { $json | Set-Content -Encoding UTF8 (Join-Path $dir 'settings.json') }
   if ($dpi) { $env:KLF_TEST_DPI = "$dpi" } else { Remove-Item Env:\KLF_TEST_DPI -ErrorAction SilentlyContinue }
   $p = Start-Process -FilePath $exe -PassThru
   $m = Attendre { [A]::FindWindow('KBLayoutFixerMain', [NullString]::Value) } 10000
@@ -324,11 +325,19 @@ foreach ($lg in 'he', 'fr', 'en') {
   } else { Manque "menu de l'icône ($lg)" }
   Start-Sleep 1
 
-  # --- bulle F10, en haut, en bas, puis (2.0.0) sans BubblePosition dans le fichier comme une
-  # installation neuve : la bulle doit apparaitre pres du texte (curseur de texte ou souris)
+  # --- bulle F10, en haut, en bas, puis (2.0.0) sur une VRAIE installation neuve (settings.json
+  # supprime : un fichier sans BubblePosition garde le haut) : le premier fichier ecrit dit 2 et la
+  # bulle apparait pres du texte (curseur de texte ou souris)
   foreach ($pos in @(@(0, 'haut'), @(1, 'bas'), @(-1, 'defaut'))) {
-    $placeJson = if ($pos[0] -ge 0) { '"BubblePosition": ' + $pos[0] + ', ' } else { '' }
-    $p = Demarrer ('{ "WelcomeDone": true, "ShowBubble": true, "ShowPreview": true, ' + $placeJson + '"UiLanguage": "' + $lg + '" }') $null
+    if ($pos[0] -ge 0) {
+      $p = Demarrer ('{ "WelcomeDone": true, "ShowBubble": true, "ShowPreview": true, "BubblePosition": ' + $pos[0] + ', "UiLanguage": "' + $lg + '" }') $null
+    } else {
+      $p = Demarrer $null $null
+      $bv = Attendre { [A]::Visible('#32770', [uint32]$p.Id) } 8000   # the welcome of a new install, closed
+      if ($bv -ne [IntPtr]::Zero) { [void][A]::PostMessage($bv, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero); Start-Sleep 1 }
+      $neuf = Get-Content (Join-Path $dir 'settings.json') -Raw -ErrorAction SilentlyContinue
+      if ($neuf -notmatch '"BubblePosition":\s*2') { Defaut "installation neuve ($lg) : le premier settings.json ne dit pas BubblePosition 2" } else { Write-Host "OK    installation neuve ($lg) : BubblePosition 2 ecrit" }
+    }
     $n = Bloc-notes 'akuo'
     if (-not $n) { Manque "Bloc-notes ($lg)"; continue }
     $avantF10 = [A]::GetForegroundWindow()   # (Notepad of Windows 11: its MainWindowHandle may be stale, avis Fable)

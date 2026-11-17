@@ -356,8 +356,9 @@ const IID_IACC_PROP_SERVICES: windows_sys::core::GUID = windows_sys::core::GUID:
 const PROPID_ACC_NAME_: windows_sys::core::GUID = windows_sys::core::GUID::from_u128(0x608d3df8_8128_4aa7_a428_f55e49267291);
 /// PROPID_ACC_DESCRIPTION (oleacc.h: 4d48dfe4-bd3f-491f-a648-492d6f20c588)
 const PROPID_ACC_DESCRIPTION_: windows_sys::core::GUID = windows_sys::core::GUID::from_u128(0x4d48dfe4_bd3f_491f_a648_492d6f20c588);
-const NAMED_IDS: [i32; 9] = [ID_BUBBLE_POS, ID_TAB, ID_GITHUB, ID_ORIGIN, ID_ABOUT_TEXT, ID_WORK_MODE, ID_RESULT, ID_DIAG_TEXT, ID_TYPING_WORDS];
-const DESCRIBED_IDS: [i32; 12] = [ID_ENABLED, ID_DIRECTION, ID_CAREFUL, ID_LIMIT, ID_DELAY, ID_RULE_OFF, ID_RULE_SEL, ID_PREVIEW, ID_SWITCH, ID_TYPING, ID_REPLACEMENTS, ID_MESSENGER];
+const NAMED_IDS: [i32; 8] = [ID_BUBBLE_POS, ID_TAB, ID_GITHUB, ID_ORIGIN, ID_ABOUT_TEXT, ID_WORK_MODE, ID_RESULT, ID_DIAG_TEXT];
+/// (clear_acc_names clears BOTH the name and the description of every control of both lists)
+const DESCRIBED_IDS: [i32; 13] = [ID_ENABLED, ID_DIRECTION, ID_CAREFUL, ID_LIMIT, ID_DELAY, ID_RULE_OFF, ID_RULE_SEL, ID_PREVIEW, ID_SWITCH, ID_TYPING, ID_REPLACEMENTS, ID_MESSENGER, ID_TYPING_WORDS];
 // Method numbers in the vtable, from oleacc.h (IAccPropServicesVtbl: QueryInterface 0, AddRef 1,
 // Release 2, SetPropValue 3, SetPropServer 4, ClearProps 5, SetHwndProp 6, SetHwndPropStr 7,
 // SetHwndPropServer 8, ClearHwndProps 9). Checked against the header by tools/verifier-vtables.py
@@ -1031,6 +1032,7 @@ fn fill_controls() {
     let u = app::user_settings();
     let l = app::lang_of(&s);
     let key = s.hotkey_description();
+    HOTKEY_WARN.with(|w| w.set([false; 2])); // a new window: no key said taken yet
     set_acc_names(l, &key);
     for (i, m) in TABS.iter().enumerate() {
         let mut t = wide(text(l, *m));
@@ -1554,17 +1556,8 @@ fn on_import() {
     };
     let old = app::user_settings();
     // a file never turns on "send reports without asking": that choice stays the user's
-    let mut new = new;
-    new.report_mode = old.report_mode;
-    new.typing_suggestions = old.typing_suggestions; // watching the keys is the user's own choice
-    new.double_shift_convert = old.double_shift_convert;
-    new.typing_sound = old.typing_sound;
-    new.f10_only_wrong_words = old.f10_only_wrong_words; // downloads the word lists: the user's choice
-    new.ctrl_tap_language = old.ctrl_tap_language; // these watch the keys: the user's own choices
-    new.messenger_guard = old.messenger_guard;
-    new.one_language_programs = old.one_language_programs;
-    new.text_replacements = old.text_replacements; // also watches the keys: the user's own choice
-    new.typing_skip_code_editors = old.typing_skip_code_editors;
+    // what a file never changes: the choices about the keys and reports, the notices already shown
+    let new = klf_core::profile::keep_own_choices(&old, new);
     let diff = klf_core::profile::differences(&old, &new, &app::locked());
     if diff.is_empty() {
         message(text(l, Msg::ImportNothing), MB_ICONINFORMATION);
@@ -1599,6 +1592,8 @@ fn on_undo_import() {
     if !ask(text(l, Msg::UndoConfirm)) {
         return;
     }
+    // 2.0.0: the notices already shown stay shown (an older copy would bring them back)
+    let prev = klf_core::profile::keep_program_marks(&app::user_settings(), prev);
     if !app::save_settings(&prev) {
         set_error(text(l, Msg::SaveFailed));
         return;

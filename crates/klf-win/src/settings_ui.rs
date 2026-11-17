@@ -1,8 +1,10 @@
 //! The settings window: native Windows controls (Common Controls v6), system font at the
 //! right DPI, mirrored right-to-left in Hebrew (WS_EX_LAYOUTRTL set at creation).
-//! Three tabs (1.4.0): Simple (keys, converter, language), Advanced (options of settings.json),
-//! Diagnostic (last attempts, copy the information). The controls of every tab are children of
-//! the window, shown or hidden with the tab; Ctrl+Tab changes the tab.
+//! 2.0.0: six tabs, General (language, "fixer on", start, indicator, bubble, sound, converter),
+//! Conversion (keys and how F10 works), Typing (correction while typing, replacements), Apps
+//! (rules per program, terminals, one-language programs), Diagnostics (last attempt, reports,
+//! export/import) and About (version, updates, GitHub, license). The controls of every tab are
+//! children of the window, shown or hidden with the tab; Ctrl+Tab changes the tab.
 
 use crate::app::{self, HotkeyState};
 use crate::platform::sys;
@@ -11,7 +13,7 @@ use klf_core::convert::{convert_with, swap_case};
 use klf_core::i18n::{text, text_with_key, Lang, Msg};
 use klf_core::layouts::{KeyMap, LatinKind};
 use klf_core::settings::{
-    hotkey_allowed, Action, KEY_NONE, key_to_vk, vk_to_key, AppSettings, MixedTextMode, UiLanguage, MOD_ALT, MOD_CONTROL, MOD_SHIFT,
+    hotkey_allowed, Action, KEY_NONE, key_to_vk, vk_to_key, AppRule, AppSettings, MixedTextMode, RuleMode, UiLanguage, MOD_ALT, MOD_CONTROL, MOD_SHIFT,
 };
 use std::cell::Cell;
 use std::ptr::{null, null_mut};
@@ -24,16 +26,22 @@ use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 // common
 const ID_STATUS: i32 = 201;
-const ID_PAUSE: i32 = 202;
 const ID_TAB: i32 = 240;
-const ID_ABOUT: i32 = 213;
 const ID_SAVE: i32 = 214;
 const ID_CLOSE: i32 = 2; // IDCANCEL: Esc closes the window
-// Simple
-const ID_LBL_HOTKEY: i32 = 230;
-const ID_HOTKEY: i32 = 203;
-const ID_LBL_HOTKEY_CASE: i32 = 241;
-const ID_HOTKEY_CASE: i32 = 236;
+/// 2.0.0: "Defaults" (of the page shown), where the About button was
+const ID_DEFAULTS: i32 = 269;
+// General
+const ID_LBL_LANG: i32 = 234;
+const ID_LANG: i32 = 212;
+const ID_ENABLED: i32 = 266;
+const ID_NOTE_ENABLED: i32 = 267;
+const ID_AUTOSTART: i32 = 211;
+const ID_INDICATOR: i32 = 259;
+const ID_BUBBLE: i32 = 208;
+const ID_BUBBLE_POS: i32 = 263;
+const ID_PREVIEW: i32 = 268;
+const ID_SOUND: i32 = 209;
 const ID_LBL_WORK: i32 = 242;
 const ID_WORK_MODE: i32 = 243;
 const ID_COPY_RESULT: i32 = 244;
@@ -41,60 +49,128 @@ const ID_LBL_TRY: i32 = 232;
 const ID_TRY: i32 = 205;
 const ID_LBL_RESULT: i32 = 233;
 const ID_RESULT: i32 = 206;
-const ID_LBL_LANG: i32 = 234;
-const ID_LANG: i32 = 212;
-const ID_AUTOSTART: i32 = 211;
-// Advanced
+// Conversion
+const ID_LBL_HOTKEY: i32 = 230;
+const ID_HOTKEY: i32 = 203;
+const ID_LBL_HOTKEY_CASE: i32 = 241;
+const ID_HOTKEY_CASE: i32 = 236;
 const ID_LBL_DIRECTION: i32 = 231;
 const ID_DIRECTION: i32 = 204;
+const ID_NOTE_DIRECTION: i32 = 273;
 const ID_SWITCH: i32 = 207;
-const ID_BUBBLE: i32 = 208;
-const ID_SOUND: i32 = 209;
 const ID_CAREFUL: i32 = 245;
-const ID_CAPSOFF: i32 = 246;
+const ID_NOTE_CAREFUL: i32 = 274;
 const ID_LASTWORD: i32 = 258;
+const ID_F10_WRONG: i32 = 272;
+const ID_DOUBLE_SHIFT: i32 = 270;
+const ID_CTRL_TAP: i32 = 271;
+const ID_CAPSOFF: i32 = 246;
 const ID_LBL_LIMIT: i32 = 247;
 const ID_LIMIT: i32 = 248;
 const ID_LBL_DELAY: i32 = 249;
 const ID_DELAY: i32 = 250;
+const ID_NOTE_LIMIT: i32 = 275;
+// Typing
+const ID_TYPING: i32 = 276;
+const ID_TYPING_SOUND: i32 = 277;
+const ID_MESSENGER: i32 = 281;
+const ID_TYPING_WORDS: i32 = 278;
+const ID_REPLACEMENTS: i32 = 279;
+const ID_REPLACEMENTS_FILE: i32 = 280;
+const ID_NOTE_TYPING: i32 = 282;
+// Apps
+const ID_NOTE_RULES: i32 = 283;
+const ID_LBL_RULE_OFF: i32 = 284;
+const ID_RULE_OFF: i32 = 285;
+const ID_LBL_RULE_SEL: i32 = 286;
+const ID_RULE_SEL: i32 = 287;
 const ID_LBL_EXCLUDED: i32 = 251;
 const ID_EXCLUDED: i32 = 252;
-const ID_LAYOUTS: i32 = 253;
-// Diagnostic
+const ID_NOTE_RULES2: i32 = 288;
+/// 1.9.5: F10 in Windows Terminal (hidden on a PC managed by an administrator)
+const ID_TERMINAL: i32 = 265;
+const ID_ONE_LANGUAGE: i32 = 289;
+const ID_ONE_LANGUAGE_FILE: i32 = 290;
+// Diagnostics
 const ID_DIAG_LAST: i32 = 254;
 const ID_DIAG_TEXT: i32 = 255;
+const ID_LAYOUTS: i32 = 253;
 const ID_DIAG_COPY: i32 = 256;
 const ID_DIAG_REFRESH: i32 = 257;
-const ID_INDICATOR: i32 = 259;
+const ID_REPORT_PROBLEM: i32 = 291;
+const ID_REPORT_SEND: i32 = 292;
+const ID_REPORT_ALWAYS: i32 = 293;
+const ID_REPORT_NEVER: i32 = 294;
 const ID_EXPORT: i32 = 260;
 const ID_IMPORT: i32 = 261;
 const ID_UNDO_IMPORT: i32 = 262;
-/// 1.8.9: "Check for updates" (Diagnostic page)
+// About
+const ID_ABOUT_TEXT: i32 = 295;
+/// 1.8.9: "Check for updates" (2.0.0: About page; the Windows test clicks it by this id)
 const ID_CHECK_UPDATE: i32 = 264;
+const ID_AUTO_UPDATE: i32 = 296;
+/// 2.0.0: SysLink « GitHub » (opens one fixed address only)
+const ID_GITHUB: i32 = 297;
+
+/// The only address the GitHub link opens (the text of the control is never used as an address).
+const GITHUB_URL: &str = "https://github.com/breslev558/hebrew-keyboard-layout-fixer";
+
+const PAGE_GENERAL: &[i32] = &[
+    ID_LBL_LANG, ID_LANG, ID_ENABLED, ID_NOTE_ENABLED, ID_AUTOSTART, ID_INDICATOR, ID_BUBBLE, ID_BUBBLE_POS, ID_PREVIEW, ID_SOUND, ID_LBL_WORK, ID_WORK_MODE, ID_COPY_RESULT, ID_LBL_TRY, ID_TRY,
+    ID_LBL_RESULT, ID_RESULT,
+];
+const PAGE_CONVERSION: &[i32] = &[
+    ID_LBL_HOTKEY, ID_HOTKEY, ID_LBL_HOTKEY_CASE, ID_HOTKEY_CASE, ID_LBL_DIRECTION, ID_DIRECTION, ID_NOTE_DIRECTION, ID_SWITCH, ID_CAREFUL, ID_NOTE_CAREFUL, ID_LASTWORD, ID_F10_WRONG,
+    ID_DOUBLE_SHIFT, ID_CTRL_TAP, ID_CAPSOFF, ID_LBL_LIMIT, ID_LIMIT, ID_LBL_DELAY, ID_DELAY, ID_NOTE_LIMIT,
+];
+const PAGE_TYPING: &[i32] = &[ID_TYPING, ID_TYPING_SOUND, ID_MESSENGER, ID_TYPING_WORDS, ID_REPLACEMENTS, ID_REPLACEMENTS_FILE, ID_NOTE_TYPING];
+const PAGE_APPS: &[i32] = &[ID_NOTE_RULES, ID_LBL_RULE_OFF, ID_RULE_OFF, ID_LBL_RULE_SEL, ID_RULE_SEL, ID_LBL_EXCLUDED, ID_EXCLUDED, ID_NOTE_RULES2, ID_TERMINAL, ID_ONE_LANGUAGE, ID_ONE_LANGUAGE_FILE];
+const PAGE_DIAG: &[i32] = &[
+    ID_DIAG_LAST, ID_DIAG_TEXT, ID_LAYOUTS, ID_DIAG_COPY, ID_DIAG_REFRESH, ID_REPORT_PROBLEM, ID_REPORT_SEND, ID_REPORT_ALWAYS, ID_REPORT_NEVER, ID_EXPORT, ID_IMPORT, ID_UNDO_IMPORT,
+];
+const PAGE_ABOUT_IDS: &[i32] = &[ID_ABOUT_TEXT, ID_CHECK_UPDATE, ID_AUTO_UPDATE, ID_GITHUB];
+/// 2.0.0: the pages, in the order of the tabs (never a number written by hand elsewhere)
+const PAGES: [&[i32]; 6] = [PAGE_GENERAL, PAGE_CONVERSION, PAGE_TYPING, PAGE_APPS, PAGE_DIAG, PAGE_ABOUT_IDS];
+const TABS: [Msg; 6] = [Msg::TabGeneral, Msg::TabConversion, Msg::TabTyping, Msg::TabApps, Msg::TabDiagnostic, Msg::TabAbout];
+const PAGE_DIAGNOSTIC: usize = 4;
+/// The About tab (opened by « About » in the tray menu).
+pub const PAGE_ABOUT: usize = 5;
+/// grey explanation lines (never reached by Tab; never just before a field, whose name they would become)
+const NOTE_IDS: &[i32] = &[ID_NOTE_ENABLED, ID_NOTE_DIRECTION, ID_NOTE_CAREFUL, ID_NOTE_LIMIT, ID_NOTE_TYPING, ID_NOTE_RULES, ID_NOTE_RULES2];
 
 /// 1.8.9: every control of the window has its own id (checked when compiling; 1.8.9 first gave the
-/// new button the id of the bubble position list).
+/// new button the id of the bubble position list). 2.0.0: every control is on one page.
 const _: () = {
-    let ids = [ID_STATUS, ID_PAUSE, ID_TAB, ID_ABOUT, ID_SAVE, ID_CLOSE, ID_LBL_HOTKEY, ID_HOTKEY, ID_LBL_HOTKEY_CASE, ID_HOTKEY_CASE, ID_LBL_WORK, ID_WORK_MODE, ID_COPY_RESULT, ID_LBL_TRY, ID_TRY, ID_LBL_RESULT, ID_RESULT, ID_LBL_LANG, ID_LANG, ID_AUTOSTART, ID_LBL_DIRECTION, ID_DIRECTION, ID_SWITCH, ID_BUBBLE, ID_SOUND, ID_CAREFUL, ID_CAPSOFF, ID_LASTWORD, ID_LBL_LIMIT, ID_LIMIT, ID_LBL_DELAY, ID_DELAY, ID_LBL_EXCLUDED, ID_EXCLUDED, ID_LAYOUTS, ID_DIAG_LAST, ID_DIAG_TEXT, ID_DIAG_COPY, ID_DIAG_REFRESH, ID_INDICATOR, ID_EXPORT, ID_IMPORT, ID_UNDO_IMPORT, ID_CHECK_UPDATE, ID_BUBBLE_POS, ID_TERMINAL];
+    let common = [ID_STATUS, ID_TAB, ID_SAVE, ID_CLOSE, ID_DEFAULTS];
+    let mut ids = [0i32; 128];
+    let mut n = 0;
     let mut i = 0;
-    while i < ids.len() {
+    while i < common.len() {
+        ids[n] = common[i];
+        n += 1;
+        i += 1;
+    }
+    let mut p = 0;
+    while p < PAGES.len() {
+        let mut j = 0;
+        while j < PAGES[p].len() {
+            ids[n] = PAGES[p][j];
+            n += 1;
+            j += 1;
+        }
+        p += 1;
+    }
+    let mut i = 0;
+    while i < n {
         let mut j = i + 1;
-        while j < ids.len() {
+        while j < n {
             assert!(ids[i] != ids[j], "two controls of the settings window share an id");
             j += 1;
         }
         i += 1;
     }
+    assert!(PAGES.len() == TABS.len() && PAGE_ABOUT < PAGES.len() && PAGE_DIAGNOSTIC < PAGES.len());
 };
-const ID_BUBBLE_POS: i32 = 263;
-/// 1.9.5: F10 in Windows Terminal (hidden on a PC managed by an administrator)
-const ID_TERMINAL: i32 = 265;
-
-const PAGE_SIMPLE: &[i32] = &[ID_LBL_HOTKEY, ID_HOTKEY, ID_LBL_HOTKEY_CASE, ID_HOTKEY_CASE, ID_LBL_WORK, ID_WORK_MODE, ID_COPY_RESULT, ID_LBL_TRY, ID_TRY, ID_LBL_RESULT, ID_RESULT, ID_LBL_LANG, ID_LANG, ID_AUTOSTART, ID_INDICATOR];
-const PAGE_ADVANCED: &[i32] = &[
-    ID_LBL_DIRECTION, ID_DIRECTION, ID_SWITCH, ID_BUBBLE, ID_BUBBLE_POS, ID_SOUND, ID_CAREFUL, ID_LASTWORD, ID_CAPSOFF, ID_TERMINAL, ID_LBL_LIMIT, ID_LIMIT, ID_LBL_DELAY, ID_DELAY, ID_LBL_EXCLUDED, ID_EXCLUDED,
-];
-const PAGE_DIAG: &[i32] = &[ID_DIAG_LAST, ID_DIAG_TEXT, ID_LAYOUTS, ID_DIAG_COPY, ID_DIAG_REFRESH, ID_EXPORT, ID_IMPORT, ID_UNDO_IMPORT, ID_CHECK_UPDATE];
 
 const HKM_SETHOTKEY: u32 = WM_USER + 1;
 const HKM_GETHOTKEY: u32 = WM_USER + 2;
@@ -106,6 +182,7 @@ const CB_ADDSTRING: u32 = 0x0143;
 const CB_GETCURSEL: u32 = 0x0147;
 const CB_SETCURSEL: u32 = 0x014E;
 const CB_RESETCONTENT: u32 = 0x014B;
+const CB_GETDROPPEDSTATE: u32 = 0x0157;
 const CBS_DROPDOWNLIST: u32 = 0x0003;
 const BM_GETCHECK: u32 = 0x00F0;
 const BM_SETCHECK: u32 = 0x00F1;
@@ -123,6 +200,7 @@ const EM_GETSEL: u32 = 0x00B0;
 const EM_SETSEL: u32 = 0x00B1;
 const EM_REPLACESEL: u32 = 0x00C2;
 const CBN_SELCHANGE: u32 = 1;
+const CBN_CLOSEUP: u32 = 8;
 const SS_LEFT: u32 = 0;
 const SS_CENTERIMAGE: u32 = 0x0200;
 /// 1.9.9: a static that wraps its words like a multi-line edit (never with SS_ENDELLIPSIS, which
@@ -135,13 +213,23 @@ const TCM_GETCURSEL: u32 = 0x1300 + 11;
 const TCM_SETCURSEL: u32 = 0x1300 + 12;
 const TCIF_TEXT: u32 = 1;
 const TCN_SELCHANGE: u32 = (-551i32) as u32;
+/// SysLink (commctrl.h): transparent background; notifications of a click and of Enter
+const LWS_TRANSPARENT: u32 = 0x0001;
+const NM_CLICK: u32 = (-2i32) as u32;
+const NM_RETURN: u32 = (-4i32) as u32;
+/// 2.0.0: the language chosen with the keyboard (list closed) is applied after this pause, so
+/// that going through the list with the arrows does not rebuild the window at every item
+const TIMER_LANG: usize = 1;
+const WM_APP_LANG: u32 = WM_APP + 21;
 
 /// Client size in 96-DPI units. When the screen is too small (200 % on 768 px), up to SHRINK_MAX
 /// units are taken from the elastic parts only: text boxes, report, spacing of the check boxes
 ///.
-const WIDTH: i32 = 480;
-const FULL_HEIGHT: i32 = 362;
-const SHRINK_MAX: i32 = 28;
+/// 2.0.0: sized for the fullest page in French (Conversion); 452 units = 904 px at 200 %, under a
+/// 1080 px screen with its taskbar.
+const WIDTH: i32 = 500;
+const FULL_HEIGHT: i32 = 452;
+const SHRINK_MAX: i32 = 36;
 
 fn height() -> i32 {
     FULL_HEIGHT - SHRINK.with(|s| s.get())
@@ -156,6 +244,8 @@ thread_local! {
     static PAGE: Cell<usize> = const { Cell::new(0) };
     static SHRINK: Cell<i32> = const { Cell::new(0) };
     static PENDING_REFRESH: Cell<bool> = const { Cell::new(false) };
+    /// 2.0.0: a language was picked in the open list: applied when the list closes
+    static LANG_PENDING: Cell<bool> = const { Cell::new(false) };
 }
 
 pub fn window() -> HWND {
@@ -197,6 +287,11 @@ fn set_checked(id: i32, on: bool) {
     send(id, BM_SETCHECK, on as usize, 0);
 }
 
+fn enable(id: i32, on: bool) {
+    // SAFETY: our control.
+    unsafe { EnableWindow(item(id), on as i32) };
+}
+
 fn scale(v: i32) -> i32 {
     v * DPI.with(|d| d.get()) as i32 / 96
 }
@@ -220,10 +315,15 @@ fn make_fonts(dpi: u32) {
 /// before it; the bubble position list (next to its check box) and the tab strip had no name. The
 /// name is given through oleacc's dynamic annotation (IAccPropServices::SetHwndPropStr), and
 /// cleared at WM_DESTROY.
+/// 2.0.0: the GitHub link gets its name the same way, and the options explained by a grey line get
+/// that line as their description (read after the name by a screen reader).
 const CLSID_ACC_PROP_SERVICES: windows_sys::core::GUID = windows_sys::core::GUID::from_u128(0xb5f8350b_0548_48b1_a6ee_88bd00b4a5e7);
 const IID_IACC_PROP_SERVICES: windows_sys::core::GUID = windows_sys::core::GUID::from_u128(0x6e26e776_04f0_495d_80e4_3330352e3169);
 const PROPID_ACC_NAME_: windows_sys::core::GUID = windows_sys::core::GUID::from_u128(0x608d3df8_8128_4aa7_a428_f55e49267291);
-const NAMED_IDS: [i32; 2] = [ID_BUBBLE_POS, ID_TAB];
+/// PROPID_ACC_DESCRIPTION (oleacc.h: 4d48dfe4-bd3f-491f-a648-492d6f20c588)
+const PROPID_ACC_DESCRIPTION_: windows_sys::core::GUID = windows_sys::core::GUID::from_u128(0x4d48dfe4_bd3f_491f_a648_492d6f20c588);
+const NAMED_IDS: [i32; 3] = [ID_BUBBLE_POS, ID_TAB, ID_GITHUB];
+const DESCRIBED_IDS: [i32; 7] = [ID_ENABLED, ID_DIRECTION, ID_CAREFUL, ID_LIMIT, ID_DELAY, ID_RULE_OFF, ID_RULE_SEL];
 // Method numbers in the vtable, from oleacc.h (IAccPropServicesVtbl: QueryInterface 0, AddRef 1,
 // Release 2, SetPropValue 3, SetPropServer 4, ClearProps 5, SetHwndProp 6, SetHwndPropStr 7,
 // SetHwndPropServer 8, ClearHwndProps 9). Checked against the header by tools/verifier-vtables.py
@@ -255,7 +355,18 @@ fn with_acc_props(f: impl FnOnce(*mut std::ffi::c_void)) {
 }
 
 fn set_acc_names(l: Lang) {
-    let names = [(ID_BUBBLE_POS, text(l, Msg::NameBubblePosition)), (ID_TAB, text(l, Msg::NameSettingsPages))];
+    let names = [
+        (ID_BUBBLE_POS, PROPID_ACC_NAME_, text(l, Msg::NameBubblePosition)),
+        (ID_TAB, PROPID_ACC_NAME_, text(l, Msg::NameSettingsPages)),
+        (ID_GITHUB, PROPID_ACC_NAME_, "GitHub"),
+        (ID_ENABLED, PROPID_ACC_DESCRIPTION_, text(l, Msg::NoteEnabled)),
+        (ID_DIRECTION, PROPID_ACC_DESCRIPTION_, text(l, Msg::NoteDirection)),
+        (ID_CAREFUL, PROPID_ACC_DESCRIPTION_, text(l, Msg::NoteCareful)),
+        (ID_LIMIT, PROPID_ACC_DESCRIPTION_, text(l, Msg::NoteLimitDelay)),
+        (ID_DELAY, PROPID_ACC_DESCRIPTION_, text(l, Msg::NoteLimitDelay)),
+        (ID_RULE_OFF, PROPID_ACC_DESCRIPTION_, text(l, Msg::NoteRulesHow)),
+        (ID_RULE_SEL, PROPID_ACC_DESCRIPTION_, text(l, Msg::NoteRulesHow)),
+    ];
     with_acc_props(|p| {
         type SetHwndPropStr = unsafe extern "system" fn(*mut std::ffi::c_void, HWND, u32, u32, windows_sys::core::GUID, *const u16) -> i32;
         // SAFETY: IAccPropServices (IUnknown 3, SetPropValue, SetPropServer, ClearProps, SetHwndProp,
@@ -263,9 +374,9 @@ fn set_acc_names(l: Lang) {
         unsafe {
             let vtbl = *(p as *const *const usize);
             let set: SetHwndPropStr = std::mem::transmute(*vtbl.add(ACC_SET_HWND_PROP_STR));
-            for (id, name) in names {
-                let w = wide(name);
-                set(p, item(id), OBJID_CLIENT as u32, CHILDID_SELF, PROPID_ACC_NAME_, w.as_ptr());
+            for (id, prop, value) in names {
+                let w = wide(value);
+                set(p, item(id), OBJID_CLIENT as u32, CHILDID_SELF, prop, w.as_ptr());
             }
         }
     });
@@ -274,13 +385,14 @@ fn set_acc_names(l: Lang) {
 fn clear_acc_names() {
     with_acc_props(|p| {
         type ClearHwndProps = unsafe extern "system" fn(*mut std::ffi::c_void, HWND, u32, u32, *const windows_sys::core::GUID, i32) -> i32;
+        let props = [PROPID_ACC_NAME_, PROPID_ACC_DESCRIPTION_];
         // SAFETY: IAccPropServices::ClearHwndProps is method 9 (after SetHwndPropStr 7 and
-        // SetHwndPropServer 8, oleacc.idl; avis Fable); one property id in the array.
+        // SetHwndPropServer 8, oleacc.idl; avis Fable); two property ids in the array.
         unsafe {
             let vtbl = *(p as *const *const usize);
             let clear: ClearHwndProps = std::mem::transmute(*vtbl.add(ACC_CLEAR_HWND_PROPS));
-            for id in NAMED_IDS {
-                clear(p, item(id), OBJID_CLIENT as u32, CHILDID_SELF, &PROPID_ACC_NAME_, 1);
+            for id in NAMED_IDS.iter().chain(DESCRIBED_IDS.iter()) {
+                clear(p, item(*id), OBJID_CLIENT as u32, CHILDID_SELF, props.as_ptr(), props.len() as i32);
             }
         }
     });
@@ -290,7 +402,8 @@ fn clear_acc_names() {
 /// Hebrew window. The window does not hand its mirroring down (WS_EX_NOINHERITLAYOUT): every
 /// other control is mirrored here, one by one. (1.8.5 took the mirroring off AFTER creation, which
 /// an EDIT ignores: the text stayed on the right.)
-const LTR_IDS: &[i32] = &[ID_DIAG_TEXT, ID_EXCLUDED, ID_LIMIT, ID_DELAY];
+/// 2.0.0: the program lists of the rules and the two key boxes too ("Ctrl + F10" stays in order).
+const LTR_IDS: &[i32] = &[ID_DIAG_TEXT, ID_EXCLUDED, ID_RULE_OFF, ID_RULE_SEL, ID_LIMIT, ID_DELAY, ID_HOTKEY, ID_HOTKEY_CASE];
 
 thread_local! {
     static MIRRORED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
@@ -317,59 +430,72 @@ fn layout() -> Vec<(i32, i32, i32, i32, i32)> {
     let cx = x0 + lw;
     let right = WIDTH - m - 10;
     let cw = right - cx;
+    let full = right - x0;
+    let ind = 18; // an option that depends on the one above
+    let note = 18; // one grey line
     let mut v = vec![
-        (ID_STATUS, m, 10, WIDTH - 2 * m - 120, 26),
-        (ID_PAUSE, WIDTH - m - 110, 10, 110, 26),
+        (ID_STATUS, m, 10, WIDTH - 2 * m, 26),
         (ID_TAB, m, 42, WIDTH - 2 * m, HEIGHT - 42 - 46),
-        (ID_ABOUT, m, HEIGHT - 38, 110, 28),
+        (ID_DEFAULTS, m, HEIGHT - 38, 140, 28),
         (ID_SAVE, WIDTH - m - 230, HEIGHT - 38, 110, 28),
         (ID_CLOSE, WIDTH - m - 110, HEIGHT - 38, 110, 28),
     ];
-    // Simple
+    let ch = 20 - (k > 0) as i32 * 2;
+    // General
+    let mut y = 74;
+    // « Language · שפה · Langue » in three scripts: a wider label than the others
+    v.push((ID_LBL_LANG, x0, y + 2, 190, 22));
+    v.push((ID_LANG, x0 + 194, y, full - 194, 200));
+    y += 30;
+    v.push((ID_ENABLED, x0, y, full, 20));
+    y += 20;
+    v.push((ID_NOTE_ENABLED, x0 + ind, y, full - ind, note));
+    y += note + 4;
+    v.push((ID_AUTOSTART, x0, y, full, ch));
+    y += ch;
+    v.push((ID_INDICATOR, x0, y, full, ch));
+    y += ch;
+    // bubble: check box + position list on the same line (1.5.2), a little more room
+    v.push((ID_BUBBLE, x0, y + 1, lw + 56, ch));
+    v.push((ID_BUBBLE_POS, cx + 62, y - 1, cw - 62, 200));
+    y += ch + 4;
+    v.push((ID_PREVIEW, x0 + ind, y, full - ind, ch));
+    y += ch;
+    v.push((ID_SOUND, x0, y, full, ch));
+    y += ch + 8;
+    // 1.9.9: « Convertisseur : » needs 78 units (the Windows test found it cut at 70)
+    v.push((ID_LBL_WORK, x0, y + 2, 86, 22));
+    v.push((ID_WORK_MODE, x0 + 88, y, full - 88 - 158, 200));
+    v.push((ID_COPY_RESULT, right - 152, y, 152, 24));
+    y += 28;
+    let half = (full - 8) / 2;
+    v.push((ID_LBL_TRY, x0, y, half, 18));
+    v.push((ID_LBL_RESULT, x0 + half + 8, y, half, 18));
+    y += 18;
+    let tk = k / 2; // the text boxes give some of the room on a small screen
+    v.push((ID_TRY, x0, y, half, 52 - tk));
+    v.push((ID_RESULT, x0 + half + 8, y, half, 52 - tk));
+    // Conversion (the fullest page: the check boxes give the room on a small screen)
     let mut y = 74;
     v.push((ID_LBL_HOTKEY, x0, y + 2, lw - 6, 22));
     v.push((ID_HOTKEY, cx, y, cw, 24));
     y += 28;
     v.push((ID_LBL_HOTKEY_CASE, x0, y + 2, lw - 6, 22));
     v.push((ID_HOTKEY_CASE, cx, y, cw, 24));
-    y += 32;
-    // 1.9.9: « Convertisseur : » needs 78 units (the Windows test found it cut at 70)
-    v.push((ID_LBL_WORK, x0, y + 2, 86, 22));
-    v.push((ID_WORK_MODE, x0 + 88, y, right - x0 - 88 - 138, 200));
-    v.push((ID_COPY_RESULT, right - 132, y, 132, 24));
-    y += 28;
-    let half = (right - x0 - 8) / 2;
-    v.push((ID_LBL_TRY, x0, y, half, 18));
-    v.push((ID_LBL_RESULT, x0 + half + 8, y, half, 18));
-    y += 18;
-    let tk = k * 3 / 4; // the text boxes give most of the room on a small screen
-    v.push((ID_TRY, x0, y, half, 48 - tk));
-    v.push((ID_RESULT, x0 + half + 8, y, half, 48 - tk));
-    y += 52 - tk;
-    v.push((ID_LBL_LANG, x0, y + 2, lw - 6, 22));
-    v.push((ID_LANG, cx, y, cw, 200));
-    y += 26 - (k > 0) as i32 * 2;
-    let ch = 20 - (k > 0) as i32 * 2;
-    v.push((ID_AUTOSTART, x0, y, right - x0, ch));
-    y += ch;
-    v.push((ID_INDICATOR, x0, y, right - x0, ch));
-    // Advanced
-    let mut y = 74;
+    y += 30;
     v.push((ID_LBL_DIRECTION, x0, y + 2, lw - 6, 22));
     v.push((ID_DIRECTION, cx, y, cw, 200));
-    y += 28;
-    // 1.9.6: 7 check boxes again (the old console box is gone: the terminal box covers it)
-    let step = 20 - (k + 6) / 7; // 20 .. 16
-    for id in [ID_SWITCH, ID_BUBBLE, ID_SOUND, ID_CAREFUL, ID_LASTWORD, ID_CAPSOFF, ID_TERMINAL] {
-        if id == ID_BUBBLE {
-            // bubble: check box + position list on the same line (1.5.2), a little more room
-            v.push((id, x0, y + 1, lw + 56, step));
-            v.push((ID_BUBBLE_POS, cx + 62, y - 1, cw - 62, 200));
-            y += step + 4;
-            continue;
-        }
-        v.push((id, x0, y, right - x0, step));
+    y += 26;
+    v.push((ID_NOTE_DIRECTION, x0 + ind, y, full - ind, note));
+    y += note + 2;
+    let step = 20 - ((k + 7) / 8).min(4); // 20 .. 16
+    for id in [ID_SWITCH, ID_CAREFUL, ID_LASTWORD, ID_F10_WRONG, ID_DOUBLE_SHIFT, ID_CTRL_TAP, ID_CAPSOFF] {
+        v.push((id, x0, y, full, step));
         y += step;
+        if id == ID_CAREFUL {
+            v.push((ID_NOTE_CAREFUL, x0 + ind, y, full - ind, note));
+            y += note + 2;
+        }
     }
     y += 4 - (k > 0) as i32 * 4;
     v.push((ID_LBL_LIMIT, x0, y + 2, 170, 22));
@@ -377,23 +503,72 @@ fn layout() -> Vec<(i32, i32, i32, i32, i32)> {
     v.push((ID_LBL_DELAY, x0 + 236, y + 2, 128, 22));
     v.push((ID_DELAY, right - 58, y, 58, 22));
     y += 26;
-    v.push((ID_LBL_EXCLUDED, x0, y + 2, lw - 6, 22));
-    v.push((ID_EXCLUDED, cx, y, cw, 22));
-    // Diagnostic
-    let y = 74;
-    v.push((ID_DIAG_LAST, x0, y, right - x0, 56));
+    v.push((ID_NOTE_LIMIT, x0, y, full, 2 * note - 2));
+    // Typing
+    let mut y = 74;
+    v.push((ID_TYPING, x0, y, full, 20));
+    y += 20;
+    v.push((ID_TYPING_SOUND, x0 + ind, y, full - ind, 20));
+    y += 20;
+    v.push((ID_MESSENGER, x0, y, full, 20));
+    y += 24;
+    v.push((ID_TYPING_WORDS, x0, y, 170, 26));
+    y += 38;
+    v.push((ID_REPLACEMENTS, x0, y, full, 20));
+    y += 24;
+    v.push((ID_REPLACEMENTS_FILE, x0, y, 170, 26));
+    y += 38;
+    v.push((ID_NOTE_TYPING, x0, y, full, 3 * note - 4));
+    // Apps
+    let lr = 200; // the labels of the program lists
+    let mut y = 74;
+    v.push((ID_NOTE_RULES, x0, y, full, 3 * note - 4));
+    y += 3 * note;
+    for (lbl, id) in [(ID_LBL_RULE_OFF, ID_RULE_OFF), (ID_LBL_RULE_SEL, ID_RULE_SEL), (ID_LBL_EXCLUDED, ID_EXCLUDED)] {
+        v.push((lbl, x0, y + 2, lr - 4, 22));
+        v.push((id, x0 + lr, y, full - lr, 22));
+        y += 28;
+    }
+    v.push((ID_NOTE_RULES2, x0, y, full, 3 * note - 4));
+    y += 3 * note + 2;
+    v.push((ID_TERMINAL, x0, y, full, 20));
+    y += 20;
+    v.push((ID_ONE_LANGUAGE, x0, y, full, 20));
+    y += 24;
+    v.push((ID_ONE_LANGUAGE_FILE, x0, y, 170, 26));
+    // Diagnostics
+    let mut y = 74;
+    v.push((ID_DIAG_LAST, x0, y, full, 56));
+    y += 60;
     // 1.9.9: the keyboards line on two lines (three keyboards did not fit on one, Windows test)
-    v.push((ID_DIAG_TEXT, x0, y + 60, right - x0, 70 - k));
-    v.push((ID_LAYOUTS, x0, y + 134 - k, right - x0, 34)); // installed keyboards, ✓ / ✗
-    // 1.8.9: three buttons on this row (copy, refresh, check for updates)
-    v.push((ID_DIAG_COPY, x0, y + 172 - k, 150, 26));
-    v.push((ID_DIAG_REFRESH, x0 + 156, y + 172 - k, 90, 26));
-    v.push((ID_CHECK_UPDATE, x0 + 252, y + 172 - k, right - x0 - 252, 26));
+    v.push((ID_DIAG_TEXT, x0, y, full, 70 - k));
+    y += 74 - k;
+    v.push((ID_LAYOUTS, x0, y, full, 34)); // installed keyboards, ✓ / ✗
+    y += 38;
+    v.push((ID_DIAG_COPY, x0, y, 180, 26));
+    v.push((ID_DIAG_REFRESH, x0 + 186, y, 100, 26));
+    y += 34;
+    v.push((ID_REPORT_PROBLEM, x0, y, 190, 26));
+    v.push((ID_REPORT_SEND, x0 + 196, y, full - 196, 26));
+    y += 28;
+    v.push((ID_REPORT_ALWAYS, x0, y, full, 20));
+    y += 20;
+    v.push((ID_REPORT_NEVER, x0, y, full, 20));
+    y += 26;
     // export / import of the settings (1.5.0)
-    let bw = (right - x0 - 12) / 3;
-    v.push((ID_EXPORT, x0, y + 202 - k, bw, 26));
-    v.push((ID_IMPORT, x0 + bw + 6, y + 202 - k, bw, 26));
-    v.push((ID_UNDO_IMPORT, x0 + 2 * (bw + 6), y + 202 - k, bw, 26));
+    let bw = (full - 12) / 3;
+    v.push((ID_EXPORT, x0, y, bw, 26));
+    v.push((ID_IMPORT, x0 + bw + 6, y, bw, 26));
+    v.push((ID_UNDO_IMPORT, x0 + 2 * (bw + 6), y, bw, 26));
+    // About
+    let mut y = 74;
+    v.push((ID_ABOUT_TEXT, x0, y, full, 184 - k));
+    y += 190 - k;
+    v.push((ID_CHECK_UPDATE, x0, y, 240, 26));
+    y += 30;
+    v.push((ID_AUTO_UPDATE, x0, y, full, 20));
+    y += 28;
+    v.push((ID_GITHUB, x0, y, 120, 20));
     v
 }
 
@@ -430,23 +605,26 @@ fn apply_layout() {
     }
 }
 
-/// Shows the controls of one tab, hides the others.
 /// 1.9.5: a PC managed by an administrator (any policy): F10 in the terminal is hidden there.
 fn school_pc() -> bool {
     !app::policy().is_empty()
 }
 
+/// Shows the controls of one tab, hides the others.
 fn show_page(page: usize) {
+    let page = page.min(PAGES.len() - 1);
     PAGE.with(|p| p.set(page));
     send(ID_TAB, TCM_SETCURSEL, page, 0);
-    for (i, ids) in [PAGE_SIMPLE, PAGE_ADVANCED, PAGE_DIAG].iter().enumerate() {
+    for (i, ids) in PAGES.iter().enumerate() {
         for id in *ids {
             let show = i == page && !(*id == ID_TERMINAL && school_pc());
             // SAFETY: our child windows.
             unsafe { ShowWindow(item(*id), if show { SW_SHOW } else { SW_HIDE }) };
         }
     }
-    if page == 2 {
+    // "Defaults" only where there are settings to put back
+    enable(ID_DEFAULTS, page != PAGE_DIAGNOSTIC && page != PAGE_ABOUT);
+    if page == PAGE_DIAGNOSTIC {
         refresh_diagnostic();
     }
 }
@@ -464,8 +642,8 @@ pub fn handle_ctrl_tab(msg: &MSG) -> bool {
             return false;
         }
         let back = GetKeyState(VK_SHIFT as i32) < 0;
-        let p = PAGE.with(|p| p.get());
-        show_page(if back { (p + 2) % 3 } else { (p + 1) % 3 });
+        let (p, n) = (PAGE.with(|p| p.get()), PAGES.len());
+        show_page(if back { (p + n - 1) % n } else { (p + 1) % n });
         SetFocus(item(ID_TAB));
     }
     true
@@ -574,6 +752,8 @@ fn refresh_diagnostic() {
     };
     set_text(ID_DIAG_LAST, &line);
     set_text(ID_DIAG_TEXT, &crate::diagnostic::report().replace('\n', "\r\n"));
+    // "Send the last report": only when one is waiting (public install only)
+    enable(ID_REPORT_SEND, crate::report::enabled() && crate::report::pending());
 }
 
 pub fn refresh_status() {
@@ -583,14 +763,15 @@ pub fn refresh_status() {
     let s = app::settings();
     let l = app::lang_of(&s);
     let key = s.hotkey_description();
-    let (msg, button) = match app::hotkey_state() {
-        HotkeyState::Ready => (Msg::StatusReady, Msg::ButtonPause),
-        HotkeyState::Paused => (Msg::StatusPaused, Msg::ButtonResume),
-        HotkeyState::Unavailable => (Msg::StatusUnavailable, Msg::ButtonPause),
+    let state = app::hotkey_state();
+    let msg = match state {
+        HotkeyState::Ready => Msg::StatusReady,
+        HotkeyState::Paused => Msg::StatusPaused,
+        HotkeyState::Unavailable => Msg::StatusUnavailable,
     };
     let mut status = format!("●  {}", text_with_key(l, msg, &key));
     // the Caps Lock hotkey taken by another program: said here too (audit 1.3.5, N4)
-    if app::hotkey_state() != HotkeyState::Paused && !app::case_hotkey_ok() {
+    if state != HotkeyState::Paused && !app::case_hotkey_ok() {
         status.push_str(" · ");
         status.push_str(&text_with_key(l, Msg::CaseKeyBusy, &s.case_hotkey_description()));
     }
@@ -599,10 +780,30 @@ pub fn refresh_status() {
         status.push_str(text(l, Msg::SchoolManaged));
     }
     set_text(ID_STATUS, &status);
-    set_text(ID_PAUSE, text(l, button));
-    set_text(ID_LBL_EXCLUDED, &text(l, Msg::LabelExcluded).replace("{n}", &s.app_rules.len().to_string()));
+    // 2.0.0: "Fixer on" is the pause state itself (the menu, the end of a 10-minute pause)
+    set_checked(ID_ENABLED, state != HotkeyState::Paused);
     // SAFETY: repaint our control.
     unsafe { InvalidateRect(item(ID_STATUS), null(), 1) };
+}
+
+/// The user's rules of one kind, as shown in their field ("a.exe, b.exe").
+fn rules_text(s: &AppSettings, mode: RuleMode) -> String {
+    s.app_rules.iter().filter(|r| r.mode == mode).map(|r| r.process.as_str()).collect::<Vec<_>>().join(", ")
+}
+
+fn programs_of(t: &str) -> Vec<String> {
+    t.split([',', ';', '\n']).map(|p| p.trim().to_string()).filter(|p| !p.is_empty()).collect()
+}
+
+/// 2.0.0: a rule changed from the tray menu while the window is open: its two lists shown again
+/// (otherwise « Apply » would write the old lists back).
+pub fn refresh_rules() {
+    if window().is_null() {
+        return;
+    }
+    let u = app::user_settings();
+    set_text(ID_RULE_OFF, &rules_text(&u, RuleMode::Disabled));
+    set_text(ID_RULE_SEL, &rules_text(&u, RuleMode::SelectionOnly));
 }
 
 fn fill_work_modes(l: Lang) {
@@ -634,11 +835,41 @@ fn layouts_line(l: Lang) -> String {
     text(l, Msg::LayoutsLine).replace("{list}", &list.join(", "))
 }
 
+fn lang_index(u: UiLanguage) -> usize {
+    match u {
+        UiLanguage::Auto => 0,
+        UiLanguage::He => 1,
+        UiLanguage::Fr => 2,
+        UiLanguage::En => 3,
+    }
+}
+
+fn lang_of_index(i: isize) -> UiLanguage {
+    match i {
+        1 => UiLanguage::He,
+        2 => UiLanguage::Fr,
+        3 => UiLanguage::En,
+        _ => UiLanguage::Auto,
+    }
+}
+
+/// The options that only matter when the one above is ticked (bubble, correction while typing).
+fn update_dependents() {
+    let lk = app::locked();
+    let bubble = checked(ID_BUBBLE);
+    enable(ID_BUBBLE_POS, !lk.bubble_position && bubble);
+    enable(ID_PREVIEW, !lk.show_preview && bubble);
+    let typing = crate::typing::allowed() && checked(ID_TYPING);
+    enable(ID_TYPING_SOUND, typing);
+    enable(ID_MESSENGER, typing);
+}
+
 fn fill_controls() {
     let s = app::settings();
+    let u = app::user_settings();
     let l = app::lang_of(&s);
     set_acc_names(l);
-    for (i, m) in [Msg::TabSimple, Msg::TabAdvanced, Msg::TabDiagnostic].iter().enumerate() {
+    for (i, m) in TABS.iter().enumerate() {
         let mut t = wide(text(l, *m));
         // SAFETY: TCITEMW read during the call; text buffer alive.
         let mut it: TCITEMW = unsafe { std::mem::zeroed() };
@@ -646,33 +877,66 @@ fn fill_controls() {
         it.pszText = t.as_mut_ptr();
         send(ID_TAB, TCM_INSERTITEMW, i, &it as *const TCITEMW as isize);
     }
-    set_text(ID_LBL_HOTKEY, text(l, Msg::LabelHotkeyLayout));
-    set_text(ID_LBL_HOTKEY_CASE, text(l, Msg::LabelHotkeyCase));
-    set_text(ID_LBL_WORK, text(l, Msg::LabelWorkshop));
-    set_text(ID_COPY_RESULT, text(l, Msg::ButtonCopyResult));
-    set_text(ID_LBL_TRY, text(l, Msg::LabelText));
-    set_text(ID_LBL_RESULT, text(l, Msg::LabelResult));
-    set_text(ID_LBL_DIRECTION, text(l, Msg::LabelDirection));
-    set_text(ID_LBL_LANG, text(l, Msg::LabelLanguage));
-    set_text(ID_SWITCH, text(l, Msg::CheckSwitchLanguage));
-    set_text(ID_BUBBLE, text(l, Msg::CheckBubble));
-    set_text(ID_SOUND, text(l, Msg::CheckSound));
-    set_text(ID_CAREFUL, text(l, Msg::CheckCareful));
-    set_text(ID_LASTWORD, text(l, Msg::CheckLastWord));
-    set_text(ID_CAPSOFF, text(l, Msg::CheckCapsOff));
-    set_text(ID_TERMINAL, text(l, Msg::CheckTerminal));
-    set_text(ID_LBL_LIMIT, text(l, Msg::LabelLimit));
-    set_text(ID_LBL_DELAY, text(l, Msg::LabelDelay));
-    set_text(ID_DIAG_COPY, text(l, Msg::ButtonCopyDiag));
-    set_text(ID_DIAG_REFRESH, text(l, Msg::ButtonRefresh));
-    set_text(ID_INDICATOR, text(l, Msg::CheckIndicator));
-    set_text(ID_EXPORT, text(l, Msg::ButtonExport));
-    set_text(ID_IMPORT, text(l, Msg::ButtonImport));
-    set_text(ID_UNDO_IMPORT, text(l, Msg::ButtonUndoImport));
-    set_text(ID_CHECK_UPDATE, text(l, Msg::ButtonCheckUpdate));
-    set_text(ID_ABOUT, text(l, Msg::ButtonAbout));
-    set_text(ID_SAVE, text(l, Msg::ButtonSave));
-    set_text(ID_CLOSE, text(l, Msg::ButtonClose));
+    for (id, m) in [
+        (ID_LBL_LANG, Msg::LabelLanguageFixed),
+        (ID_ENABLED, Msg::CheckEnabled),
+        (ID_NOTE_ENABLED, Msg::NoteEnabled),
+        (ID_INDICATOR, Msg::CheckIndicator),
+        (ID_BUBBLE, Msg::CheckBubble),
+        (ID_PREVIEW, Msg::MenuPreview),
+        (ID_SOUND, Msg::CheckSound),
+        (ID_LBL_WORK, Msg::LabelWorkshop),
+        (ID_COPY_RESULT, Msg::ButtonCopyResult),
+        (ID_LBL_TRY, Msg::LabelText),
+        (ID_LBL_RESULT, Msg::LabelResult),
+        (ID_LBL_HOTKEY, Msg::LabelHotkeyLayout),
+        (ID_LBL_HOTKEY_CASE, Msg::LabelHotkeyCase),
+        (ID_LBL_DIRECTION, Msg::LabelDirection),
+        (ID_NOTE_DIRECTION, Msg::NoteDirection),
+        (ID_SWITCH, Msg::CheckSwitchLanguage),
+        (ID_CAREFUL, Msg::CheckCareful),
+        (ID_NOTE_CAREFUL, Msg::NoteCareful),
+        (ID_LASTWORD, Msg::CheckLastWord),
+        (ID_F10_WRONG, Msg::MenuF10WrongWords),
+        (ID_DOUBLE_SHIFT, Msg::MenuDoubleShift),
+        (ID_CTRL_TAP, Msg::MenuCtrlTap),
+        (ID_CAPSOFF, Msg::CheckCapsOff),
+        (ID_LBL_LIMIT, Msg::LabelLimit),
+        (ID_LBL_DELAY, Msg::LabelDelay),
+        (ID_NOTE_LIMIT, Msg::NoteLimitDelay),
+        (ID_TYPING, Msg::MenuTyping),
+        (ID_TYPING_SOUND, Msg::MenuTypingSound),
+        (ID_MESSENGER, Msg::MenuMessengerGuard),
+        (ID_TYPING_WORDS, Msg::MenuTypingWords),
+        (ID_REPLACEMENTS, Msg::MenuReplacements),
+        (ID_REPLACEMENTS_FILE, Msg::MenuReplacementsFile),
+        (ID_NOTE_RULES, Msg::NoteRules),
+        (ID_LBL_RULE_OFF, Msg::LabelRulesDisabled),
+        (ID_LBL_RULE_SEL, Msg::LabelRulesSelection),
+        (ID_LBL_EXCLUDED, Msg::LabelExcluded),
+        (ID_NOTE_RULES2, Msg::NoteRulesHow),
+        (ID_TERMINAL, Msg::CheckTerminal),
+        (ID_ONE_LANGUAGE, Msg::MenuOneLanguage),
+        (ID_ONE_LANGUAGE_FILE, Msg::MenuOneLanguageFile),
+        (ID_DIAG_COPY, Msg::ButtonCopyDiag),
+        (ID_DIAG_REFRESH, Msg::ButtonRefresh),
+        (ID_REPORT_PROBLEM, Msg::MenuReportProblem),
+        (ID_REPORT_SEND, Msg::ButtonSendReport),
+        (ID_REPORT_ALWAYS, Msg::MenuReportAlways),
+        (ID_REPORT_NEVER, Msg::MenuReportNever),
+        (ID_EXPORT, Msg::ButtonExport),
+        (ID_IMPORT, Msg::ButtonImport),
+        (ID_UNDO_IMPORT, Msg::ButtonUndoImport),
+        (ID_CHECK_UPDATE, Msg::ButtonCheckUpdate),
+        (ID_AUTO_UPDATE, Msg::MenuCheckUpdates),
+        (ID_DEFAULTS, Msg::ButtonDefaults),
+        (ID_SAVE, Msg::ButtonSave),
+        (ID_CLOSE, Msg::ButtonClose),
+    ] {
+        set_text(id, text(l, m));
+    }
+    // About: version, what it does, nothing sent, license and credit (one text, as the old box)
+    set_text(ID_ABOUT_TEXT, &text_with_key(l, Msg::AboutText, &s.hotkey_description()).replace("{version}", klf_core::VERSION).replace('\n', "\r\n"));
     set_text(ID_LAYOUTS, &layouts_line(l));
     fill_work_modes(l);
     for m in [Msg::DirectionAuto, Msg::DirectionToHebrew, Msg::DirectionToEnglish] {
@@ -689,19 +953,14 @@ fn fill_controls() {
         let w = wide(t);
         send(ID_LANG, CB_ADDSTRING, 0, w.as_ptr() as isize);
     }
-    let li = match s.ui_language {
-        UiLanguage::Auto => 0,
-        UiLanguage::He => 1,
-        UiLanguage::Fr => 2,
-        UiLanguage::En => 3,
-    };
-    send(ID_LANG, CB_SETCURSEL, li, 0);
+    send(ID_LANG, CB_SETCURSEL, lang_index(s.ui_language), 0);
     send(ID_HOTKEY, HKM_SETRULES, 0, 0); // F1-F11 alone allowed (F12 refused by validate)
     send(ID_HOTKEY_CASE, HKM_SETRULES, 0, 0);
     set_box(ID_HOTKEY, s.hotkey_modifiers, s.hotkey_key);
     set_box(ID_HOTKEY_CASE, s.case_hotkey_modifiers, s.case_hotkey_key);
     set_checked(ID_SWITCH, s.switch_language_after_convert);
     set_checked(ID_BUBBLE, s.show_bubble);
+    set_checked(ID_PREVIEW, s.show_preview);
     set_checked(ID_SOUND, s.play_sound);
     set_checked(ID_CAREFUL, s.require_selection);
     set_checked(ID_LASTWORD, s.last_word_only);
@@ -710,17 +969,47 @@ fn fill_controls() {
     set_checked(ID_INDICATOR, s.indicator);
     set_text(ID_LIMIT, &s.max_character_limit.to_string());
     set_text(ID_DELAY, &s.paste_delay_ms.to_string());
-    // only the user's own list (the administrator's programs are added on top, never saved here)
-    set_text(ID_EXCLUDED, &app::user_settings().excluded_processes.join(", "));
+    // only the user's own lists (the administrator's programs and rules are added on top, never
+    // saved here)
+    set_text(ID_EXCLUDED, &u.excluded_processes.join(", "));
+    set_text(ID_RULE_OFF, &rules_text(&u, RuleMode::Disabled));
+    set_text(ID_RULE_SEL, &rules_text(&u, RuleMode::SelectionOnly));
+    // public per-user install only (as the menu before 2.0.0): shown greyed and unticked elsewhere
+    let typing = crate::typing::allowed();
+    for (id, on) in [
+        (ID_F10_WRONG, s.f10_only_wrong_words),
+        (ID_DOUBLE_SHIFT, s.double_shift_convert),
+        (ID_CTRL_TAP, s.ctrl_tap_language),
+        (ID_TYPING, s.typing_suggestions),
+        (ID_TYPING_SOUND, s.typing_sound),
+        (ID_MESSENGER, s.messenger_guard),
+        (ID_REPLACEMENTS, s.text_replacements),
+        (ID_ONE_LANGUAGE, s.one_language_programs),
+    ] {
+        set_checked(id, on && typing);
+        enable(id, typing);
+    }
+    for id in [ID_TYPING_WORDS, ID_REPLACEMENTS_FILE, ID_ONE_LANGUAGE_FILE] {
+        enable(id, typing);
+    }
+    set_text(ID_NOTE_TYPING, if typing { "" } else { text(l, Msg::NoteNotHere) });
+    let reports = crate::report::enabled();
+    set_checked(ID_REPORT_ALWAYS, reports && s.report_mode == klf_core::report::ALWAYS);
+    set_checked(ID_REPORT_NEVER, reports && s.report_mode == klf_core::report::NEVER);
+    for id in [ID_REPORT_PROBLEM, ID_REPORT_ALWAYS, ID_REPORT_NEVER] {
+        enable(id, reports);
+    }
+    let updates = crate::update::allowed(true);
+    set_checked(ID_AUTO_UPDATE, updates && s.check_updates);
     // settings imposed by the administrator: shown, greyed out
     let lk = app::locked();
+    enable(ID_AUTO_UPDATE, updates && !lk.check_updates);
     for (id, locked) in [
         (ID_HOTKEY, lk.hotkey),
         (ID_HOTKEY_CASE, lk.case_hotkey),
         (ID_DIRECTION, lk.mixed_text_mode),
         (ID_SWITCH, lk.switch_language_after_convert),
         (ID_BUBBLE, lk.show_bubble),
-        (ID_BUBBLE_POS, lk.bubble_position || !s.show_bubble),
         (ID_SOUND, lk.play_sound),
         (ID_CAREFUL, lk.require_selection),
         (ID_LASTWORD, lk.last_word_only),
@@ -731,21 +1020,86 @@ fn fill_controls() {
         (ID_INDICATOR, lk.indicator),
     ] {
         if locked {
-            // SAFETY: our control.
-            unsafe { EnableWindow(item(id), 0) };
+            enable(id, false);
         }
     }
+    update_dependents();
     let managed = sys::autostart_managed();
     MANAGED.with(|c| c.set(managed));
     if managed {
         set_text(ID_AUTOSTART, text(l, Msg::AutostartManaged));
-        // SAFETY: our control.
-        unsafe { EnableWindow(item(ID_AUTOSTART), 0) };
+        enable(ID_AUTOSTART, false);
     } else {
         set_text(ID_AUTOSTART, text(l, Msg::CheckAutostart));
         set_checked(ID_AUTOSTART, sys::autostart_user());
     }
     refresh_status();
+}
+
+/// 2.0.0 « Defaults »: the default values of the page shown, put in its controls only (saved by
+/// « Apply »). Never the lists (words, replacements, rules, excluded programs, one-language
+/// programs), never a setting imposed by the administrator, never the pause state nor the start
+/// with Windows (a state of Windows, set by the installer).
+fn on_defaults() {
+    let d = AppSettings::default();
+    let lk = app::locked();
+    let typing = crate::typing::allowed();
+    let check = |id: i32, locked: bool, on: bool| {
+        if !locked {
+            set_checked(id, on);
+        }
+    };
+    match PAGE.with(|p| p.get()) {
+        0 => {
+            if !lk.ui_language {
+                send(ID_LANG, CB_SETCURSEL, lang_index(d.ui_language), 0);
+            }
+            check(ID_INDICATOR, lk.indicator, d.indicator);
+            check(ID_BUBBLE, lk.show_bubble, d.show_bubble);
+            if !lk.bubble_position {
+                send(ID_BUBBLE_POS, CB_SETCURSEL, d.bubble_position as usize, 0);
+            }
+            check(ID_PREVIEW, lk.show_preview, d.show_preview);
+            check(ID_SOUND, lk.play_sound, d.play_sound);
+        }
+        1 => {
+            if !lk.hotkey {
+                set_box(ID_HOTKEY, d.hotkey_modifiers, d.hotkey_key);
+            }
+            if !lk.case_hotkey {
+                set_box(ID_HOTKEY_CASE, d.case_hotkey_modifiers, d.case_hotkey_key);
+            }
+            if !lk.mixed_text_mode {
+                send(ID_DIRECTION, CB_SETCURSEL, d.mixed_text_mode.as_number() as usize, 0);
+            }
+            check(ID_SWITCH, lk.switch_language_after_convert, d.switch_language_after_convert);
+            check(ID_CAREFUL, lk.require_selection, d.require_selection);
+            check(ID_LASTWORD, lk.last_word_only, d.last_word_only);
+            check(ID_CAPSOFF, lk.turn_off_caps_lock, d.turn_off_caps_lock);
+            check(ID_F10_WRONG, !typing, d.f10_only_wrong_words);
+            check(ID_DOUBLE_SHIFT, !typing, d.double_shift_convert);
+            check(ID_CTRL_TAP, !typing, d.ctrl_tap_language);
+            if !lk.max_character_limit {
+                set_text(ID_LIMIT, &d.max_character_limit.to_string());
+            }
+            if !lk.paste_delay_ms {
+                set_text(ID_DELAY, &d.paste_delay_ms.to_string());
+            }
+        }
+        2 => {
+            check(ID_TYPING, !typing, d.typing_suggestions);
+            check(ID_TYPING_SOUND, !typing, d.typing_sound);
+            check(ID_MESSENGER, !typing, d.messenger_guard);
+            check(ID_REPLACEMENTS, !typing, d.text_replacements);
+        }
+        3 => {
+            check(ID_TERMINAL, school_pc(), d.terminal_support);
+            check(ID_ONE_LANGUAGE, !typing, d.one_language_programs);
+        }
+        _ => {}
+    }
+    update_dependents();
+    update_try();
 }
 
 /// Reads the controls; None (with a message) if a value is not allowed.
@@ -799,7 +1153,11 @@ fn read_controls() -> Option<AppSettings> {
     };
     s.max_character_limit = limit;
     s.paste_delay_ms = delay;
-    s.excluded_processes = get_text(ID_EXCLUDED).split([',', ';', '\n']).map(|p| p.trim().to_string()).filter(|p| !p.is_empty()).collect();
+    s.excluded_processes = programs_of(&get_text(ID_EXCLUDED));
+    // 2.0.0: the rules of the tray menu, as two lists (a program in both: "only with a selection")
+    let mut rules: Vec<AppRule> = programs_of(&get_text(ID_RULE_OFF)).into_iter().map(|p| AppRule { process: p, mode: RuleMode::Disabled }).collect();
+    rules.extend(programs_of(&get_text(ID_RULE_SEL)).into_iter().map(|p| AppRule { process: p, mode: RuleMode::SelectionOnly }));
+    s.app_rules = rules;
     let keep = |locked: bool, mine: bool, id: i32| if locked { mine } else { checked(id) };
     if !lk.mixed_text_mode {
         s.mixed_text_mode = direction();
@@ -812,6 +1170,7 @@ fn read_controls() -> Option<AppSettings> {
             s.bubble_position = i as u32;
         }
     }
+    s.show_preview = keep(lk.show_preview, old.show_preview, ID_PREVIEW);
     s.play_sound = keep(lk.play_sound, old.play_sound, ID_SOUND);
     s.require_selection = keep(lk.require_selection, old.require_selection, ID_CAREFUL);
     s.last_word_only = keep(lk.last_word_only, old.last_word_only, ID_LASTWORD);
@@ -819,20 +1178,36 @@ fn read_controls() -> Option<AppSettings> {
     // 1.9.5: hidden (and forced off) on a PC managed by an administrator
     s.terminal_support = keep(school_pc(), old.terminal_support, ID_TERMINAL);
     s.indicator = keep(lk.indicator, old.indicator, ID_INDICATOR);
-    if !lk.ui_language {
-        s.ui_language = match send(ID_LANG, CB_GETCURSEL, 0, 0) {
-            1 => UiLanguage::He,
-            2 => UiLanguage::Fr,
-            3 => UiLanguage::En,
-            _ => UiLanguage::Auto,
+    // public per-user install only: elsewhere the user's values stay as they are
+    let no_typing = !crate::typing::allowed();
+    s.f10_only_wrong_words = keep(no_typing, old.f10_only_wrong_words, ID_F10_WRONG);
+    s.double_shift_convert = keep(no_typing, old.double_shift_convert, ID_DOUBLE_SHIFT);
+    s.ctrl_tap_language = keep(no_typing, old.ctrl_tap_language, ID_CTRL_TAP);
+    s.typing_suggestions = keep(no_typing, old.typing_suggestions, ID_TYPING);
+    s.typing_sound = keep(no_typing, old.typing_sound, ID_TYPING_SOUND);
+    s.messenger_guard = keep(no_typing, old.messenger_guard, ID_MESSENGER);
+    s.text_replacements = keep(no_typing, old.text_replacements, ID_REPLACEMENTS);
+    s.one_language_programs = keep(no_typing, old.one_language_programs, ID_ONE_LANGUAGE);
+    s.check_updates = keep(!crate::update::allowed(true) || lk.check_updates, old.check_updates, ID_AUTO_UPDATE);
+    if crate::report::enabled() {
+        s.report_mode = if checked(ID_REPORT_ALWAYS) {
+            klf_core::report::ALWAYS
+        } else if checked(ID_REPORT_NEVER) {
+            klf_core::report::NEVER
+        } else {
+            klf_core::report::ASK
         };
+    }
+    if !lk.ui_language {
+        s.ui_language = lang_of_index(send(ID_LANG, CB_GETCURSEL, 0, 0));
     }
     s.validate();
     Some(s)
 }
 
-fn on_save() {
-    let Some(new_user) = read_controls() else { return };
+/// Saves; returns true when the window was made again (language changed).
+fn on_save() -> bool {
+    let Some(new_user) = read_controls() else { return false };
     let old = app::settings();
     // the keys and the language in force after saving (the administrator's settings stay on top)
     let new = klf_core::school::effective(&new_user, &app::policy()).0;
@@ -842,17 +1217,17 @@ fn on_save() {
     let key_changed = (new.hotkey_modifiers, new.hotkey_key) != (old.hotkey_modifiers, old.hotkey_key);
     if key_changed && !ours(new.hotkey_modifiers, new.hotkey_key) && !app::hotkey_free(new.hotkey_modifiers, new.hotkey_key) {
         set_error(&text_with_key(app::lang(), Msg::HotkeyBusy, &new.hotkey_description()));
-        return;
+        return false;
     }
     let case_changed = (new.case_hotkey_modifiers, new.case_hotkey_key) != (old.case_hotkey_modifiers, old.case_hotkey_key);
     if case_changed && new.case_hotkey_key != KEY_NONE && !ours(new.case_hotkey_modifiers, new.case_hotkey_key) && !app::hotkey_free(new.case_hotkey_modifiers, new.case_hotkey_key) {
         set_error(&text_with_key(app::lang(), Msg::HotkeyBusy, &new.case_hotkey_description()));
-        return;
+        return false;
     }
     // settings.json first: if it cannot be written, NOTHING is changed (registry included)
     if !app::save_settings(&new_user) {
         set_error(text(app::lang(), Msg::SaveFailed));
-        return;
+        return false;
     }
     let mut autostart_failed = false;
     if !MANAGED.with(|c| c.get()) {
@@ -863,7 +1238,9 @@ fn on_save() {
         }
     }
     let relang = app::lang_of(&new) != app::lang_of(&old);
+    let report_mode = new_user.report_mode;
     app::apply_settings(new_user);
+    crate::report::mode_saved(report_mode);
     log("Settings saved");
     if relang {
         // the layout direction (RTL) is chosen at creation: recreate the window
@@ -878,6 +1255,24 @@ fn on_save() {
     } else {
         set_error(if autostart_failed { text(app::lang(), Msg::AutostartFailed) } else { "" });
         refresh_status();
+    }
+    relang
+}
+
+/// 2.0.0: a language picked in the list is applied at once (with the rest of the page, as
+/// « Apply »: the window is made again in the new direction, on the same tab, the language list
+/// keeping the focus). Nothing if it is the language already in force.
+fn apply_language_now() {
+    LANG_PENDING.with(|p| p.set(false));
+    if window().is_null() || app::locked().ui_language {
+        return;
+    }
+    if lang_of_index(send(ID_LANG, CB_GETCURSEL, 0, 0)) == app::user_settings().ui_language {
+        return;
+    }
+    if on_save() {
+        // SAFETY: our (new) window's control.
+        unsafe { SetFocus(item(ID_LANG)) };
     }
 }
 
@@ -1066,23 +1461,58 @@ fn copy_text(t: &str) {
     }
 }
 
+/// 2.0.0: the GitHub link (click or Enter): only the fixed address of the project, never the text
+/// of the control.
+fn open_github() {
+    use windows_sys::Win32::UI::Shell::ShellExecuteW;
+    let (verb, url) = (wide("open"), wide(GITHUB_URL));
+    // SAFETY: valid strings; no parameters, no folder.
+    unsafe { ShellExecuteW(window(), verb.as_ptr(), url.as_ptr(), null(), null(), SW_SHOWNORMAL) };
+}
+
 extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     match msg {
         WM_COMMAND => {
             let id = (wparam & 0xFFFF) as i32;
             let code = ((wparam >> 16) & 0xFFFF) as u32;
             match (id, code) {
-                (ID_PAUSE, _) => app::toggle_pause(),
-                (ID_SAVE, _) | (1, _) => on_save(), // 1 = IDOK (Enter)
+                (ID_SAVE, _) | (1, _) => {
+                    on_save(); // 1 = IDOK (Enter)
+                }
                 (ID_CLOSE, _) => close(),
-                (ID_ABOUT, _) => app::show_about(hwnd),
+                (ID_DEFAULTS, BN_CLICKED) => on_defaults(),
+                // 2.0.0: the pause state, at once (not saved: the program starts active)
+                (ID_ENABLED, BN_CLICKED) => app::set_active(checked(ID_ENABLED)),
+                // 2.0.0: the language at once; list open: when it closes; list closed (arrows):
+                // after a short pause
+                (ID_LANG, CBN_SELCHANGE) => {
+                    if send(ID_LANG, CB_GETDROPPEDSTATE, 0, 0) != 0 {
+                        LANG_PENDING.with(|p| p.set(true));
+                    } else {
+                        // SAFETY: our window.
+                        unsafe { SetTimer(hwnd, TIMER_LANG, 800, None) };
+                    }
+                }
+                (ID_LANG, CBN_CLOSEUP) if LANG_PENDING.with(|p| p.get()) => {
+                    // never destroy the list from its own notification: posted
+                    // SAFETY: posting to our own window.
+                    unsafe { PostMessageW(hwnd, WM_APP_LANG, 0, 0) };
+                }
                 (ID_TRY, EN_CHANGE) => update_try(),
                 (ID_WORK_MODE, CBN_SELCHANGE) | (ID_DIRECTION, CBN_SELCHANGE) => update_try(),
-                // the position list only matters when the bubble is shown
-                (ID_BUBBLE, BN_CLICKED) if !app::locked().bubble_position => {
-                    // SAFETY: our control.
-                    unsafe { EnableWindow(item(ID_BUBBLE_POS), checked(ID_BUBBLE) as i32) };
+                // the position list and the preview only matter when the bubble is shown
+                (ID_BUBBLE, BN_CLICKED) | (ID_TYPING, BN_CLICKED) => update_dependents(),
+                // "always send" and "never offer" cannot both be ticked
+                (ID_REPORT_ALWAYS, BN_CLICKED) if checked(ID_REPORT_ALWAYS) => set_checked(ID_REPORT_NEVER, false),
+                (ID_REPORT_NEVER, BN_CLICKED) if checked(ID_REPORT_NEVER) => set_checked(ID_REPORT_ALWAYS, false),
+                (ID_REPORT_PROBLEM, BN_CLICKED) if crate::report::enabled() => crate::report::open(),
+                (ID_REPORT_SEND, BN_CLICKED) if crate::report::enabled() => {
+                    crate::report::send_pending(app::main_window());
+                    refresh_diagnostic();
                 }
+                (ID_TYPING_WORDS, BN_CLICKED) if crate::typing::allowed() => crate::typing::open_personal(),
+                (ID_REPLACEMENTS_FILE, BN_CLICKED) if crate::typing::allowed() => crate::typing::open_replacements(),
+                (ID_ONE_LANGUAGE_FILE, BN_CLICKED) if crate::typing::allowed() => crate::typing::open_one_language(),
                 (ID_COPY_RESULT, _) => copy_text(&get_text(ID_RESULT)),
                 (ID_DIAG_REFRESH, _) => refresh_diagnostic(),
                 (ID_EXPORT, _) => on_export(),
@@ -1101,6 +1531,16 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             }
             0
         }
+        WM_TIMER if wparam == TIMER_LANG => {
+            // SAFETY: our window.
+            unsafe { KillTimer(hwnd, TIMER_LANG) };
+            apply_language_now();
+            0
+        }
+        m if m == WM_APP_LANG => {
+            apply_language_now();
+            0
+        }
         WM_ENABLE if wparam != 0 && PENDING_REFRESH.with(|p| p.get()) => {
             // the dialog closed: the administrator's settings changed meanwhile
             // SAFETY: posting to our own window.
@@ -1116,6 +1556,8 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             let nm = unsafe { &*(lparam as *const NMHDR) };
             if nm.idFrom == ID_TAB as usize && nm.code == TCN_SELCHANGE {
                 show_page(send(ID_TAB, TCM_GETCURSEL, 0, 0).max(0) as usize);
+            } else if nm.idFrom == ID_GITHUB as usize && nm.hwndFrom == item(ID_GITHUB) && (nm.code == NM_CLICK || nm.code == NM_RETURN) {
+                open_github();
             }
             0
         }
@@ -1142,6 +1584,9 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     SetBkMode(dc, OPAQUE as i32);
                     SetBkColor(dc, GetSysColor(COLOR_BTNFACE));
                     return GetSysColorBrush(COLOR_BTNFACE) as LRESULT;
+                } else if NOTE_IDS.iter().any(|id| child == item(*id)) && !sys::high_contrast() {
+                    // 2.0.0: the explanation lines in grey (normal text colour in high contrast)
+                    SetTextColor(dc, GetSysColor(COLOR_GRAYTEXT));
                 } else {
                     SetTextColor(dc, GetSysColor(COLOR_WINDOWTEXT));
                 }
@@ -1188,12 +1633,23 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             0
         }
         WM_DESTROY => {
+            // SAFETY: our window (a timer of a destroyed window is gone anyway).
+            unsafe { KillTimer(hwnd, TIMER_LANG) };
+            LANG_PENDING.with(|p| p.set(false));
             clear_acc_names();
             HWND_.with(|c| c.set(null_mut()));
             0
         }
         // SAFETY: default handling.
         _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
+    }
+}
+
+/// 2.0.0: the window opened on one tab (« About » in the tray menu).
+pub fn open_on(page: usize) {
+    open();
+    if !window().is_null() {
+        show_page(page);
     }
 }
 
@@ -1259,55 +1715,95 @@ pub fn open() {
         DPI.with(|d| d.set(dpi));
         make_fonts(dpi);
 
-        // creation order = Tab order (children are added at the bottom of the Z order)
+        // creation order = Tab order (children are added at the bottom of the Z order); a label
+        // is created just before its field (a screen reader names the field after it); a grey
+        // line never just before a field
         let stat = SS_LEFT | SS_CENTERIMAGE | SS_ENDELLIPSIS;
+        let note = SS_LEFT | SS_EDITCONTROL | SS_NOPREFIX;
+        let check = BS_AUTOCHECKBOX | WS_TABSTOP;
+        let button = BS_PUSHBUTTON | WS_TABSTOP;
+        let combo = CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL;
         create("STATIC", "", stat, 0, ID_STATUS);
-        create("BUTTON", "", BS_PUSHBUTTON | WS_TABSTOP, 0, ID_PAUSE);
-        // Simple
-        create("STATIC", "", stat, 0, ID_LBL_HOTKEY);
-        create("msctls_hotkey32", "", WS_TABSTOP | WS_BORDER, 0, ID_HOTKEY);
-        create("STATIC", "", stat, 0, ID_LBL_HOTKEY_CASE);
-        create("msctls_hotkey32", "", WS_TABSTOP | WS_BORDER, 0, ID_HOTKEY_CASE);
+        // General
+        create("STATIC", "", stat, 0, ID_LBL_LANG);
+        create("COMBOBOX", "", combo, 0, ID_LANG);
+        create("BUTTON", "", check, 0, ID_ENABLED);
+        create("STATIC", "", note, 0, ID_NOTE_ENABLED);
+        create("BUTTON", "", check, 0, ID_AUTOSTART);
+        create("BUTTON", "", check, 0, ID_INDICATOR);
+        create("BUTTON", "", check, 0, ID_BUBBLE);
+        create("COMBOBOX", "", combo, 0, ID_BUBBLE_POS);
+        create("BUTTON", "", check, 0, ID_PREVIEW);
+        create("BUTTON", "", check, 0, ID_SOUND);
         create("STATIC", "", stat, 0, ID_LBL_WORK);
-        create("COMBOBOX", "", CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL, 0, ID_WORK_MODE);
-        create("BUTTON", "", BS_PUSHBUTTON | WS_TABSTOP, 0, ID_COPY_RESULT);
+        create("COMBOBOX", "", combo, 0, ID_WORK_MODE);
+        create("BUTTON", "", button, 0, ID_COPY_RESULT);
         create("STATIC", "", SS_LEFT | SS_ENDELLIPSIS, 0, ID_LBL_TRY);
         create("EDIT", "", ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | WS_VSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE, ID_TRY);
         create("STATIC", "", SS_LEFT | SS_ENDELLIPSIS, 0, ID_LBL_RESULT);
         create("EDIT", "", ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | WS_VSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE, ID_RESULT);
-        create("STATIC", "", stat, 0, ID_LBL_LANG);
-        create("COMBOBOX", "", CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL, 0, ID_LANG);
-        create("BUTTON", "", BS_AUTOCHECKBOX | WS_TABSTOP, 0, ID_AUTOSTART);
-        create("BUTTON", "", BS_AUTOCHECKBOX | WS_TABSTOP, 0, ID_INDICATOR);
-        // Advanced
+        // Conversion
+        create("STATIC", "", stat, 0, ID_LBL_HOTKEY);
+        create("msctls_hotkey32", "", WS_TABSTOP | WS_BORDER, 0, ID_HOTKEY);
+        create("STATIC", "", stat, 0, ID_LBL_HOTKEY_CASE);
+        create("msctls_hotkey32", "", WS_TABSTOP | WS_BORDER, 0, ID_HOTKEY_CASE);
         create("STATIC", "", stat, 0, ID_LBL_DIRECTION);
-        create("COMBOBOX", "", CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL, 0, ID_DIRECTION);
-        for id in [ID_SWITCH, ID_BUBBLE, ID_SOUND, ID_CAREFUL, ID_LASTWORD, ID_CAPSOFF, ID_TERMINAL] {
-            create("BUTTON", "", BS_AUTOCHECKBOX | WS_TABSTOP, 0, id);
-            if id == ID_BUBBLE {
-                create("COMBOBOX", "", CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL, 0, ID_BUBBLE_POS);
+        create("COMBOBOX", "", combo, 0, ID_DIRECTION);
+        create("STATIC", "", note, 0, ID_NOTE_DIRECTION);
+        for id in [ID_SWITCH, ID_CAREFUL, ID_LASTWORD, ID_F10_WRONG, ID_DOUBLE_SHIFT, ID_CTRL_TAP, ID_CAPSOFF] {
+            create("BUTTON", "", check, 0, id);
+            if id == ID_CAREFUL {
+                create("STATIC", "", note, 0, ID_NOTE_CAREFUL);
             }
         }
         create("STATIC", "", stat, 0, ID_LBL_LIMIT);
         create("EDIT", "", ES_NUMBER | ES_AUTOHSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE, ID_LIMIT);
         create("STATIC", "", stat, 0, ID_LBL_DELAY);
         create("EDIT", "", ES_NUMBER | ES_AUTOHSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE, ID_DELAY);
+        create("STATIC", "", note, 0, ID_NOTE_LIMIT);
+        // Typing
+        create("BUTTON", "", check, 0, ID_TYPING);
+        create("BUTTON", "", check, 0, ID_TYPING_SOUND);
+        create("BUTTON", "", check, 0, ID_MESSENGER);
+        create("BUTTON", "", button, 0, ID_TYPING_WORDS);
+        create("BUTTON", "", check, 0, ID_REPLACEMENTS);
+        create("BUTTON", "", button, 0, ID_REPLACEMENTS_FILE);
+        create("STATIC", "", note, 0, ID_NOTE_TYPING);
+        // Apps
+        create("STATIC", "", note, 0, ID_NOTE_RULES);
+        create("STATIC", "", stat, 0, ID_LBL_RULE_OFF);
+        create("EDIT", "", ES_AUTOHSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE, ID_RULE_OFF);
+        create("STATIC", "", stat, 0, ID_LBL_RULE_SEL);
+        create("EDIT", "", ES_AUTOHSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE, ID_RULE_SEL);
         create("STATIC", "", stat, 0, ID_LBL_EXCLUDED);
         create("EDIT", "", ES_AUTOHSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE, ID_EXCLUDED);
-        create("STATIC", "", SS_LEFT | SS_EDITCONTROL | SS_NOPREFIX, 0, ID_LAYOUTS);
-        // Diagnostic
+        create("STATIC", "", note, 0, ID_NOTE_RULES2);
+        create("BUTTON", "", check, 0, ID_TERMINAL);
+        create("BUTTON", "", check, 0, ID_ONE_LANGUAGE);
+        create("BUTTON", "", button, 0, ID_ONE_LANGUAGE_FILE);
+        // Diagnostics
         create("STATIC", "", SS_LEFT, 0, ID_DIAG_LAST);
         create("EDIT", "", ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | WS_VSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE, ID_DIAG_TEXT);
-        create("BUTTON", "", BS_PUSHBUTTON | WS_TABSTOP, 0, ID_DIAG_COPY);
-        create("BUTTON", "", BS_PUSHBUTTON | WS_TABSTOP, 0, ID_DIAG_REFRESH);
-        create("BUTTON", "", BS_PUSHBUTTON | WS_TABSTOP, 0, ID_CHECK_UPDATE);
-        create("BUTTON", "", BS_PUSHBUTTON | WS_TABSTOP, 0, ID_EXPORT);
-        create("BUTTON", "", BS_PUSHBUTTON | WS_TABSTOP, 0, ID_IMPORT);
-        create("BUTTON", "", BS_PUSHBUTTON | WS_TABSTOP, 0, ID_UNDO_IMPORT);
+        create("STATIC", "", SS_LEFT | SS_EDITCONTROL | SS_NOPREFIX, 0, ID_LAYOUTS);
+        create("BUTTON", "", button, 0, ID_DIAG_COPY);
+        create("BUTTON", "", button, 0, ID_DIAG_REFRESH);
+        create("BUTTON", "", button, 0, ID_REPORT_PROBLEM);
+        create("BUTTON", "", button, 0, ID_REPORT_SEND);
+        create("BUTTON", "", check, 0, ID_REPORT_ALWAYS);
+        create("BUTTON", "", check, 0, ID_REPORT_NEVER);
+        create("BUTTON", "", button, 0, ID_EXPORT);
+        create("BUTTON", "", button, 0, ID_IMPORT);
+        create("BUTTON", "", button, 0, ID_UNDO_IMPORT);
+        // About
+        create("STATIC", "", note, 0, ID_ABOUT_TEXT);
+        create("BUTTON", "", button, 0, ID_CHECK_UPDATE);
+        create("BUTTON", "", check, 0, ID_AUTO_UPDATE);
+        let link = format!("<a href=\"{GITHUB_URL}\">GitHub</a>");
+        create("SysLink", &link, WS_TABSTOP | LWS_TRANSPARENT, 0, ID_GITHUB);
         // common bottom row
-        create("BUTTON", "", BS_PUSHBUTTON | WS_TABSTOP, 0, ID_ABOUT);
+        create("BUTTON", "", button, 0, ID_DEFAULTS);
         create("BUTTON", "", BS_DEFPUSHBUTTON | WS_TABSTOP, 0, ID_SAVE);
-        create("BUTTON", "", BS_PUSHBUTTON | WS_TABSTOP, 0, ID_CLOSE);
+        create("BUTTON", "", button, 0, ID_CLOSE);
         // the tab control last: at the bottom of the Z order, under the page controls (clicks
         // reach them), and last in the Tab order (Ctrl+Tab changes the page from anywhere)
         create("SysTabControl32", "", WS_TABSTOP | WS_CLIPSIBLINGS, 0, ID_TAB);

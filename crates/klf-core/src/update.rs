@@ -247,6 +247,26 @@ mod tests {
         assert!((1, 10, 0) > (1, 9, 9), "numeric, not text");
     }
 
+    /// 2.0.0: the first change of major number is seen as newer by 1.9.9 (and 1.10.0 too).
+    #[test]
+    fn major_version_is_newer() {
+        let v199 = parse_version("1.9.9").unwrap();
+        let v200 = parse_version("v2.0.0").unwrap();
+        let v1100 = parse_version("1.10.0").unwrap();
+        assert!(v200 > v199 && v1100 > v199 && v200 > v1100);
+        let r = parse_release(&json("v2.0.0", 700_000, false)).unwrap();
+        assert!(should_offer(v199, &r, None, 0), "1.9.9 is offered 2.0.0");
+        assert!(should_offer(v1100, &r, None, 0));
+        assert!(!should_offer(v200, &r, None, 0), "never the same version");
+        let r = parse_release(&json("v1.10.0", 700_000, false)).unwrap();
+        assert!(should_offer(v199, &r, None, 0), "1.9.9 is offered 1.10.0");
+        assert!(!should_offer(v200, &r, None, 0), "2.0.0 is never offered 1.10.0");
+        let i = parse_update_file(&update_file_text("2.0.0", 700_000, &"a".repeat(64))).unwrap();
+        let r = parse_release(&json("v2.0.0", 700_000, false)).unwrap();
+        assert!(update_info_ok(&i, &r, v199));
+        assert_eq!(crate::VERSION, "2.0.0");
+    }
+
     #[test]
     fn no_check_at_school_or_when_switched_off() {
         let lp = r"C:\Users\a\AppData\Local\Programs\KeyboardLayoutFixer";

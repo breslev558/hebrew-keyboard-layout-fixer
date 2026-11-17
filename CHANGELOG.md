@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.0.0 (November 2026)
+- **A simpler tray menu**: Settings… (in bold; a double click on the icon opens it too), Install version X and Put back the previous clipboard when they apply, Pause for 10 minutes, Pause until resumed (one "Resume" line while paused, with the end time of a 10-minute pause), a tick "Disable in {program}" for the program in front, About and Exit. No submenu. The icon tip says "paused until hh:mm" during a timed pause.
+- **Settings in six tabs**: General (language, "Fixer on", start with Windows, language indicator, bubble and its preview, sound, converter), Conversion (keys, direction, careful mode, last word only, F10 fixes only wrong words, double Shift, left/right Ctrl, Caps Lock, limit and delay), Typing (fixing while typing, short sound, my words, text replacements, chat apps), Apps (rules per program as two editable lists, excluded programs, terminals, one-language programs), Diagnostics (last attempt, report, keyboards, problem reports, export/import) and About (version, check for updates, automatic update check, GitHub link, license and credit). Everything that left the tray menu is in one of these tabs.
+- **"Fixer on"** in the General tab is the pause itself: it acts at once and follows the menu and the end of a 10-minute pause.
+- **The interface language applies at once** when it is picked in the list (labelled "Language · שפה · Langue" in every language); the window opens again on the same tab.
+- **"Defaults"** puts back the default values of the tab shown (applied with Apply); never the lists, never a setting imposed by the administrator.
+- Short grey explanations under the options that needed one (careful mode, direction, limit and delay, "Fixer on"), also read by screen readers.
+- **New, softer "bubble" sound, played the moment the text is pasted** (it came about one second late, after the wait that puts the clipboard back); the undo sound is a shorter falling bubble. The sounds are prepared at start, so the first one is not late either.
+- The About box is replaced by the About tab; the About item of the menu opens it.
+
 ## 1.9.9 (November 2026)
 - **Settings texts no longer cut** (found by the new Windows check): the terminal box is shorter ("Also fix in terminals: cmd, PowerShell, Windows Terminal"), the keyboards line of the Diagnostic page wraps on two lines, and the French "Convertisseur :" label is wider.
 - **Screen readers**: the bubble position list and the tab strip of the settings now have a name.

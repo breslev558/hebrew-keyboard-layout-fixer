@@ -1,4 +1,4 @@
-//! Keyboard Layout Fixer — Rust 1.9.9. Fixes text typed with the wrong keyboard layout
+//! Keyboard Layout Fixer — Rust 2.0.0. Fixes text typed with the wrong keyboard layout
 //! (Hebrew <-> English) with one key (F10). Based on RavidSaadia/Keyboard_Layout_Fixer (MIT).
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
@@ -29,7 +29,7 @@ mod util;
 
 #[cfg(windows)]
 fn main() {
-    use windows_sys::Win32::UI::Controls::{InitCommonControlsEx, ICC_HOTKEY_CLASS, ICC_STANDARD_CLASSES, ICC_WIN95_CLASSES, INITCOMMONCONTROLSEX};
+    use windows_sys::Win32::UI::Controls::{InitCommonControlsEx, ICC_HOTKEY_CLASS, ICC_LINK_CLASS, ICC_STANDARD_CLASSES, ICC_WIN95_CLASSES, INITCOMMONCONTROLSEX};
 
     // panic = "abort": write the reason in debug.log before the program stops
     std::panic::set_hook(Box::new(|info| {
@@ -54,7 +54,7 @@ fn main() {
     unsafe {
         let icc = INITCOMMONCONTROLSEX {
             dwSize: std::mem::size_of::<INITCOMMONCONTROLSEX>() as u32,
-            dwICC: ICC_HOTKEY_CLASS | ICC_STANDARD_CLASSES | ICC_WIN95_CLASSES,
+            dwICC: ICC_HOTKEY_CLASS | ICC_STANDARD_CLASSES | ICC_WIN95_CLASSES | ICC_LINK_CLASS, // 2.0.0: SysLink (About tab)
         };
         InitCommonControlsEx(&icc);
     }
@@ -65,6 +65,8 @@ fn main() {
     app::share_settings();
     // what the administrator imposes (registry), before the keys are registered
     app::reload_policy();
+    // 2.0.0: sounds made and sound thread started now (the first "fixed" sound is not late)
+    platform::sys::warm_sound();
 
     let Some(hwnd) = app::create_main_window() else {
         util::log("Main window could not be created, exit");

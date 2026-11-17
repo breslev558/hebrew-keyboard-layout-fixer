@@ -8,6 +8,10 @@
 # 1.9.9 (audit du 17/11) : trois VERIFICATIONS qui font echouer l'essai (« DEFAUT », sortie 1 a la fin) :
 #  texte coupe ou controle hors de la fenetre dans les reglages (3 langues, 100/150/200 %), controle
 #  sans nom pour un lecteur d'ecran (UI Automation), bulle qui prend le premier plan ou le focus.
+# 2.0.0 : SIX onglets (General, Conversion, Frappe, Programmes, Diagnostic, A propos) ; menu de l'icone a
+#  plat (aucun sous-menu, « Parametres » en gras, 10 lignes au plus) ; « Valeurs par defaut » remet la page
+#  affichee sans rien enregistrer et reste inactif sur Diagnostic et A propos ; lien SysLink « GitHub »
+#  (nom pour le lecteur d'ecran, adresse exacte, jamais ouvert ici).
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 Add-Type -ReferencedAssemblies System.Drawing, Accessibility -TypeDefinition @'
@@ -139,6 +143,23 @@ public static class A {
     }, IntPtr.Zero);
     seen = n; return bad.ToString();
   }
+  // 2.0.0: the GitHub link (name and address read without opening it), the « Defaults » button, the menu
+  public static string AccNameOf(IntPtr h) {
+    Guid iid = new Guid("618736E0-3C3D-11CF-810C-00AA00389B71"); object o;
+    if (AccessibleObjectFromWindow(h, 0xFFFFFFFC, ref iid, out o) != 0 || o == null) return null;
+    try { return ((Accessibility.IAccessible)o).get_accName(0); } catch { return null; }
+  }
+  public static string AccLinkValue(IntPtr h) {
+    Guid iid = new Guid("618736E0-3C3D-11CF-810C-00AA00389B71"); object o;
+    if (AccessibleObjectFromWindow(h, 0xFFFFFFFC, ref iid, out o) != 0 || o == null) return null;
+    try { return ((Accessibility.IAccessible)o).get_accValue(1); } catch { return null; }
+  }
+  public static string Text(IntPtr h) { var sb = new StringBuilder(1024); GetWindowText(h, sb, 1024); return sb.ToString(); }
+  [DllImport("user32.dll")] public static extern bool IsWindowEnabled(IntPtr h);
+  [DllImport("user32.dll")] public static extern int GetMenuItemCount(IntPtr m);
+  [DllImport("user32.dll")] public static extern IntPtr GetSubMenu(IntPtr m, int i);
+  [DllImport("user32.dll")] public static extern int GetMenuDefaultItem(IntPtr m, uint byPos, uint flags);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int SetWindowText(IntPtr h, string s);
   [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int w, int ht, uint f);
   [DllImport("user32.dll")] public static extern IntPtr GetDC(IntPtr h);
   [DllImport("user32.dll")] public static extern int ReleaseDC(IntPtr h, IntPtr dc);
@@ -252,7 +273,21 @@ foreach ($lg in 'he', 'fr', 'en') {
   [void][A]::Front($m)
   [void][A]::PostMessage($m, 0x8001, [IntPtr]::Zero, [IntPtr]0x007B)   # WM_APP_TRAY, WM_CONTEXTMENU
   $menu = Attendre { [A]::Visible('#32768', 0) } 5000
-  if ($menu -ne [IntPtr]::Zero) { Start-Sleep -Milliseconds 400; Photo $menu "menu-icone-$lg.png"; [void][A]::PostMessage($m, 0x001F, [IntPtr]::Zero, [IntPtr]::Zero) } else { Manque "menu de l'icône ($lg)" }   # WM_CANCELMODE closes the menu
+  if ($menu -ne [IntPtr]::Zero) {
+    Start-Sleep -Milliseconds 400; Photo $menu "menu-icone-$lg.png"
+    # 2.0.0: a flat menu (MN_GETHMENU gives the menu shown; menus can be read from another process)
+    $hm = [A]::SendMessage($menu, 0x01E1, [IntPtr]::Zero, [IntPtr]::Zero)
+    if ($hm -ne [IntPtr]::Zero) {
+      $nb = [A]::GetMenuItemCount($hm); $sous = 0
+      for ($i = 0; $i -lt $nb; $i++) { if ([A]::GetSubMenu($hm, $i) -ne [IntPtr]::Zero) { $sous++ } }
+      $def = [A]::GetMenuDefaultItem($hm, 1, 0)
+      if ($sous -gt 0) { Defaut "menu de l'icone ($lg) : $sous sous-menu(s)" }
+      if ($nb -gt 10) { Defaut "menu de l'icone ($lg) : $nb lignes (10 au plus)" }
+      if ($def -ne 0) { Defaut "menu de l'icone ($lg) : 'Parametres' n'est pas l'entree par defaut en tete ($def)" }
+      if ($sous -eq 0 -and $nb -le 10 -and $def -eq 0) { Write-Host "OK    menu de l'icone ($lg) : $nb lignes, sans sous-menu, Parametres en gras" }
+    } else { Manque "menu de l'icone ($lg) : menu non lu" }
+    [void][A]::PostMessage($m, 0x001F, [IntPtr]::Zero, [IntPtr]::Zero)   # WM_CANCELMODE closes the menu
+  } else { Manque "menu de l'icône ($lg)" }
   Start-Sleep 1
 
   # --- bulle F10, en haut puis en bas
@@ -276,20 +311,55 @@ foreach ($lg in 'he', 'fr', 'en') {
     Start-Sleep 1
   }
 
-  # --- bouton « Rechercher une mise à jour » (page Diagnostic) : bulle de réponse
+  # --- bouton « Rechercher une mise à jour » (2.0.0 : onglet À propos) : bulle de réponse
   $p = Demarrer ('{ "WelcomeDone": true, "ShowBubble": true, "UiLanguage": "' + $lg + '" }') $null
-  $w = Reglages $lg 'normal' @(1, 2, 3) -noms
+  $w = Reglages $lg 'normal' @(1, 2, 3, 4, 5, 6) -noms
   if ($w -ne [IntPtr]::Zero) {
     [void][A]::PostMessage($w, 0x0111, [IntPtr]264, [A]::GetDlgItem($w, 264))   # WM_COMMAND, bouton 264
     $b = Attendre { [A]::Visible('KBLayoutFixerBubble', 0) } 15000
     if ($b -ne [IntPtr]::Zero) { Start-Sleep -Milliseconds 250; Photo $b "bulle-mise-a-jour-$lg.png" } else { Manque "bulle de mise à jour ($lg)" }
+    Start-Sleep 4   # the bubble goes away
+    $tc = [A]::GetDlgItem($w, 240)
+    # 2.0.0 « Valeurs par defaut » (bouton 269) sur l'onglet Conversion : mode prudent (245) coche et limite
+    # (248) a 123, puis le bouton : la case est decochee, la limite revient a 0, et rien n'est enregistre
+    [A]::Ask($tc, 0x1330, [IntPtr]1, [IntPtr]::Zero); Start-Sleep -Milliseconds 400   # TCM_SETCURFOCUS onglet 2
+    $prudent = [A]::GetDlgItem($w, 245); $limite = [A]::GetDlgItem($w, 248)
+    [A]::Ask($prudent, 0x00F1, [IntPtr]1, [IntPtr]::Zero)   # BM_SETCHECK
+    [void][A]::SetWindowText($limite, '123')
+    $avantJson = Get-Content (Join-Path $dir 'settings.json') -Raw
+    [A]::Ask($w, 0x0111, [IntPtr]269, [A]::GetDlgItem($w, 269))   # WM_COMMAND, bouton 269
+    Start-Sleep -Milliseconds 300
+    $coche = [int][A]::SendMessage($prudent, 0x00F0, [IntPtr]::Zero, [IntPtr]::Zero)   # BM_GETCHECK
+    $lim = [A]::Text($limite); $apresJson = Get-Content (Join-Path $dir 'settings.json') -Raw
+    if ($coche -ne 0 -or $lim -ne '0') { Defaut "valeurs par defaut ($lg) : mode prudent $coche, limite '$lim' (attendu 0 et '0')" }
+    elseif ($apresJson -ne $avantJson) { Defaut "valeurs par defaut ($lg) : settings.json change sans 'Appliquer'" }
+    else { Write-Host "OK    valeurs par defaut ($lg) : page Conversion remise, rien enregistre" }
+    foreach ($tab in 5, 6) {
+      [A]::Ask($tc, 0x1330, [IntPtr]($tab - 1), [IntPtr]::Zero); Start-Sleep -Milliseconds 300
+      if ([A]::IsWindowEnabled([A]::GetDlgItem($w, 269))) { Defaut "valeurs par defaut ($lg) : bouton actif sur l'onglet $tab" }
+    }
+    # 2.0.0 lien « GitHub » (SysLink 297, onglet A propos) : present, visible, nomme, la bonne adresse (jamais ouvert ici)
+    $gh = [A]::GetDlgItem($w, 297)
+    if ($gh -eq [IntPtr]::Zero) { Defaut "lien GitHub ($lg) : absent" }
+    else {
+      $cn = New-Object Text.StringBuilder 64; [void][A]::GetClassName($gh, $cn, 64)
+      $nom = [A]::AccNameOf($gh); $txt = [A]::Text($gh); $val = [A]::AccLinkValue($gh)
+      $url = 'https://github.com/breslev558/hebrew-keyboard-layout-fixer'
+      $vu = if ($txt -match 'href="([^"]*)"') { $Matches[1] } elseif ($val) { $val } else { $null }
+      if ($cn.ToString() -ne 'SysLink') { Defaut "lien GitHub ($lg) : classe $($cn.ToString())" }
+      if (-not [A]::IsWindowVisible($gh)) { Defaut "lien GitHub ($lg) : pas visible sur l'onglet A propos" }
+      if ([string]::IsNullOrWhiteSpace($nom)) { Defaut "lien GitHub ($lg) : sans nom pour le lecteur d'ecran" }
+      if ($null -eq $vu) { Manque "lien GitHub ($lg) : adresse non lisible (texte '$txt')" }
+      elseif ($vu -ne $url) { Defaut "lien GitHub ($lg) : adresse '$vu'" }
+      else { Write-Host "OK    lien GitHub ($lg) : '$nom', $vu" }
+    }
     [void][A]::PostMessage($w, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)
   }
 
   # --- réglages à 150 % et 200 % (tous les onglets)
   foreach ($dpi in 144, 192) {
     $p = Demarrer ('{ "WelcomeDone": true, "ShowBubble": false, "UiLanguage": "' + $lg + '" }') $dpi
-    $w = Reglages $lg "$([int]($dpi * 100 / 96))pc" @(1, 2, 3) -dpi $dpi
+    $w = Reglages $lg "$([int]($dpi * 100 / 96))pc" @(1, 2, 3, 4, 5, 6) -dpi $dpi
     if ($w -ne [IntPtr]::Zero) { [void][A]::PostMessage($w, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) }
   }
   Remove-Item Env:\KLF_TEST_DPI -ErrorAction SilentlyContinue
@@ -306,7 +376,7 @@ foreach ($lg in 'he', 'fr', 'en') {
     $w = Attendre { [A]::FindWindow('KBLayoutFixerSettings', [NullString]::Value) } 10000
     if ($w -eq [IntPtr]::Zero) { Defaut "ouverture-fermeture $lg : fenetre $i pas ouverte"; break }
     $tc = [A]::GetDlgItem($w, 240)
-    foreach ($tab in 1, 2, 3, 1) { [A]::Ask($tc, 0x1330, [IntPtr]($tab - 1), [IntPtr]::Zero); Start-Sleep -Milliseconds 150 }
+    foreach ($tab in 1, 2, 3, 4, 5, 6, 1) { [A]::Ask($tc, 0x1330, [IntPtr]($tab - 1), [IntPtr]::Zero); Start-Sleep -Milliseconds 150 }
     [void][A]::PostMessage($w, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)   # WM_CLOSE
     $parti = Attendre { if ([A]::FindWindow('KBLayoutFixerSettings', [NullString]::Value) -eq [IntPtr]::Zero) { 1 } else { 0 } } 5000
     if (-not $parti) { Defaut "ouverture-fermeture $lg : fenetre $i pas fermee"; break }
@@ -332,7 +402,7 @@ try {
     if (([A]::HighContrastFlags() -band 1) -eq 0) { Manque "contraste élevé demandé mais pas appliqué" }
     foreach ($lg in 'he', 'fr') {
       $p = Demarrer ('{ "WelcomeDone": true, "ShowBubble": false, "UiLanguage": "' + $lg + '" }') $null
-      $w = Reglages $lg 'contraste' @(1, 2, 3)
+      $w = Reglages $lg 'contraste' @(1, 2, 3, 4, 5, 6)
       if ($w -ne [IntPtr]::Zero) { [void][A]::PostMessage($w, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) }
     }
   } else { Manque "contraste élevé (non activable sur cette machine)" }

@@ -2,7 +2,7 @@
 # Essai Windows (CI) 1.8.5, après bout-en-bout.ps1 (programme installé, en marche) :
 #  1) F10 sans sélection dans une zone multi-ligne ÉTROITE qui passe à la ligne toute seule : tout le
 #     paragraphe doit être corrigé, pas seulement la dernière ligne affichée ;
-#  2) captures de la fenêtre de réglages (3 onglets) et de À propos en hébreu, français et anglais (artefact « captures »).
+#  2) captures de la fenêtre de réglages (2.0.0 : 6 onglets, dont À propos) en hébreu, français et anglais (artefact « captures »).
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 Add-Type @'
@@ -34,13 +34,6 @@ public static class V {
   [DllImport("user32.dll")] public static extern IntPtr GetWindow(IntPtr h, uint cmd);
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr h, StringBuilder s, int n);
-  // the visible dialog box (#32770) owned by `owner` (the About box opened from the settings window)
-  public static IntPtr OwnedDialog(IntPtr owner) {
-    IntPtr found = IntPtr.Zero;
-    EnumWindows((h, l) => { var sb = new StringBuilder(64); GetClassName(h, sb, 64);
-      if (sb.ToString() == "#32770" && IsWindowVisible(h) && GetWindow(h, 4) == owner) { found = h; return false; } return true; }, IntPtr.Zero);
-    return found;
-  }
 }
 '@
 function Fail($m) { Write-Host "ECHEC : $m"; exit 1 }
@@ -128,6 +121,38 @@ $fuite = @(Get-ChildItem -Path $dir -File -Recurse -ErrorAction SilentlyContinue
 if ($fuite.Count -gt 0) { Fail "texte tapé retrouvé dans : $($fuite.Name -join ', ')" }
 "OK    phrase témoin : aucun texte tapé dans les fichiers du programme ($((Get-ChildItem $dir -File).Count) fichiers lus)"
 
+# --- 1d) (2.0.0) le son « corrigé » part au moment de Ctrl+V (avant : 1 s plus tard, après l'attente
+# qui remet le Presse-papiers) ; le journal dit « Sound started (N ms after Ctrl+V) », sans texte tapé
+Get-Process KeyboardLayoutFixer -ErrorAction SilentlyContinue | Stop-Process -Force
+Start-Sleep 1
+'{ "WelcomeDone": true, "ShowBubble": false, "PlaySound": true, "SwitchLanguageAfterConvert": false }' | Set-Content -Encoding UTF8 (Join-Path $dir 'settings.json')
+Start-Process -FilePath $exe | Out-Null
+Start-Sleep 3
+$lg = Join-Path $dir 'debug.log'
+$n0 = @(Get-Content $lg -ErrorAction SilentlyContinue).Count
+$pf = Start-Process powershell -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $fp -PassThru
+$h = [IntPtr]::Zero; $t = 0; while ($h -eq [IntPtr]::Zero) { Start-Sleep -Milliseconds 300; $h = [V]::FindWindow([NullString]::Value, 'KLF-paragraphe'); if (++$t -gt 60) { Fail 'fenetre de test introuvable (son)' } }
+$e = [V]::FindWindowEx($h, [IntPtr]::Zero, [NullString]::Value, [NullString]::Value)
+[void][V]::SendMessage($e, 0x000C, [IntPtr]::Zero, 'akuo')                    # WM_SETTEXT
+$t = 0; while (-not [V]::Front($h)) { Start-Sleep -Milliseconds 300; if (++$t -gt 20) { Fail 'fenetre de test pas au premier plan (son)' } }
+[void][V]::SendMessage($e, 0x00B1, [IntPtr]4, [IntPtr]4)                         # EM_SETSEL : curseur a la fin
+Start-Sleep 1
+[V]::Key(0x79)   # F10
+$son = $null; $sw = [Diagnostics.Stopwatch]::StartNew()
+while (-not $son -and $sw.ElapsedMilliseconds -lt 6000) {
+  Start-Sleep -Milliseconds 200
+  $son = @(Get-Content $lg -ErrorAction SilentlyContinue | Select-Object -Skip $n0 | Where-Object { $_ -match 'Sound started \((\d+) ms after Ctrl\+V\)' }) | Select-Object -First 1
+}
+Start-Sleep 2
+$nbson = @(Get-Content $lg -ErrorAction SilentlyContinue | Select-Object -Skip $n0 | Where-Object { $_ -match 'Sound started' }).Count
+Stop-Process -Id $pf.Id -Force -ErrorAction SilentlyContinue
+if (-not $son) { Fail 'son : aucune ligne « Sound started » dans debug.log apres F10 (PlaySound actif)' }
+$msson = [int]([regex]::Match($son, 'Sound started \((\d+) ms').Groups[1].Value)
+"MESURE son : $msson ms apres Ctrl+V"
+if ($env:GITHUB_STEP_SUMMARY) { @("", "### Son de correction", "", "MESURE son : $msson ms apres Ctrl+V") | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY }
+if ($nbson -ne 1) { Fail "son : $nbson sons pour une seule correction" }
+if ($msson -gt 50) { Fail "son : $msson ms apres Ctrl+V (seuil 50 ms)" }
+
 # --- 2) captures de la fenêtre de réglages dans les 3 langues
 foreach ($lg in 'he', 'fr', 'en') {
   Get-Process KeyboardLayoutFixer -ErrorAction SilentlyContinue | Stop-Process -Force
@@ -149,22 +174,15 @@ foreach ($lg in 'he', 'fr', 'en') {
   # window, like a click); the old Ctrl+Tab never reached the 3rd page (Diagnostic)
   $tc = [V]::GetDlgItem($w, 240)
   if ($tc -eq [IntPtr]::Zero) { Fail "onglets introuvables ($lg)" }
-  for ($tab = 1; $tab -le 3; $tab++) {
+  for ($tab = 1; $tab -le 6; $tab++) {
     [void][V]::SendMessage($tc, 0x1330, [IntPtr]($tab - 1), [IntPtr]::Zero)   # TCM_SETCURFOCUS
     Start-Sleep -Milliseconds 700
     $cur = [int][V]::SendMessage($tc, 0x130B, [IntPtr]::Zero, [IntPtr]::Zero)  # TCM_GETCURSEL
     if ($cur -ne ($tab - 1)) { Fail "onglet $tab non affiché ($lg)" }
     Photo $w "reglages-$lg-onglet$tab.png"
   }
-  # 1.8.9: the About box (with its "Check for updates" button), opened by its button (posted: the
-  # box is modal), photographed, then closed
-  [void][V]::PostMessage($w, 0x0111, [IntPtr]213, [V]::GetDlgItem($w, 213))   # WM_COMMAND (button 213, BN_CLICKED)
-  $d = [IntPtr]::Zero; $t = 0
-  while ($d -eq [IntPtr]::Zero) { Start-Sleep -Milliseconds 300; $d = [V]::OwnedDialog($w); if (++$t -gt 20) { break } }
-  if ($d -eq [IntPtr]::Zero) { Fail "fenêtre À propos introuvable ($lg)" }
-  Start-Sleep -Milliseconds 500
-  Photo $d "a-propos-$lg.png"
-  [void][V]::PostMessage($d, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)   # WM_CLOSE
+  # 2.0.0: the About box is gone: « About » is the 6th tab (photographed above, reglages-$lg-onglet6.png)
+  [void][V]::PostMessage($w, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)   # WM_CLOSE
   Start-Sleep -Milliseconds 500
   "OK    captures des réglages et de À propos ($lg)"
 }

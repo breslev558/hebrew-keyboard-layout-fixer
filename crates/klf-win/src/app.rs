@@ -71,32 +71,11 @@ const CMD_SETTINGS: usize = 102;
 const CMD_ABOUT: usize = 103;
 const CMD_EXIT: usize = 104;
 const CMD_RULE_DISABLE: usize = 105;
-const CMD_RULE_SELECTION: usize = 106;
-const CMD_RULE_REMOVE: usize = 107;
 const CMD_PAUSE10: usize = 108;
 const CMD_RESTORE_CLIP: usize = 109;
-const CMD_CHECK_UPDATES: usize = 110;
 const CMD_INSTALL_UPDATE: usize = 111;
-const CMD_PREVIEW: usize = 112;
-// 1.6.1: anonymous problem reports (public install only)
-const CMD_REPORT_SEND: usize = 113;
-const CMD_REPORT_PROBLEM: usize = 114;
-const CMD_REPORT_ALWAYS: usize = 115;
-const CMD_REPORT_NEVER: usize = 116;
-/// not a command: place of the "Problem reports" submenu
-const MENU_REPORTS: usize = 199;
-// 1.8.0: correction while typing (public install only)
-const CMD_TYPING: usize = 117;
-const CMD_TYPING_WORDS: usize = 118;
-const CMD_DOUBLE_SHIFT: usize = 119;
-const CMD_TYPING_SOUND: usize = 120;
-const CMD_REPLACEMENTS: usize = 121;
-const CMD_REPLACEMENTS_FILE: usize = 122;
-const CMD_F10_WRONG_WORDS: usize = 123;
-const CMD_CTRL_TAP: usize = 124;
-const CMD_MESSENGER_GUARD: usize = 125;
-const CMD_ONE_LANGUAGE: usize = 126;
-const CMD_ONE_LANGUAGE_FILE: usize = 127;
+// 2.0.0: the other commands of the menu (rules "only with a selection" and "enable again", bubble
+// preview, automatic update check, typing options, problem reports) moved to the settings window
 /// End of a timed pause (10 minutes).
 const TIMER_PAUSE_END: usize = 3;
 const TIMED_PAUSE_MS: u32 = 10 * 60 * 1000;
@@ -138,10 +117,6 @@ thread_local! {
     static LAST_FG: Cell<usize> = const { Cell::new(0) };
     /// 1.8.5: a keyboard hook removed by Windows could not be put back (alert on the icon)
     static HOOK_LOST: Cell<bool> = const { Cell::new(false) };
-}
-
-fn s_text_replacements_on() -> bool {
-    user_settings().text_replacements
 }
 
 /// 1.8.2: grey tray icon while the typing help sleeps in the foreground window. `None`: the
@@ -653,6 +628,8 @@ pub fn pause_for_a_while() {
     };
     log(&format!("Paused for 10 minutes (until {end})"));
     PAUSE_UNTIL.with(|p| *p.borrow_mut() = end);
+    update_tray(); // 2.0.0: "– paused until hh:mm" in the tip
+    settings_ui::refresh_status();
 }
 
 fn end_timed_pause(hwnd: HWND) {
@@ -682,8 +659,26 @@ fn set_rule(exe: &str, mode: Option<klf_core::settings::RuleMode>) {
         log(&format!("Rule for {exe}: {mode:?}"));
         apply_settings(s);
         settings_ui::refresh_status();
+        settings_ui::refresh_rules(); // the lists of the Apps tab, if the window is open
     } else {
         log("Rule could not be saved (settings.json)");
+    }
+}
+
+/// 2.0.0: "Fixer on" (settings window) and "Pause until resumed / Resume" (menu): `on` resumes
+/// (a timed pause ends too), otherwise pauses with no end. Nothing if already in that state.
+pub fn set_active(on: bool) {
+    let paused = hotkey_state() == HotkeyState::Paused;
+    if on && paused {
+        let hwnd = STATE.with(|s| s.hwnd.get());
+        // SAFETY: our window.
+        unsafe { KillTimer(hwnd, TIMER_PAUSE_END) };
+        PAUSE_UNTIL.with(|p| p.borrow_mut().clear());
+        toggle_pause();
+    } else if !on && !paused {
+        toggle_pause();
+    } else {
+        settings_ui::refresh_status(); // the box shows the state again
     }
 }
 
@@ -747,7 +742,14 @@ fn tray_data() -> NOTIFYICONDATAW {
             Some(m) => (format!("{}\n{}", text(l, m), text_with_key(l, Msg::TipReady, &key)), 2),
             None => (text_with_key(l, Msg::TipReady, &key), 1),
         },
-        HotkeyState::Paused => (text_with_key(l, Msg::TipPaused, &key), 2),
+        HotkeyState::Paused => {
+            let until = PAUSE_UNTIL.with(|p| p.borrow().clone());
+            if until.is_empty() {
+                (text_with_key(l, Msg::TipPaused, &key), 2)
+            } else {
+                (text(l, Msg::TipPausedUntil).replace("{time}", &until), 2)
+            }
+        }
         HotkeyState::Unavailable => (text_with_key(l, Msg::TipUnavailable, &key), 2),
     };
     // SAFETY: GetSystemMetrics has no pointers.
@@ -887,79 +889,38 @@ fn remove_tray() {
 /// `anchor`: where the shell asks the menu to open (1.9.9, audit 17/11: opened from the keyboard,
 /// Win+B then the Menu key, it opened where the mouse happened to be instead of at the icon).
 fn show_menu(hwnd: HWND, anchor: Option<(i32, i32)>) {
+    // 2.0.0: a flat menu of 6 to 9 lines (no submenu); everything else is in the settings window
     let l = lang();
     let paused = hotkey_state() == HotkeyState::Paused;
     let s = settings();
     let app = LAST_APP.with(|a| a.borrow().clone());
     let until = PAUSE_UNTIL.with(|p| p.borrow().clone());
-    let mut items: Vec<(usize, String, bool)> = vec![(CMD_SETTINGS, text(l, Msg::MenuSettings).to_string(), false), (0, String::new(), false)];
-    let school = klf_core::school::school_rule(&policy(), &app);
-    if klf_core::policy::rule_allowed_for(&app) {
-        let rule = s.rule_for(&app);
-        // shown as it is, shortened, & doubled (a menu would take it as a shortcut letter)
-        let shown: String = if app.chars().count() > 40 { app.chars().take(39).chain(std::iter::once('…')).collect() } else { app.clone() };
-        let shown = shown.replace('&', "&&");
-        let with_app = |m: Msg| text(l, m).replace("{app}", &shown);
-        items.push((CMD_RULE_DISABLE, with_app(Msg::MenuRuleDisable), rule == Some(klf_core::settings::RuleMode::Disabled)));
-        items.push((CMD_RULE_SELECTION, with_app(Msg::MenuRuleSelection), rule == Some(klf_core::settings::RuleMode::SelectionOnly)));
-        if rule.is_some() && !school {
-            items.push((CMD_RULE_REMOVE, with_app(Msg::MenuRuleRemove), false));
+    // (id, text, ticked, greyed)
+    let mut items: Vec<(usize, String, bool, bool)> = vec![(CMD_SETTINGS, text(l, Msg::MenuSettings).to_string(), false, false), (0, String::new(), false, false)];
+    if crate::update::allowed(true) && s.check_updates {
+        if let Some(r) = crate::update::OFFER.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref().filter(|_| !UPDATE_BUSY.load(Ordering::SeqCst)) {
+            items.push((CMD_INSTALL_UPDATE, text(l, Msg::MenuInstallUpdate).replace("{version}", r.tag.trim_start_matches('v')), false, false));
         }
-        items.push((0, String::new(), false));
+    }
+    if crate::host::parked_available() {
+        items.push((CMD_RESTORE_CLIP, text(l, Msg::MenuRestoreClipboard).to_string(), false, false));
     }
     if paused {
         let t = if until.is_empty() { text(l, Msg::MenuResume).to_string() } else { text(l, Msg::MenuResumeAt).replace("{time}", &until) };
-        items.push((CMD_PAUSE, t, false));
+        items.push((CMD_PAUSE, t, false, false));
     } else {
-        items.push((CMD_PAUSE10, text(l, Msg::MenuPause10).to_string(), false));
-        items.push((CMD_PAUSE, text(l, Msg::MenuPause).to_string(), false));
+        items.push((CMD_PAUSE10, text(l, Msg::MenuPause10).to_string(), false, false));
+        items.push((CMD_PAUSE, text(l, Msg::MenuPause).to_string(), false, false));
     }
-    if crate::update::allowed(true) {
-        let on = settings().check_updates;
-        if on {
-            if let Some(r) = crate::update::OFFER.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref().filter(|_| !UPDATE_BUSY.load(Ordering::SeqCst)) {
-                items.push((CMD_INSTALL_UPDATE, text(l, Msg::MenuInstallUpdate).replace("{version}", r.tag.trim_start_matches('v')), false));
-            }
-        }
-        items.push((CMD_CHECK_UPDATES, text(l, Msg::MenuCheckUpdates).to_string(), on));
+    if klf_core::policy::rule_allowed_for(&app) {
+        // a rule of the administrator is shown, ticked, but cannot be changed here
+        let school = klf_core::school::school_rule(&policy(), &app);
+        let rule = s.rule_for(&app);
+        items.push((CMD_RULE_DISABLE, menu_rule_text(l, &app), rule == Some(klf_core::settings::RuleMode::Disabled), school));
     }
-    if settings().show_bubble {
-        items.push((CMD_PREVIEW, text(l, Msg::MenuPreview).to_string(), settings().show_preview));
-    }
-    if crate::host::parked_available() {
-        items.push((CMD_RESTORE_CLIP, text(l, Msg::MenuRestoreClipboard).to_string(), false));
-    }
-    if crate::typing::allowed() {
-        items.push((CMD_F10_WRONG_WORDS, text(l, Msg::MenuF10WrongWords).to_string(), s.f10_only_wrong_words));
-        items.push((CMD_TYPING, text(l, Msg::MenuTyping).to_string(), s.typing_suggestions));
-        if s.typing_suggestions {
-            items.push((CMD_TYPING_WORDS, text(l, Msg::MenuTypingWords).to_string(), false));
-            items.push((CMD_TYPING_SOUND, text(l, Msg::MenuTypingSound).to_string(), s.typing_sound));
-        }
-        items.push((CMD_REPLACEMENTS, text(l, Msg::MenuReplacements).to_string(), s.text_replacements));
-        if s.text_replacements {
-            items.push((CMD_REPLACEMENTS_FILE, text(l, Msg::MenuReplacementsFile).to_string(), false));
-        }
-        items.push((CMD_DOUBLE_SHIFT, text(l, Msg::MenuDoubleShift).to_string(), s.double_shift_convert));
-        items.push((CMD_CTRL_TAP, text(l, Msg::MenuCtrlTap).to_string(), s.ctrl_tap_language));
-        if s.typing_suggestions {
-            items.push((CMD_MESSENGER_GUARD, text(l, Msg::MenuMessengerGuard).to_string(), s.messenger_guard));
-        }
-        items.push((CMD_ONE_LANGUAGE, text(l, Msg::MenuOneLanguage).to_string(), s.one_language_programs));
-        if s.one_language_programs {
-            items.push((CMD_ONE_LANGUAGE_FILE, text(l, Msg::MenuOneLanguageFile).to_string(), false));
-        }
-    }
-    let reports = crate::report::enabled();
-    if reports {
-        if crate::report::pending() {
-            items.push((CMD_REPORT_SEND, text(l, Msg::MenuSendReport).to_string(), false));
-        }
-        items.push((MENU_REPORTS, text(l, Msg::MenuReports).to_string(), false));
-    }
-    items.push((CMD_ABOUT, text(l, Msg::MenuAbout).to_string(), false));
-    items.push((0, String::new(), false));
-    items.push((CMD_EXIT, text(l, Msg::MenuExit).to_string(), false));
+    items.push((0, String::new(), false, false));
+    items.push((CMD_ABOUT, text(l, Msg::MenuAbout).to_string(), false, false));
+    items.push((CMD_EXIT, text(l, Msg::MenuExit).to_string(), false, false));
     MENU_APP.with(|m| *m.borrow_mut() = app);
     // SAFETY: menu created and destroyed here; strings live until TrackPopupMenu returns.
     unsafe {
@@ -967,31 +928,15 @@ fn show_menu(hwnd: HWND, anchor: Option<(i32, i32)>) {
         if menu.is_null() {
             return;
         }
-        let strings: Vec<(usize, Vec<u16>, bool)> = items.iter().map(|(id, t, c)| (*id, wide(t), *c)).collect();
-        for (id, w, check) in &strings {
+        let strings: Vec<(usize, Vec<u16>, bool, bool)> = items.iter().map(|(id, t, c, g)| (*id, wide(t), *c, *g)).collect();
+        for (id, w, check, grey) in &strings {
             if *id == 0 {
                 AppendMenuW(menu, MF_SEPARATOR, 0, null());
-            } else if *id == MENU_REPORTS {
-                let sub = CreatePopupMenu();
-                if !sub.is_null() {
-                    let mode = s.report_mode;
-                    let subs = [
-                        (CMD_REPORT_PROBLEM, wide(text(l, Msg::MenuReportProblem)), false),
-                        (CMD_REPORT_ALWAYS, wide(text(l, Msg::MenuReportAlways)), mode == klf_core::report::ALWAYS),
-                        (CMD_REPORT_NEVER, wide(text(l, Msg::MenuReportNever)), mode == klf_core::report::NEVER),
-                    ];
-                    for (sid, sw, sc) in &subs {
-                        AppendMenuW(sub, MF_STRING | if *sc { MF_CHECKED } else { 0 }, *sid, sw.as_ptr());
-                    }
-                    // the submenu is destroyed with the menu
-                    AppendMenuW(menu, MF_STRING | MF_POPUP, sub as usize, w.as_ptr());
-                }
             } else {
-                // a rule of the administrator is shown, ticked, but cannot be changed here
-                let grey = (school && matches!(*id, CMD_RULE_DISABLE | CMD_RULE_SELECTION)) || (*id == CMD_PREVIEW && locked().show_preview);
-                AppendMenuW(menu, MF_STRING | if *check { MF_CHECKED } else { 0 } | if grey { MF_GRAYED } else { 0 }, *id, w.as_ptr());
+                AppendMenuW(menu, MF_STRING | if *check { MF_CHECKED } else { 0 } | if *grey { MF_GRAYED } else { 0 }, *id, w.as_ptr());
             }
         }
+        // Settings… in bold: the default item (a double click on the icon opens it too)
         SetMenuDefaultItem(menu, CMD_SETTINGS as u32, 0);
         let mut pt = POINT { x: 0, y: 0 };
         match anchor {
@@ -1012,57 +957,19 @@ fn show_menu(hwnd: HWND, anchor: Option<(i32, i32)>) {
     }
 }
 
-thread_local! {
-    /// program named in the menu that was shown (the rule commands act on it)
-    static MENU_APP: RefCell<String> = const { RefCell::new(String::new()) };
+/// "Disable in {app}": the program name shown as it is, shortened, & doubled (a menu would take it
+/// as a shortcut letter). 2.0.0: in Hebrew the Latin name is isolated (LRI … PDI), or "Notepad++"
+/// would be drawn "++Notepad"; only in Hebrew, where it is needed.
+fn menu_rule_text(l: Lang, app: &str) -> String {
+    let shown: String = if app.chars().count() > 40 { app.chars().take(39).chain(std::iter::once('…')).collect() } else { app.to_string() };
+    let shown = shown.replace('&', "&&");
+    let shown = if l.is_rtl() { format!("\u{2066}{shown}\u{2069}") } else { shown };
+    text(l, Msg::MenuRuleDisable).replace("{app}", &shown)
 }
 
-pub fn show_about(owner: HWND) {
-    use windows_sys::Win32::UI::Controls::*;
-    let l = lang();
-    let body = text_with_key(l, Msg::AboutText, &key_name()).replace("{version}", klf_core::VERSION);
-    let title = wide(text(l, Msg::WindowTitle));
-    let body = wide(&body);
-    // 1.8.9: a real "Check for updates" button in the About box (a task dialog, not a message box)
-    const ID_CHECK: i32 = 200;
-    const ID_OK: i32 = 201;
-    let (t_check, t_close) = (wide(text(l, Msg::ButtonCheckUpdate)), wide(text(l, Msg::ButtonClose)));
-    let buttons = [TASKDIALOG_BUTTON { nButtonID: ID_CHECK, pszButtonText: t_check.as_ptr() }, TASKDIALOG_BUTTON { nButtonID: ID_OK, pszButtonText: t_close.as_ptr() }];
-    let mut flags = TDF_ALLOW_DIALOG_CANCELLATION;
-    if l.is_rtl() {
-        flags |= TDF_RTL_LAYOUT;
-    }
-    let icon = app_icon(32);
-    if !icon.is_null() {
-        flags |= TDF_USE_HICON_MAIN;
-    }
-    // SAFETY: a zeroed TASKDIALOGCONFIG is valid; every pointer lives until TaskDialogIndirect returns.
-    let mut cfg: TASKDIALOGCONFIG = unsafe { std::mem::zeroed() };
-    cfg.cbSize = std::mem::size_of::<TASKDIALOGCONFIG>() as u32;
-    cfg.hwndParent = owner;
-    cfg.dwFlags = flags;
-    cfg.pszWindowTitle = title.as_ptr();
-    cfg.Anonymous1.hMainIcon = icon;
-    cfg.pszContent = body.as_ptr();
-    cfg.cButtons = buttons.len() as u32;
-    cfg.pButtons = buttons.as_ptr();
-    cfg.nDefaultButton = ID_OK;
-    let mut pressed = 0i32;
-    // SAFETY: see above.
-    let hr = unsafe { TaskDialogIndirect(&cfg, &mut pressed, null_mut(), null_mut()) };
-    if hr < 0 {
-        // no task dialog (very old comctl32): the plain box, as before
-        let mut f = MB_OK | MB_ICONINFORMATION;
-        if l.is_rtl() {
-            f |= MB_RTLREADING | MB_RIGHT;
-        }
-        // SAFETY: valid strings.
-        unsafe { MessageBoxW(owner, body.as_ptr(), title.as_ptr(), f) };
-        return;
-    }
-    if pressed == ID_CHECK {
-        check_updates_now();
-    }
+thread_local! {
+    /// program named in the menu that was shown (the rule command acts on it)
+    static MENU_APP: RefCell<String> = const { RefCell::new(String::new()) };
 }
 
 fn request_exit(hwnd: HWND) {
@@ -1559,9 +1466,8 @@ fn on_done(hwnd: HWND) {
             };
             bubble::show(&shown, rtl, done.caret, done.target, msg == Msg::Converted);
         }
-        if s.play_sound && msg == Msg::Converted {
-            sys::beep();
-        }
+        // 2.0.0: the "fixed" sound is no longer played here (1 s late, after the wait that puts
+        // the clipboard back): the flow starts it at Ctrl+V (Host::fixed_sound)
     }
     if STATE.with(|s| s.exit_requested.get()) {
         // SAFETY: our window.
@@ -1607,7 +1513,9 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 // NOTIFYICON_VERSION_4: wParam holds the anchor (the click, or the icon when the
                 // menu is asked from the keyboard), as two signed 16-bit screen coordinates
                 WM_CONTEXTMENU => show_menu(hwnd, (wparam != 0).then_some(((wparam & 0xFFFF) as u16 as i16 as i32, ((wparam >> 16) & 0xFFFF) as u16 as i16 as i32))),
-                NIN_SELECT | NIN_KEYSELECT => settings_ui::open(),
+                // 2.0.0: a double click opens the settings too (version 4 sends NIN_SELECT for
+                // the first click, then WM_LBUTTONDBLCLK; an open window only comes to the front)
+                NIN_SELECT | NIN_KEYSELECT | WM_LBUTTONDBLCLK => settings_ui::open(),
                 // the only notification we show: "Send an anonymous report?" (1.6.1)
                 NIN_BALLOONUSERCLICK => crate::report::send_pending(hwnd),
                 _ => {}
@@ -1616,87 +1524,10 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
         }
         WM_COMMAND => {
             match wparam & 0xFFFF {
-                CMD_PAUSE => {
-                    if hotkey_state() == HotkeyState::Paused {
-                        // resuming by hand ends a timed pause too
-                        // SAFETY: our window.
-                        unsafe { KillTimer(hwnd, TIMER_PAUSE_END) };
-                        PAUSE_UNTIL.with(|p| p.borrow_mut().clear());
-                    }
-                    toggle_pause()
-                }
+                // pause until resumed / resume (a timed pause ends too)
+                CMD_PAUSE => set_active(hotkey_state() == HotkeyState::Paused),
                 CMD_PAUSE10 => pause_for_a_while(),
-                CMD_REPORT_SEND => crate::report::send_pending(hwnd),
-                CMD_TYPING_WORDS if crate::typing::allowed() => crate::typing::open_personal(),
-                CMD_REPLACEMENTS_FILE if crate::typing::allowed() => crate::typing::open_replacements(),
-                CMD_ONE_LANGUAGE_FILE if crate::typing::allowed() => crate::typing::open_one_language(),
-                CMD_CTRL_TAP | CMD_MESSENGER_GUARD | CMD_ONE_LANGUAGE if crate::typing::allowed() => {
-                    let mut s = user_settings();
-                    match wparam & 0xFFFF {
-                        CMD_CTRL_TAP => s.ctrl_tap_language = !s.ctrl_tap_language,
-                        CMD_MESSENGER_GUARD => s.messenger_guard = !s.messenger_guard,
-                        _ => s.one_language_programs = !s.one_language_programs,
-                    }
-                    if save_settings(&s) {
-                        apply_settings(s);
-                    }
-                }
-                CMD_F10_WRONG_WORDS if crate::typing::allowed() => {
-                    let mut s = user_settings();
-                    s.f10_only_wrong_words = !s.f10_only_wrong_words;
-                    if save_settings(&s) {
-                        apply_settings(s);
-                    }
-                }
-                CMD_TYPING_SOUND if crate::typing::allowed() => {
-                    let mut s = user_settings();
-                    s.typing_sound = !s.typing_sound;
-                    if save_settings(&s) {
-                        apply_settings(s);
-                    }
-                }
-                CMD_REPLACEMENTS if crate::typing::allowed() => {
-                    let mut s = user_settings();
-                    s.text_replacements = !s.text_replacements;
-                    if save_settings(&s) {
-                        apply_settings(s);
-                        if s_text_replacements_on() {
-                            crate::typing::open_replacements(); // empty at first: shows how to write one
-                        }
-                    }
-                }
-                CMD_DOUBLE_SHIFT if crate::typing::allowed() => {
-                    let mut s = user_settings();
-                    s.double_shift_convert = !s.double_shift_convert;
-                    if save_settings(&s) {
-                        apply_settings(s);
-                    }
-                }
-                CMD_TYPING if crate::typing::allowed() => {
-                    let mut s = user_settings();
-                    s.typing_suggestions = !s.typing_suggestions;
-                    if save_settings(&s) {
-                        apply_settings(s);
-                    }
-                }
-                CMD_REPORT_PROBLEM => crate::report::open(),
-                CMD_REPORT_ALWAYS => crate::report::set_mode(klf_core::report::ALWAYS),
-                CMD_REPORT_NEVER => crate::report::set_mode(klf_core::report::NEVER),
-                CMD_CHECK_UPDATES => {
-                    let mut s = user_settings();
-                    s.check_updates = !s.check_updates;
-                    if save_settings(&s) {
-                        apply_settings(s);
-                    }
-                }
                 CMD_INSTALL_UPDATE if !busy() => start_update_install(hwnd),
-                CMD_PREVIEW if !locked().show_preview => {
-                    let mut s = user_settings();
-                    s.show_preview = !s.show_preview;
-                    if save_settings(&s) {
-                        apply_settings(s);
-                    }
-                }
                 CMD_RESTORE_CLIP if !busy() => {
                     use klf_core::flow::RestoreResult;
                     let l = lang();
@@ -1709,20 +1540,16 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     log(&format!("Kept clipboard put back on request: {m:?}"));
                     bubble::show(text(l, m), l.is_rtl(), None, 0, m == Msg::ClipboardRestoredLater);
                 }
-                CMD_RULE_DISABLE | CMD_RULE_SELECTION | CMD_RULE_REMOVE => {
+                CMD_RULE_DISABLE => {
                     use klf_core::settings::RuleMode;
                     let app = MENU_APP.with(|m| m.borrow().clone());
-                    let mode = match wparam & 0xFFFF {
-                        CMD_RULE_DISABLE => Some(RuleMode::Disabled),
-                        CMD_RULE_SELECTION => Some(RuleMode::SelectionOnly),
-                        _ => None,
-                    };
-                    // clicking a ticked rule again removes it
-                    let mode = if mode.is_some() && settings().rule_for(&app) == mode { None } else { mode };
+                    // ticked: the rule is removed; otherwise "disabled" (also over "only with a selection")
+                    let mode = if settings().rule_for(&app) == Some(RuleMode::Disabled) { None } else { Some(RuleMode::Disabled) };
                     set_rule(&app, mode);
                 }
                 CMD_SETTINGS => settings_ui::open(),
-                CMD_ABOUT => show_about(null_mut()),
+                // 2.0.0: the About tab of the settings window (the About box is gone)
+                CMD_ABOUT => settings_ui::open_on(settings_ui::PAGE_ABOUT),
                 CMD_EXIT => request_exit(hwnd),
                 _ => {}
             }

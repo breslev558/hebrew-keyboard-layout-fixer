@@ -2,7 +2,8 @@
 //! administrator policy (school) nor on another install (same rule as the updates).
 //! - after a real error (clipboard not put back, paste failed) or a crash of the previous
 //!   session: a Windows notification asks "Send an anonymous report?"; one click sends it;
-//! - tray menu "Report a problem…": a window with an optional comment and EXACTLY what is sent;
+//! - "Report a problem…" (settings, Diagnostic tab; 2.0.0, was in the tray menu): a window with an
+//!   optional comment and EXACTLY what is sent;
 //! - "Send reports without asking" (off by default) and "Never offer a report".
 //!
 //! What is sent is built by klf-core/report.rs (fixed technical fields, never the text).
@@ -169,15 +170,11 @@ pub fn on_result(code: WPARAM) {
     crate::bubble::show(text(l, if code == 0 { Msg::ReportSent } else { Msg::ReportFailed }), l.is_rtl(), None, 0, code == 0);
 }
 
-/// Menu "Always send" / "Never offer": ticking one unticks the other.
-pub fn set_mode(mode: u32) {
-    let mut s = app::user_settings();
-    s.report_mode = if s.report_mode == mode { r::ASK } else { mode };
-    if s.report_mode == r::NEVER {
+/// 2.0.0: "Never offer a report" applied (settings window, Diagnostic tab): the waiting report is
+/// dropped, as the menu did before.
+pub fn mode_saved(mode: u32) {
+    if mode == r::NEVER {
         PENDING.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
-    }
-    if app::save_settings(&s) {
-        app::apply_settings(s);
     }
 }
 

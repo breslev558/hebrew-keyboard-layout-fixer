@@ -120,41 +120,69 @@ pub fn ui_langid() -> u16 {
 /// 1.8.5: the program's own short sounds (made by klf_core::sound, kept in memory for good):
 /// never the Windows error, warning or default sounds. Played asynchronously from memory (nothing
 /// to load, never blocks typing); SND_NODEFAULT: silence rather than another sound.
-fn play(wav: &'static [u8]) {
+/// A sound to play; `since`: the moment the fixed text was pasted (2.0.0: the delay is written).
+type SoundJob = (&'static [u8], Option<std::time::Instant>);
+
+/// The sound thread (made once, at start by `warm_sound`, or at the first sound).
+fn sound_sender() -> &'static std::sync::Mutex<Option<std::sync::mpsc::Sender<SoundJob>>> {
     use std::sync::mpsc::{channel, Sender};
     // one sound thread for good: loading the sound or a slow audio service never holds the UI
     // thread (which runs the keyboard hooks)
-    static TX: std::sync::OnceLock<std::sync::Mutex<Option<Sender<&'static [u8]>>>> = std::sync::OnceLock::new();
-    let tx = TX.get_or_init(|| {
-        let (tx, rx) = channel::<&'static [u8]>();
+    static TX: std::sync::OnceLock<std::sync::Mutex<Option<Sender<SoundJob>>>> = std::sync::OnceLock::new();
+    TX.get_or_init(|| {
+        let (tx, rx) = channel::<SoundJob>();
         let ok = std::thread::Builder::new().name("klf-sound".into()).spawn(move || {
             use windows_sys::Win32::Media::Audio::{PlaySoundW, SND_MEMORY, SND_NODEFAULT};
-            while let Ok(w) = rx.recv() {
+            while let Ok((w, since)) = rx.recv() {
+                if let Some(t) = since {
+                    // 2.0.0: no typed text, only the delay (the Windows test measures it)
+                    crate::util::log(&format!("Sound started ({} ms after Ctrl+V)", t.elapsed().as_millis()));
+                }
                 // SAFETY: static bytes; played to the end on this thread.
                 unsafe { PlaySoundW(w.as_ptr() as *const u16, null_mut(), SND_MEMORY | SND_NODEFAULT) };
             }
         });
         std::sync::Mutex::new(ok.is_ok().then_some(tx))
-    });
-    if let Some(t) = tx.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref() {
-        let _ = t.send(wav);
+    })
+}
+
+fn play(wav: &'static [u8], since: Option<std::time::Instant>) {
+    if let Some(t) = sound_sender().lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref() {
+        let _ = t.send((wav, since));
     }
 }
 
-/// A text was fixed (F10, or a fix while typing): two soft rising notes.
+fn fixed_wav() -> &'static [u8] {
+    static W: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+    W.get_or_init(klf_core::sound::fixed)
+}
+
+fn undone_wav() -> &'static [u8] {
+    static W: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+    W.get_or_init(klf_core::sound::undone)
+}
+
+/// 2.0.0: at start, the sounds are made and the sound thread is started, so that the first sound
+/// is not later than the others.
+pub fn warm_sound() {
+    let _ = (fixed_wav(), undone_wav());
+    let _ = sound_sender();
+}
+
+/// A text was fixed (a fix while typing, a quick toggle): the "bubble" sound.
 pub fn beep() {
-    static W: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
-    play(W.get_or_init(klf_core::sound::fixed));
+    play(fixed_wav(), None);
 }
 
-pub fn fix_sound() {
-    beep();
+/// 2.0.0: F10 / F9 fixed a text, pasted at `pasted` (or replaced in a terminal): the sound starts
+/// now, and the delay since the paste is written in the log.
+pub fn fixed_sound_since(pasted: std::time::Instant) {
+    play(fixed_wav(), Some(pasted));
 }
 
-/// A fix undone or toggled back: one lower, quieter note.
+/// A fix undone or toggled back: the shorter, softer falling sound.
 pub fn undo_sound() {
-    static W: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
-    play(W.get_or_init(klf_core::sound::undone));
+    play(undone_wav(), None);
 }
 
 /// Full path of the process exe (None if access is refused).

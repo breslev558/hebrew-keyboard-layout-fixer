@@ -1070,7 +1070,7 @@ fn fix() {
     }
     BUF.with(|b| b.borrow_mut().clear());
     if app::settings().typing_sound {
-        crate::platform::sys::fix_sound();
+        crate::platform::sys::beep();
     }
     log(&format!("Typing correction: {} word(s) fixed", p.s.text.split_whitespace().count()));
 }

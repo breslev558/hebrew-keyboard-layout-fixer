@@ -35,6 +35,8 @@ pub struct WinHost {
     /// the answer once it came (kept for the rest of this F10)
     late_sel: RefCell<Option<std::sync::mpsc::Receiver<Option<bool>>>>,
     late_answer: Cell<Option<bool>>,
+    /// 2.0.0: when Ctrl+V was sent (the fixed sound says how long after)
+    pasted_at: Cell<Option<std::time::Instant>>,
     /// diagnostic clock
     started: std::time::Instant,
     /// layout of the target at the press, and the Latin layout chosen for the conversion
@@ -122,6 +124,7 @@ impl WinHost {
             console: None,
             late_sel: RefCell::new(None),
             late_answer: Cell::new(None),
+            pasted_at: Cell::new(None),
             started: std::time::Instant::now(),
             layout_seen: Cell::new(None),
             latin_hkl: Cell::new(None),
@@ -312,7 +315,13 @@ impl Host for WinHost {
         input::select_to_line_start()
     }
     fn send_paste(&self) -> bool {
-        input::paste()
+        let ok = input::paste();
+        self.pasted_at.set(ok.then(std::time::Instant::now));
+        ok
+    }
+    fn fixed_sound(&self) {
+        // the moment of Ctrl+V; in a terminal (no Ctrl+V), the replacement just done
+        crate::platform::sys::fixed_sound_since(self.pasted_at.get().unwrap_or_else(std::time::Instant::now));
     }
     fn wrong_words_only(&self, text: &str, map: &klf_core::layouts::KeyMap, replace_caps: bool) -> Option<String> {
         crate::typing::wrong_words_only(text, map, replace_caps)

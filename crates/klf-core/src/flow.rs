@@ -194,6 +194,10 @@ pub trait Host {
     /// 1.8.5: Ctrl+V was just sent with `after` replacing `before` (the clipboard path): a quick
     /// next F10 may toggle it back without the clipboard.
     fn pasted(&self, _before: &str, _after: &str, _selected: bool) {}
+    /// 2.0.0: the fixed text is in the target NOW (Ctrl+V sent, or the terminal/console keys sent
+    /// and checked): the "fixed" sound starts here, once per fix, never after the wait before the
+    /// clipboard is put back. Called only when the sound is on (never blocks: queued).
+    fn fixed_sound(&self) {}
     /// 1.8.7: called once the keys are released and the window checked, before anything is
     /// copied (an autocompletion suggestion is taken away there).
     fn before_copy(&self) {}
@@ -919,6 +923,9 @@ fn convert_window_inner(
         return Outcome::say(Msg::KeysBlocked, "Ctrl+V not sent, NOT pasted");
     }
     st.our_selection = false; // replaced by the paste: never collapsed afterwards
+    if s.play_sound {
+        host.fixed_sound(); // 2.0.0: at the paste, not 1 s later (after the wait below)
+    }
     if s.action == Action::Layout {
         host.pasted(text, &out, false);
     }
@@ -1164,6 +1171,9 @@ fn terminal_send(host: &mut dyn Host, s: &AppSettings, target: usize, typed: &st
     }
     // confirmed on the screen: a second F10 toggles it back; otherwise forgotten
     let confirmed = terminal_shows(host, out).is_ok();
+    if s.play_sound {
+        host.fixed_sound(); // 2.0.0: the replacement is on the screen (or could not be read)
+    }
     // (adopted only if the user typed nothing since: our own keys never change the run)
     if confirmed && host.terminal_generation() == generation {
         host.terminal_adopt(out);
@@ -1316,6 +1326,9 @@ fn conhost_confirm(host: &mut dyn Host, s: &AppSettings, target: usize, typed: &
         }
     }
     crate::terminal::wipe_string(after);
+    if s.play_sound {
+        host.fixed_sound(); // 2.0.0: as soon as the replacement is seen (the loop stops there)
+    }
     if confirmed && host.terminal_generation() == generation {
         host.terminal_adopt(out);
     } else {
@@ -1738,6 +1751,9 @@ mod tests {
             self.ev("shifthome");
             *self.selected.borrow_mut() = self.line.clone();
             true
+        }
+        fn fixed_sound(&self) {
+            self.ev("sound");
         }
         fn send_paste(&self) -> bool {
             self.ev("paste");
@@ -2398,6 +2414,34 @@ mod tests {
         let o = run(&mut m, &s);
         assert_eq!(o.msg, Some(Msg::Converted), "{}", o.log);
         assert_eq!(m.c_replaced.borrow().clone(), Some((3, "Dir".to_string())));
+    }
+
+    /// 2.0.0: the "fixed" sound starts right at Ctrl+V (before the wait that puts the clipboard
+    /// back), once per fix, and only when the sound is on; in a terminal or a console, once too.
+    #[test]
+    fn fixed_sound_starts_at_the_paste_once() {
+        let count = |m: &Mock| m.events.borrow().iter().filter(|e| *e == "sound").count();
+        let mut m = Mock::new();
+        let o = run(&mut m, &AppSettings { play_sound: true, ..settings() });
+        assert_eq!(o.msg, Some(Msg::Converted), "{}", o.log);
+        assert_eq!(count(&m), 1);
+        let ev = m.events.borrow().clone();
+        let p = ev.iter().position(|e| e == "paste").unwrap();
+        assert_eq!(ev.get(p + 1).map(String::as_str), Some("sound"), "{ev:?}");
+        let mut m = Mock::new();
+        run(&mut m, &AppSettings { play_sound: false, ..settings() });
+        assert_eq!(count(&m), 0, "sound off: never");
+        let (mut m, s) = terminal_mock();
+        let o = run(&mut m, &AppSettings { play_sound: true, ..s });
+        assert_eq!(o.msg, Some(Msg::Converted), "{}", o.log);
+        assert_eq!(count(&m), 1, "terminal");
+        let mut m = console();
+        *m.t_typed.borrow_mut() = Some(("dIR".into(), 7));
+        *m.c_screen.borrow_mut() = "C:\\>dIR".into();
+        m.c_cursor.set((7, 0, 120));
+        let o = run(&mut m, &AppSettings { action: Action::Case, play_sound: true, ..settings() });
+        assert_eq!(o.msg, Some(Msg::Converted), "{}", o.log);
+        assert_eq!(count(&m), 1, "console");
     }
 
     // Audit tests: expected user-facing safety properties, deliberately not implementation mirrors.

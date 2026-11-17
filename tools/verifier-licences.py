@@ -9,6 +9,8 @@ meta = json.loads(subprocess.run(["cargo", "metadata", "--format-version", "1", 
 bad = []
 for p in sorted(meta["packages"], key=lambda p: p["name"]):
     lic = p.get("license") or ""
+    # 1.9.9: the old Cargo form "MIT/Apache-2.0" means "MIT OR Apache-2.0" (core_detect, under proptest)
+    lic = lic.replace("/", " OR ")
     # "(MIT OR Apache-2.0) AND Unicode-3.0": every AND part needs one allowed licence
     parts = [x for x in re.split(r"\bAND\b", lic.replace("(", "").replace(")", "")) if x.strip()]
     ok = bool(parts) and all(any(o.strip() in ALLOWED for o in part.split("OR")) for part in parts)

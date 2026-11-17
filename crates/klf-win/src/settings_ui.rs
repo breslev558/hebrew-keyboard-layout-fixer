@@ -216,6 +216,69 @@ fn make_fonts(dpi: u32) {
     }
 }
 
+/// 1.9.9 (Windows test of 17/11): a screen reader names a classic control after the label just
+/// before it; the bubble position list (next to its check box) and the tab strip had no name. The
+/// name is given through oleacc's dynamic annotation (IAccPropServices::SetHwndPropStr), and
+/// cleared at WM_DESTROY.
+const CLSID_ACC_PROP_SERVICES: windows_sys::core::GUID = windows_sys::core::GUID::from_u128(0xb5f8350b_0548_48b1_a6ee_88bd00b4a5e7);
+const IID_IACC_PROP_SERVICES: windows_sys::core::GUID = windows_sys::core::GUID::from_u128(0x6e26e776_04f0_495d_80e4_3330352e3169);
+const PROPID_ACC_NAME_: windows_sys::core::GUID = windows_sys::core::GUID::from_u128(0x608d3df8_8128_4aa7_a428_f55e49267291);
+const NAMED_IDS: [i32; 2] = [ID_BUBBLE_POS, ID_TAB];
+
+/// Runs `f` with an IAccPropServices (nothing if COM or the service is not available).
+fn with_acc_props(f: impl FnOnce(*mut std::ffi::c_void)) {
+    use windows_sys::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED};
+    thread_local! { static COM: Cell<bool> = const { Cell::new(false) }; }
+    // SAFETY: COM for this (UI) thread, once, never uninitialized while the thread lives
+    // (RPC_E_CHANGED_MODE = already multithreaded: usable as it is); the object is released here;
+    // IUnknown::Release is method 2.
+    unsafe {
+        if !COM.with(|c| c.replace(true)) {
+            CoInitializeEx(null(), COINIT_APARTMENTTHREADED as u32);
+        }
+        let mut p: *mut std::ffi::c_void = null_mut();
+        if CoCreateInstance(&CLSID_ACC_PROP_SERVICES, null_mut(), CLSCTX_INPROC_SERVER, &IID_IACC_PROP_SERVICES, &mut p) < 0 || p.is_null() {
+            return;
+        }
+        f(p);
+        let vtbl = *(p as *const *const usize);
+        let release: unsafe extern "system" fn(*mut std::ffi::c_void) -> u32 = std::mem::transmute(*vtbl.add(2));
+        release(p);
+    }
+}
+
+fn set_acc_names(l: Lang) {
+    let names = [(ID_BUBBLE_POS, text(l, Msg::NameBubblePosition)), (ID_TAB, text(l, Msg::NameSettingsPages))];
+    with_acc_props(|p| {
+        type SetHwndPropStr = unsafe extern "system" fn(*mut std::ffi::c_void, HWND, u32, u32, windows_sys::core::GUID, *const u16) -> i32;
+        // SAFETY: IAccPropServices (IUnknown 3, SetPropValue, SetPropServer, ClearProps, SetHwndProp,
+        // then SetHwndPropStr = method 7); OBJID_CLIENT, CHILDID_SELF; the string is copied by oleacc.
+        unsafe {
+            let vtbl = *(p as *const *const usize);
+            let set: SetHwndPropStr = std::mem::transmute(*vtbl.add(7));
+            for (id, name) in names {
+                let w = wide(name);
+                set(p, item(id), OBJID_CLIENT as u32, CHILDID_SELF, PROPID_ACC_NAME_, w.as_ptr());
+            }
+        }
+    });
+}
+
+fn clear_acc_names() {
+    with_acc_props(|p| {
+        type ClearHwndProps = unsafe extern "system" fn(*mut std::ffi::c_void, HWND, u32, u32, *const windows_sys::core::GUID, i32) -> i32;
+        // SAFETY: IAccPropServices::ClearHwndProps is method 9 (after SetHwndPropStr 7 and
+        // SetHwndPropServer 8, oleacc.idl; avis Fable); one property id in the array.
+        unsafe {
+            let vtbl = *(p as *const *const usize);
+            let clear: ClearHwndProps = std::mem::transmute(*vtbl.add(9));
+            for id in NAMED_IDS {
+                clear(p, item(id), OBJID_CLIENT as u32, CHILDID_SELF, &PROPID_ACC_NAME_, 1);
+            }
+        }
+    });
+}
+
 /// 1.8.9: technical text (diagnostic, program names, numbers) always left to right, even in the
 /// Hebrew window. The window does not hand its mirroring down (WS_EX_NOINHERITLAYOUT): every
 /// other control is mirrored here, one by one. (1.8.5 took the mirroring off AFTER creation, which
@@ -567,6 +630,7 @@ fn layouts_line(l: Lang) -> String {
 fn fill_controls() {
     let s = app::settings();
     let l = app::lang_of(&s);
+    set_acc_names(l);
     for (i, m) in [Msg::TabSimple, Msg::TabAdvanced, Msg::TabDiagnostic].iter().enumerate() {
         let mut t = wide(text(l, *m));
         // SAFETY: TCITEMW read during the call; text buffer alive.
@@ -1117,6 +1181,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             0
         }
         WM_DESTROY => {
+            clear_acc_names();
             HWND_.with(|c| c.set(null_mut()));
             0
         }

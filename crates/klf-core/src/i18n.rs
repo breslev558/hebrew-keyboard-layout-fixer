@@ -91,6 +91,9 @@ pub enum Msg {
     CheckConsole,
     /// 1.9.5
     CheckTerminal,
+    /// 1.9.9: names for a screen reader (the bubble position list, the tab strip of the settings)
+    NameBubblePosition,
+    NameSettingsPages,
     CheckAutostart,
     AutostartManaged,
     LabelLanguage,
@@ -215,7 +218,7 @@ pub const ALL_MSGS: &[Msg] = &[
     Msg::WindowTitle, Msg::StatusReady, Msg::StatusPaused, Msg::StatusUnavailable, Msg::ButtonPause,
     Msg::ButtonResume, Msg::LabelHotkey, Msg::LabelDirection, Msg::DirectionAuto, Msg::DirectionToHebrew,
     Msg::DirectionToEnglish, Msg::LabelTry, Msg::LabelResult, Msg::CheckSwitchLanguage, Msg::CheckBubble, Msg::BubbleTop, Msg::BubbleBottom, Msg::BubbleCaret,
-    Msg::CheckSound, Msg::CheckConsole, Msg::CheckTerminal, Msg::CheckAutostart, Msg::AutostartManaged, Msg::LabelLanguage,
+    Msg::CheckSound, Msg::CheckConsole, Msg::CheckTerminal, Msg::NameBubblePosition, Msg::NameSettingsPages, Msg::CheckAutostart, Msg::AutostartManaged, Msg::LabelLanguage,
     Msg::LanguageAuto, Msg::ButtonSave, Msg::ButtonClose, Msg::ButtonAbout, Msg::HotkeyInvalid, Msg::SaveFailed, Msg::AutostartFailed, Msg::AboutText, Msg::IndicatorCapsOn, Msg::IndicatorCapsOff, Msg::CheckIndicator, Msg::SchoolManaged, Msg::ButtonExport, Msg::ButtonImport, Msg::ButtonUndoImport, Msg::ImportConfirm, Msg::ImportNothing, Msg::ImportFailed, Msg::ImportTooBig, Msg::ImportNotJson, Msg::ImportUnknownFormat, Msg::ImportNewerFormat, Msg::ImportUnreadable, Msg::MenuRestoreClipboard, Msg::MenuCheckUpdates, Msg::MenuPreview, Msg::WelcomeTitle, Msg::WelcomeText, Msg::WelcomeTry, Msg::WelcomeClose, Msg::WelcomeNoMore, Msg::MenuInstallUpdate, Msg::UpdateAvailable, Msg::UpdateInstalling, Msg::UpdateFailed, Msg::ClipboardRestoredLater, Msg::ClipboardNotRestoredNewCopy, Msg::ImportDone, Msg::ExportDone, Msg::UndoConfirm, Msg::UndoNone, Msg::CheckLastWord, Msg::TabSimple, Msg::TabAdvanced, Msg::TabDiagnostic, Msg::LabelHotkeyLayout, Msg::LabelHotkeyCase, Msg::LabelWorkshop, Msg::WorkFollow, Msg::WorkToLatin, Msg::WorkToHebrew, Msg::WorkCase, Msg::ButtonCopyResult, Msg::LabelText, Msg::CheckCareful, Msg::CheckCapsOff, Msg::LabelLimit, Msg::LabelDelay, Msg::LabelExcluded, Msg::NumberInvalid, Msg::DiagNone, Msg::DiagLast, Msg::ButtonCopyDiag, Msg::ButtonRefresh, Msg::DiagCopied, Msg::CopyFailed, Msg::LayoutsLine, Msg::MenuReports, Msg::MenuReportProblem, Msg::MenuSendReport, Msg::MenuReportAlways, Msg::MenuReportNever, Msg::ReportAskTitle, Msg::ReportAskText, Msg::ReportSent, Msg::ReportFailed, Msg::ReportDialogText, Msg::ReportPreviewLabel, Msg::ReportSend, Msg::ReportCancel, Msg::MenuTyping, Msg::TypingReady, Msg::TypingFailed, Msg::MenuTypingWords, Msg::TypingUndone, Msg::TypingWordsHelp, Msg::MenuDoubleShift, Msg::MenuTypingSound, Msg::QuickBrake, Msg::HookBrake, Msg::MenuCtrlTap, Msg::MenuMessengerGuard, Msg::MessengerWarning, Msg::MenuOneLanguage, Msg::MenuOneLanguageFile, Msg::OneLanguageHelp, Msg::TypingRestored, Msg::HookLost, Msg::MenuF10WrongWords, Msg::DormantFullscreen, Msg::DormantExcluded, Msg::DormantCodeEditor, Msg::DormantSensitive, Msg::MenuReplacements, Msg::MenuReplacementsFile, Msg::ReplacementsHelp, Msg::ButtonCheckUpdate, Msg::UpdateUpToDate, Msg::UpdateCheckFailed, Msg::UpdatesManaged,
 ];
 
@@ -401,6 +404,12 @@ pub fn text(lang: Lang, m: Msg) -> &'static str {
         (CheckTerminal, He) => "תקן גם בטרמינלים: cmd, PowerShell, Windows Terminal\u{200F}",
         (CheckTerminal, Fr) => "Corriger aussi dans les terminaux : cmd, PowerShell, Windows Terminal",
         (CheckTerminal, En) => "Also fix in terminals: cmd, PowerShell, Windows Terminal",
+        (NameBubblePosition, He) => "מיקום ההודעה הקטנה",
+        (NameBubblePosition, Fr) => "Position de la bulle",
+        (NameBubblePosition, En) => "Bubble position",
+        (NameSettingsPages, He) => "עמודי ההגדרות",
+        (NameSettingsPages, Fr) => "Pages des réglages",
+        (NameSettingsPages, En) => "Settings pages",
         (CheckAutostart, He) => "הפעל בעת הכניסה ל-Windows\u{200F}",
         (CheckAutostart, Fr) => "Démarrer avec Windows",
         (CheckAutostart, En) => "Start with Windows",

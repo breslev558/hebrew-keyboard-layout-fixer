@@ -104,7 +104,25 @@ function Ouvrir($script, $cmd = $false) {
 }
 function Journal($n0) { @(Get-Content $log -ErrorAction SilentlyContinue) | Select-Object -Skip $n0 }
 function Lignes($n0) { Journal $n0 | Where-Object { $_ -match 'Terminal|User input|changed|nothing done|Console' } | ForEach-Object { Write-Host "       $(($_ -split '\] ', 2)[1])" } }
-function F10() { [T]::Key(0x79); Start-Sleep -Milliseconds 1500 }
+# 1.9.9 (7th trial: « Tab avant F10 » with NOTHING in the journal): before each F10, which window is in
+# front and whether the program runs are written; the console is brought back in front first if it is
+# not (and that is written too); after it, « never received » is told apart from « received and refused »
+function F10() {
+  $fg = [T]::GetForegroundWindow(); $sb = New-Object Text.StringBuilder 64; [void][W]::GetClassName($fg, $sb, 64)
+  $vivant = [bool](Get-Process KeyboardLayoutFixer -ErrorAction SilentlyContinue)
+  Write-Host ("       avant F10 : premier plan {0} 0x{1:X} (console 0x{2:X}, la meme : {3}) ; programme en marche : {4}" -f $sb, [int64]$fg, [int64]$script:h, ($fg -eq $script:h), $vivant)
+  if ($fg -ne $script:h) {
+    $t = 0; while (-not [T]::Front($script:h) -and $t++ -lt 10) { Start-Sleep -Milliseconds 300 }
+    Write-Host "       (console remise au premier plan avant F10 : $([T]::GetForegroundWindow() -eq $script:h))"
+  }
+  $script:n10 = @(Get-Content $log -ErrorAction SilentlyContinue).Count
+  [T]::Key(0x79); Start-Sleep -Milliseconds 1500
+}
+# what the program wrote for the last F10: nothing at all = the key never reached it
+function Recu() {
+  $l = @(Journal $script:n10 | Where-Object { $_ -match 'Console|Terminal|Timing|Hotkey|nothing done|changed' })
+  if ($l.Count -eq 0) { 'F10 JAMAIS RECU par le programme (rien au journal)' } else { "F10 recu : $((($l[-1]) -split '\] ', 2)[1])" }
+}
 function Entree() { [T]::Key(0x0D); Start-Sleep 2 }
 function Lu() { if (Test-Path $out) { (Get-Content -Encoding UTF8 $out -Raw).Trim() } else { '(rien écrit)' } }
 $shalom = [string][char]0x05E9 + [char]0x05DC + [char]0x05D5 + [char]0x05DD
@@ -145,7 +163,7 @@ $n0 = @(Get-Content $log).Count
 [T]::Word('akuo'); [T]::Typed(0x09); Start-Sleep -Milliseconds 500; F10
 $j = Journal $n0; Lignes $n0
 if ($j -match 'characters replaced') { Fail 'Tab : du texte a été remplacé' }
-if (-not ($j -match 'Console: nothing followed')) { Fail 'Tab : refus attendu « nothing followed »' }
+if (-not ($j -match 'Console: nothing followed')) { Fail "Tab : refus attendu « nothing followed » ; $(Recu)" }
 Entree
 $results += 'OK    console : Tab avant F10, rien fait'
 

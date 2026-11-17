@@ -1,6 +1,8 @@
 # Changelog
 
 ## 1.9.9 (November 2026)
+- **Settings texts no longer cut** (found by the new Windows check): the terminal box is shorter ("Also fix in terminals: cmd, PowerShell, Windows Terminal"), the keyboards line of the Diagnostic page wraps on two lines, and the French "Convertisseur :" label is wider.
+- **Screen readers**: the bubble position list and the tab strip of the settings now have a name.
 - **Tray menu from the keyboard**: opened with Win+B and the Menu key (or Shift+F10) on the icon, the menu now appears at the icon instead of wherever the mouse happened to be.
 - In the classic console, a text that the conversion leaves unchanged is now wiped from memory too, like every other one; the conversion no longer leaves smaller copies of the text behind while it builds its result.
 - PRIVACY.md and THREAT_MODEL.md now say 15 seconds (the real delay after which keys followed in a terminal are forgotten), and that the converted text kept for a second F10 is wiped but not locked in memory.

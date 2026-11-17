@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.9.8 (November 2026)
+- **F10 faster in Chrome, Edge and Electron apps when the page is busy**: to know whether text is selected, the program asks Windows accessibility, waiting 60 ms. When the page answered later (a busy page, or its accessibility waking up), F10 waited 400 ms for a copy that never came: about half a second before the fix, seen several times in real use. Now the late answer is still listened to while the copy is awaited: nothing selected ends the wait at once, and a selection seen late gets the full wait and is never extended to the start of the line.
+- The Windows test makes the page's accessibility answer 100 ms late, in Edge and Chrome, with and without a selection: under 300 ms until the paste (about 500 ms before).
+
 ## 1.9.7 (November 2026)
 - **When careful mode refuses, the bubble now says so**: "Careful mode is on: select the text, or untick it in Settings > Advanced" (or names the rule set for the program in the icon menu), instead of a bare "Select the text". With careful mode off (the default), F10 takes the text before the cursor by itself.
 - **F10 at the start of a wrapped line** (Edge and apps that expose their text to Windows accessibility): when the cursor was at the start of a displayed line in the middle of a paragraph, Shift+Home took nothing and nothing was fixed. Now, only when Windows accessibility shows text right before the cursor (no line break), the line above is taken; a line break there is refused.

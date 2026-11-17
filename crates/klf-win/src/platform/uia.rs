@@ -4,7 +4,7 @@
 //! does not come in time counts as "maybe a password" (nothing is proposed).
 
 use std::ffi::c_void;
-use std::sync::mpsc::{channel, Sender};
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Mutex, OnceLock};
 use windows_sys::core::GUID;
 use windows_sys::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED};
@@ -343,10 +343,12 @@ pub fn focused_is_password(reply: Sender<Option<bool>>) {
 
 /// 1.9.2: is the selection of the focused field empty? Waits at most `ms` (worker thread only, never
 /// the hook thread). None: unknown, or no answer in time.
-pub fn selection_empty(ms: u64) -> Option<bool> {
+/// 1.9.8: asks whether the selection is empty without waiting; the answer comes on the receiver
+/// (None inside = could not be told). The asker may keep it after its own short wait (late answer).
+pub fn selection_empty_later() -> Receiver<Option<bool>> {
     let (tx, rx) = channel();
     send(Kind::SelectionEmpty, tx);
-    rx.recv_timeout(std::time::Duration::from_millis(ms)).ok().flatten()
+    rx
 }
 
 /// 1.9.5: the text just before the cursor in the focused Windows Terminal control of process
@@ -362,6 +364,23 @@ pub fn terminal_before_caret(n: usize, pid: u32, ms: u64) -> Result<String, &'st
 /// waiting at most `ms`; Err(why) when it cannot be told (no text pattern, selection, no answer).
 pub fn before_caret(n: usize, ms: u64) -> Result<String, &'static str> {
     terminal_before_caret(n, 0, ms)
+}
+
+/// 1.9.8: Windows test only (environment KLF_TEST_UIA_DELAY_MS, 1 to 1000, at start): the answer
+/// about the selection comes that much later, like a busy Chrome (the slow F10 of 12-16/11).
+fn test_delay() {
+    static MS: OnceLock<u64> = OnceLock::new();
+    let ms = *MS.get_or_init(|| {
+        let ms = std::env::var("KLF_TEST_UIA_DELAY_MS").ok().and_then(|v| v.parse().ok()).filter(|m| (1..=1000).contains(m)).unwrap_or(0);
+        if ms > 0 {
+            // never silent: a forgotten variable would make slow F10s without a reason
+            crate::util::log(&format!("TEST: KLF_TEST_UIA_DELAY_MS set, accessibility answers {ms} ms late"));
+        }
+        ms
+    });
+    if ms > 0 {
+        std::thread::sleep(std::time::Duration::from_millis(ms));
+    }
 }
 
 /// 1.9.3: the UI Automation thread is answering a question.
@@ -415,7 +434,10 @@ fn send(kind: Kind, reply: Sender<Option<bool>>) {
                 } else {
                     match &q.0 {
                         Kind::Password => ask(automation),
-                        Kind::SelectionEmpty => ask_selection_empty(automation),
+                        Kind::SelectionEmpty => {
+                            test_delay();
+                            ask_selection_empty(automation)
+                        }
                         Kind::Terminal(n, pid, r) => {
                             // an answer nobody waits for any more is wiped
                             if let Err(std::sync::mpsc::SendError(Ok(late))) = r.send(ask_terminal(automation, *n, *pid)) {

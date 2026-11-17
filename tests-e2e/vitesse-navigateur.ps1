@@ -377,6 +377,22 @@ foreach ($n in $navs) {
     if ([Math]::Abs($br.T - $my) -gt 200 -or [Math]::Abs($br.L - $mx) -gt 400) { Fail "bulle : loin de la souris ($($br.L),$($br.T))" }
     $resultats += 'OK    nouvelle Edge, bulle pres de la souris (curseur de texte inconnu)'
   }
+  # 1.9.8 : accessibilite lente (reponse de UI Automation retardee de 100 ms, comme Chrome occupe lors des
+  # 4 F10 lents vus sur 2 PC en usage reel les 12-16/11 : 430 ms attendus pour rien). La reponse tardive
+  # doit mettre fin a l'attente de la copie : moins de 300 ms jusqu'au collage (1.9.7 : environ 500 ms).
+  $n5 = @(Get-Content $log).Count
+  $env:KLF_TEST_UIA_DELAY_MS = '100'
+  try {
+    Lancer $exe
+    $resultats += Mediane3 'nouvelle' "$v, accessibilite lente, sans selection" $sans $shalom 300
+    $resultats += Mediane3 'nouvelle' "$v, accessibilite lente, avec selection" $avec $shalom 300
+    $tard = @(@(Get-Content $log) | Select-Object -Skip $n5 | Where-Object { $_ -match 'copy not awaited' }).Count
+  } finally {
+    Remove-Item Env:KLF_TEST_UIA_DELAY_MS -ErrorAction SilentlyContinue
+    Lancer $exe
+  }
+  Write-Host "INFO $v, accessibilite lente : $tard reponse(s) tardive(s) 'rien de selectionne' utilisee(s)"
+  if ($tard -lt 1) { Fail "$v, accessibilite lente : la reponse tardive n'a jamais servi (cas non reproduit)" }
   $vus = @(Get-Content $log) | Select-Object -Skip $nlog | Where-Object { $_ -match 'Focus moved|Text caret moved|User input during' }
   Write-Host "INFO $v : $($vus.Count) changement(s) de focus vus par la nouvelle version"; $vus | ForEach-Object { Write-Host "       $(($_ -split '\] ', 2)[1])" }
   Fermer $n.Exe

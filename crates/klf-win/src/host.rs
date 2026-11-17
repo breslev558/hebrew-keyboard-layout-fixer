@@ -31,6 +31,10 @@ pub struct WinHost {
     /// keyboard layout of the target before `switch_language` (to put it back)
     lang_before: Cell<Option<usize>>,
     console: Option<console::Session>,
+    /// 1.9.8: question about the selection still unanswered after the 60 ms of target_info, and
+    /// the answer once it came (kept for the rest of this F10)
+    late_sel: RefCell<Option<std::sync::mpsc::Receiver<Option<bool>>>>,
+    late_answer: Cell<Option<bool>>,
     /// diagnostic clock
     started: std::time::Instant,
     /// layout of the target at the press, and the Latin layout chosen for the conversion
@@ -116,6 +120,8 @@ impl WinHost {
             lang_before: Cell::new(None),
             caps_at_hotkey,
             console: None,
+            late_sel: RefCell::new(None),
+            late_answer: Cell::new(None),
             started: std::time::Instant::now(),
             layout_seen: Cell::new(None),
             latin_hkl: Cell::new(None),
@@ -190,6 +196,9 @@ impl Host for WinHost {
         self.caret.set(Some(target::caret_of(self.target.get())));
     }
     fn target_info(&self, hwnd: usize) -> TargetInfo {
+        // 1.9.8: a question of an earlier call never answers this one
+        *self.late_sel.borrow_mut() = None;
+        self.late_answer.set(None);
         self.target.set(h(hwnd));
         self.focus.set(target::focus_of(h(hwnd)));
         *self.pids.borrow_mut() = target::pids_of(h(hwnd));
@@ -197,13 +206,39 @@ impl Host for WinHost {
         // 1.9.2: in a web page or an Electron app the selection is asked to UI Automation (60 ms at
         // most): nothing selected = no Ctrl+C to wait for, the line is taken at once
         if matches!(info.selection, None | Some(klf_core::policy::Selection::Unknown)) && klf_core::policy::copies_nothing_without_selection(&info.focus_class) {
-            info.selection = match crate::platform::uia::selection_empty(60) {
-                Some(true) => Some(klf_core::policy::Selection::Empty),
-                Some(false) => Some(klf_core::policy::Selection::NonEmpty),
-                None => info.selection,
+            let rx = crate::platform::uia::selection_empty_later();
+            info.selection = match rx.recv_timeout(std::time::Duration::from_millis(60)) {
+                Ok(Some(true)) => Some(klf_core::policy::Selection::Empty),
+                Ok(Some(false)) => Some(klf_core::policy::Selection::NonEmpty),
+                Ok(None) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => info.selection,
+                // 1.9.8: too slow (Chrome busy or waking its accessibility): the answer is still
+                // watched during the first copy instead of waiting 400 ms for nothing
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    *self.late_sel.borrow_mut() = Some(rx);
+                    info.selection
+                }
             };
         }
         info
+    }
+    fn late_selection_empty(&self) -> Option<bool> {
+        if let Some(a) = self.late_answer.get() {
+            return Some(a);
+        }
+        let mut slot = self.late_sel.borrow_mut();
+        let got = match slot.as_ref().map(|rx| rx.try_recv()) {
+            Some(Ok(Some(a))) => Some(a),
+            Some(Ok(None)) | Some(Err(std::sync::mpsc::TryRecvError::Disconnected)) => {
+                *slot = None;
+                None
+            }
+            _ => None,
+        };
+        if got.is_some() {
+            *slot = None;
+            self.late_answer.set(got);
+        }
+        got
     }
     fn pause(&self, ms: u64) {
         std::thread::sleep(std::time::Duration::from_millis(ms));
@@ -271,6 +306,9 @@ impl Host for WinHost {
         input::copy()
     }
     fn send_select_to_line_start(&self) -> bool {
+        // our own selection keys: a later answer about the selection would no longer be true
+        *self.late_sel.borrow_mut() = None;
+        self.late_answer.set(None);
         input::select_to_line_start()
     }
     fn send_paste(&self) -> bool {
@@ -303,6 +341,8 @@ impl Host for WinHost {
         }
     }
     fn send_extend_up(&self) -> bool {
+        *self.late_sel.borrow_mut() = None;
+        self.late_answer.set(None);
         input::select_up_to_line_start()
     }
     fn send_shrink_down(&self) -> bool {

@@ -331,6 +331,13 @@ pub trait Host {
     fn chars_before_caret(&self, _n: usize) -> Result<String, &'static str> {
         Err("not available")
     }
+    /// 1.9.8: the answer of UI Automation about the selection, when it came AFTER the short wait
+    /// of target_info (Chrome busy or waking its accessibility): Some(true) nothing selected,
+    /// Some(false) a selection, None no answer yet. Asked again and again during the first copy;
+    /// once an answer came it stays the same for the rest of this F10.
+    fn late_selection_empty(&self) -> Option<bool> {
+        None
+    }
     /// 1.9.5: the converted text was confirmed on the screen (a second F10 toggles it back).
     fn terminal_adopt(&self, _text: &str) {}
     /// 1.9.5: the run is forgotten (not confirmed: nothing more is done until retyped).
@@ -547,7 +554,7 @@ enum Copy {
 
 /// Ctrl+C in the target, then waits for a REAL clipboard change.
 fn copy_selection(host: &mut dyn Host, target: usize, st: &mut ClipState) -> Copy {
-    copy_selection_within(host, target, st, COPY_WAIT_MS)
+    copy_selection_within(host, target, st, COPY_WAIT_MS, false)
 }
 
 /// 1.9.2: the FIRST Ctrl+C when the selection is unknown, in a web page or an Electron app (Chrome,
@@ -555,8 +562,14 @@ fn copy_selection(host: &mut dyn Host, target: usize, st: &mut ClipState) -> Cop
 /// whole 1.5 s before taking the line (1 to 3 s in a browser, instant in Notepad). A real
 /// selection is copied there in a few tens of ms.
 pub const COPY_WAIT_UNKNOWN_WEB_MS: u64 = 400;
+/// 1.9.8: least wait after Ctrl+C before a late "nothing selected" of UI Automation is believed.
+pub const LATE_EMPTY_FLOOR_MS: u64 = 50;
 
-fn copy_selection_within(host: &mut dyn Host, target: usize, st: &mut ClipState, wait_ms: u64) -> Copy {
+/// `late_hint` (1.9.8, first Ctrl+C with the selection unknown in a web page): while the copy is
+/// awaited, a late answer of UI Automation ends the wait at once when nothing is selected (seen on
+/// 12-16/11: the 4 slow F10, 430 ms waited for a copy that never comes), or gives a real selection
+/// the full wait. Trusting "nothing selected" is what an answer in time already does.
+fn copy_selection_within(host: &mut dyn Host, target: usize, st: &mut ClipState, mut wait_ms: u64, mut late_hint: bool) -> Copy {
     if host.foreground() != target {
         return Copy::Stopped(Outcome::say(Msg::WindowChanged, "Target window changed before Ctrl+C"));
     }
@@ -570,6 +583,23 @@ fn copy_selection_within(host: &mut dyn Host, target: usize, st: &mut ClipState,
     loop {
         if host.clipboard_seq() != seq {
             break;
+        }
+        if late_hint {
+            match host.late_selection_empty() {
+                // believed only LATE_EMPTY_FLOOR_MS after Ctrl+C: a real selection that
+                // UI Automation missed is copied by then (a few tens of ms), and the clipboard is
+                // checked again at the top of each round
+                Some(true) if waited >= LATE_EMPTY_FLOOR_MS => {
+                    host.note("Selection: late answer of UI Automation, nothing selected: copy not awaited");
+                    return Copy::NoChange;
+                }
+                Some(false) => {
+                    host.note("Selection: late answer of UI Automation, text selected: full wait");
+                    wait_ms = wait_ms.max(COPY_WAIT_MS);
+                    late_hint = false;
+                }
+                _ => {}
+            }
         }
         if waited >= wait_ms {
             return Copy::NoChange;
@@ -670,7 +700,7 @@ fn take_line_above(host: &mut dyn Host, s: &AppSettings, info: &TargetInfo, targ
         return Err(Outcome::say(Msg::KeysBlocked, "Shift+Up not sent, stopped"));
     }
     st.our_selection = true;
-    match copy_selection_within(host, target, st, if web { COPY_WAIT_UNKNOWN_WEB_MS } else { COPY_WAIT_MS }) {
+    match copy_selection_within(host, target, st, if web { COPY_WAIT_UNKNOWN_WEB_MS } else { COPY_WAIT_MS }, false) {
         Copy::Text(t) if !policy::contains_line_break(&t) => {
             st.captured = Some(t);
             Ok(())
@@ -743,7 +773,7 @@ fn convert_window_inner(
     if selection != Selection::Empty {
         trace.mark(Step::Copy, host.now_ms());
         let wait = if selection == Selection::Unknown && web { COPY_WAIT_UNKNOWN_WEB_MS } else { COPY_WAIT_MS };
-        match copy_selection_within(host, target, st, wait) {
+        match copy_selection_within(host, target, st, wait, selection == Selection::Unknown && web) {
             Copy::Text(t) => {
                 let suspect = policy::line_copy_suspect(&t, selection, &info.focus_class);
                 st.captured = Some(t);
@@ -758,7 +788,7 @@ fn convert_window_inner(
             Copy::Stopped(o) => return o,
             // 1.8.8: a selection is known but the application did not copy it: Shift+Home would
             // EXTEND the user's selection and paste another text than the one chosen
-            Copy::NoChange if selection == Selection::NonEmpty => {
+            Copy::NoChange if selection == Selection::NonEmpty || (selection == Selection::Unknown && web && host.late_selection_empty() == Some(false)) => {
                 return Outcome::say(Msg::NothingToConvert, "Selection seen but no copy after Ctrl+C, nothing done")
             }
             Copy::NoChange => {}
@@ -785,7 +815,7 @@ fn convert_window_inner(
         }
         // 1.9.2: in a web page, Shift+Home that selects nothing (caret at the start, empty field) is
         // not waited for 1.5 s either: at worst nothing is done
-        match copy_selection_within(host, target, st, if web { COPY_WAIT_UNKNOWN_WEB_MS } else { COPY_WAIT_MS }) {
+        match copy_selection_within(host, target, st, if web { COPY_WAIT_UNKNOWN_WEB_MS } else { COPY_WAIT_MS }, false) {
             Copy::Text(t) => {
                 // something was selected by Shift+Home (an empty line or the caret at its start
                 // selects nothing: then no Right arrow is ever sent)
@@ -1394,6 +1424,8 @@ mod tests {
         c_read_fails_after: Cell<Option<i32>>,
         /// 1.9.7: what the screen reader shows just before the caret
         before_caret: RefCell<Option<String>>,
+        /// 1.9.8: late answer of UI Automation about the selection, after n sleeps after Ctrl+C
+        late_sel: Option<(usize, bool)>,
         c_mode_unknown: bool,
         c_replaced: RefCell<Option<(usize, String)>>,
         /// 1.9.5 terminal: run followed, generation, screen answers (one per read, the last repeats)
@@ -1474,6 +1506,7 @@ mod tests {
                 c_truetype: true,
                 c_read_fails_after: Cell::new(None),
                 before_caret: RefCell::new(None),
+                late_sel: None,
                 c_mode_unknown: false,
                 c_replaced: RefCell::new(None),
                 t_typed: RefCell::new(None),
@@ -1773,6 +1806,9 @@ mod tests {
         }
         fn chars_before_caret(&self, _n: usize) -> Result<String, &'static str> {
             self.before_caret.borrow().clone().ok_or("no text pattern")
+        }
+        fn late_selection_empty(&self) -> Option<bool> {
+            self.late_sel.and_then(|(n, b)| (self.sleeps_after_copy.get() >= n).then_some(b))
         }
         fn send_home(&self) -> bool {
             let c = self.c_cursor.get();
@@ -2595,6 +2631,82 @@ mod tests {
         m.line = Some("akuo".into());
         run(&mut m, &settings());
         assert!(!m.events.borrow().iter().any(|e| e.starts_with("select-back")));
+    }
+
+    // ---- 1.9.8 : a late answer of UI Automation ends the wait for the first copy ----
+
+    #[test]
+    fn a_late_answer_nothing_selected_ends_the_wait_at_once() {
+        let mut m = Mock::new();
+        *m.selected.borrow_mut() = None; // the page copies nothing for Ctrl+C
+        m.info.focus_class = "Chrome_WidgetWin_1".into();
+        m.line = Some("akuo".into());
+        m.late_sel = Some((3, true));
+        let o = run(&mut m, &settings());
+        assert_eq!(m.pasted.borrow().as_deref(), Some("שלום"), "{}", o.log);
+        assert!(m.happened("note"), "the late answer is written in the journal");
+        // the floor (10 polls), then the copy of Shift+Home (a few polls + settle)
+        assert!(m.sleeps_after_copy.get() < 30, "{} waits of 5 ms", m.sleeps_after_copy.get());
+        // without the late answer: the 400 ms (80 polls) are waited
+        let mut m = Mock::new();
+        *m.selected.borrow_mut() = None;
+        m.info.focus_class = "Chrome_WidgetWin_1".into();
+        m.line = Some("akuo".into());
+        run(&mut m, &settings());
+        assert!(m.sleeps_after_copy.get() >= 80, "{}", m.sleeps_after_copy.get());
+    }
+
+    #[test]
+    fn a_late_nothing_selected_is_not_believed_before_the_floor() {
+        // UI Automation wrong (answers "nothing" at once) and the page copies a real selection
+        // after 20 ms: that copy is taken, never mixed with a Shift+Home
+        let mut m = Mock::new();
+        *m.selected.borrow_mut() = None;
+        m.info.focus_class = "Chrome_WidgetWin_1".into();
+        m.line = Some("other line".into());
+        m.late_sel = Some((0, true));
+        m.late_text = Some("akuo");
+        m.late_at_sleep = 4;
+        let o = run(&mut m, &settings());
+        assert_eq!(m.pasted.borrow().as_deref(), Some("שלום"), "{}", o.log);
+        assert!(!m.happened("shifthome"), "{}", o.log);
+        // the late "nothing" ends the wait right after the floor (50 ms = 10 rounds), not at 400 ms
+        let mut m = Mock::new();
+        *m.selected.borrow_mut() = None;
+        m.info.focus_class = "Chrome_WidgetWin_1".into();
+        m.line = Some("akuo".into());
+        m.late_sel = Some((0, true));
+        run(&mut m, &settings());
+        let n = m.sleeps_after_copy.get();
+        assert!((10..30).contains(&n), "{n} waits of 5 ms");
+    }
+
+    #[test]
+    fn a_late_answer_text_selected_never_takes_the_line() {
+        // a selection seen late, but the page did not copy it: Shift+Home would extend it
+        let mut m = Mock::new();
+        *m.selected.borrow_mut() = None;
+        m.info.focus_class = "Chrome_WidgetWin_1".into();
+        m.line = Some("akuo".into());
+        m.late_sel = Some((2, false));
+        let o = run(&mut m, &settings());
+        assert_eq!(o.msg, Some(Msg::NothingToConvert), "{}", o.log);
+        assert!(!m.happened("shifthome"), "{}", o.log);
+        assert!(m.sleeps_after_copy.get() >= 300, "the full 1.5 s is given to a real selection");
+        // the page copies it: converted as usual
+        let mut m = Mock::new();
+        *m.selected.borrow_mut() = Some("akuo".into());
+        m.info.focus_class = "Chrome_WidgetWin_1".into();
+        m.late_sel = Some((0, false));
+        let o = run(&mut m, &settings());
+        assert_eq!(m.pasted.borrow().as_deref(), Some("שלום"), "{}", o.log);
+        // outside a web page the late answer is never asked
+        let mut m = Mock::new();
+        *m.selected.borrow_mut() = None;
+        m.line = Some("akuo".into());
+        m.late_sel = Some((0, true));
+        run(&mut m, &settings());
+        assert!(!m.happened("note"));
     }
 
     // ---- 1.9.2 : a web page with nothing selected is not waited for 1.5 s ----

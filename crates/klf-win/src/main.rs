@@ -60,6 +60,8 @@ fn main() {
     }
 
     util::log(&format!("Application starting v{} (Rust)", klf_core::VERSION));
+    // 2.0.0: a settings file already there = an older version was used (the "6 tabs" notice)
+    let file_existed = util::settings_path().is_some_and(|p| p.exists());
     let s = app::load_settings();
     app::STATE.with(|st| *st.settings.borrow_mut() = s);
     app::share_settings();
@@ -87,6 +89,7 @@ fn main() {
     app::ensure_tray();
     indicator::configure();
     app::post_welcome();
+    app::tabs_notice_at_start(file_existed);
     report::at_start(hwnd);
     typing::apply();
     if arg("--settings") {

@@ -2,13 +2,19 @@
 
 ## 2.0.0 (November 2026)
 - **A simpler tray menu**: Settings… (in bold; a double click on the icon opens it too), Install version X and Put back the previous clipboard when they apply, Pause for 10 minutes, Pause until resumed (one "Resume" line while paused, with the end time of a 10-minute pause), a tick "Disable in {program}" for the program in front, About and Exit. No submenu. The icon tip says "paused until hh:mm" during a timed pause.
-- **Settings in six tabs**: General (language, "Fixer on", start with Windows, language indicator, bubble and its preview, sound, converter), Conversion (keys, direction, careful mode, last word only, F10 fixes only wrong words, double Shift, left/right Ctrl, Caps Lock, limit and delay), Typing (fixing while typing, short sound, my words, text replacements, chat apps), Apps (rules per program as two editable lists, excluded programs, terminals, one-language programs), Diagnostics (last attempt, report, keyboards, problem reports, export/import) and About (version, check for updates, automatic update check, GitHub link, license and credit). Everything that left the tray menu is in one of these tabs.
-- **"Fixer on"** in the General tab is the pause itself: it acts at once and follows the menu and the end of a 10-minute pause.
-- **The interface language applies at once** when it is picked in the list (labelled "Language · שפה · Langue" in every language); the window opens again on the same tab.
-- **"Defaults"** puts back the default values of the tab shown (applied with Apply); never the lists, never a setting imposed by the administrator.
-- Short grey explanations under the options that needed one (careful mode, direction, limit and delay, "Fixer on"), also read by screen readers.
+- **Settings in six tabs, in plain words**: General, Keys, While typing, Programs, Advanced and Help. Every setting has a short grey sentence under it that says what it does (also read by screen readers); the keys named in these sentences are the ones really chosen.
+  - General: language (labelled "Language · שפה · Langue" in every language, applied at once), "Fixer on" (the pause itself, at once), start with the computer, show the language when it changes, a short message after each fix and where to show it, the fixed text in the message, a sound, and a box to try or convert a text.
+  - Keys: the fix key and the capitals key (a key already used by another program is said as soon as it is chosen), then switch to the right language, fix only selected text.
+  - While typing: suggestions while typing, my words, text shortcuts.
+  - Programs: "fix nothing in these programs", "here, selected text only", programs that always use one language.
+  - Advanced ("you normally do not need to change anything here", with a line naming what was changed): direction, mistyped words only, double Shift, left/right Ctrl, command windows (cmd, PowerShell), a sound per word while typing, chat apps, maximum length, delay (now in seconds), export and import.
+  - Help: nothing you type is sent or saved; what happened last time; the keyboards of the computer; technical details (the report folded behind a button); report a problem; what to do when something goes wrong (one list: ask me, send without asking, never offer); version and updates; previous settings; where the program comes from, with links to our project and to the original project by Ravid Saadia.
+- **"Defaults"** puts back the default values of the tab shown (applied with Apply); never the lists, never a setting imposed by the administrator. Settings imposed by the administrator are greyed with a small lock.
+- **The message after a fix now appears near the text by default** (new installs only: a position already chosen is kept).
+- **Removed**: "Turn Caps Lock off after fixing capitals" (always done now), "No selection: last word only" (F10 takes the whole line before the cursor again) and the "Excluded" list (its programs move once to "fix nothing in these programs").
+- A user of an older version is told once that the settings are now in 6 tabs.
 - **New, softer "bubble" sound, played the moment the text is pasted** (it came about one second late, after the wait that puts the clipboard back); the undo sound is a shorter falling bubble. The sounds are prepared at start, so the first one is not late either.
-- The About box is replaced by the About tab; the About item of the menu opens it.
+- The About box is replaced by the Help tab; the About item of the menu opens it.
 
 ## 1.9.9 (November 2026)
 - **Settings texts no longer cut** (found by the new Windows check): the terminal box is shorter ("Also fix in terminals: cmd, PowerShell, Windows Terminal"), the keyboards line of the Diagnostic page wraps on two lines, and the French "Convertisseur :" label is wider.

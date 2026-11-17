@@ -45,6 +45,64 @@ const _: () = {
 };
 /// 1.6.0: first-run welcome (shown once the message loop runs)
 const WM_APP_WELCOME: u32 = WM_APP + 6;
+/// 2.0.0: the "6 tabs" notice (wparam 1: also say that F10 takes the whole line again)
+const WM_APP_TABS_NOTICE: u32 = WM_APP + 9;
+/// 2.0.0: the last notification shown next to the icon was the "6 tabs" notice (its click opens
+/// the settings; the other one, a problem report, sends the report)
+static NOTICE_SHOWN: AtomicBool = AtomicBool::new(false);
+
+/// 2.0.0: at the first start of this version, a user of an older version (a settings file was
+/// there) is told once that the settings are now in 6 tabs; remembered in the settings either way.
+pub fn tabs_notice_at_start(file_existed: bool) {
+    let u = user_settings();
+    if u.tabs_notice_done {
+        return;
+    }
+    let due = klf_core::settings::tabs_notice_due(file_existed, &u);
+    // « last word only » was ticked: that option is gone, F10 takes the whole line again
+    let last_word = u.last_word_only;
+    let mut done = u;
+    done.tabs_notice_done = true;
+    if save_settings(&done) {
+        STATE.with(|s| *s.settings.borrow_mut() = done);
+    }
+    if due {
+        let h = STATE.with(|s| s.hwnd.get());
+        // SAFETY: posting a message without pointers to our window (shown once the loop runs).
+        unsafe { PostMessageW(h, WM_APP_TABS_NOTICE, last_word as usize, 0) };
+    }
+}
+
+/// Shows the "6 tabs" notice: a Windows notification next to the icon (a bubble if the icon is
+/// not there yet). A click on it opens the settings.
+fn show_tabs_notice(last_word: bool) {
+    let l = lang();
+    let mut body = text(l, Msg::NoticeNewSettings).to_string();
+    if last_word {
+        body.push(' ');
+        body.push_str(&text_with_key(l, Msg::NoticeLastWord, &key_name()));
+    }
+    log("Notice shown: the settings are now in 6 tabs");
+    if STATE.with(|s| s.tray_added.get()) {
+        // SAFETY: zeroed is a valid NOTIFYICONDATAW; only the notification fields are changed.
+        let ok = unsafe {
+            let mut nid: NOTIFYICONDATAW = std::mem::zeroed();
+            nid.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as u32;
+            nid.hWnd = main_window();
+            nid.uID = TRAY_ID;
+            nid.uFlags = NIF_INFO;
+            nid.dwInfoFlags = NIIF_INFO | NIIF_RESPECT_QUIET_TIME;
+            copy_wide(&mut nid.szInfoTitle, text(l, Msg::WindowTitle));
+            copy_wide(&mut nid.szInfo, &body);
+            Shell_NotifyIconW(NIM_MODIFY, &nid) != 0
+        };
+        if ok {
+            NOTICE_SHOWN.store(true, Ordering::SeqCst);
+            return;
+        }
+    }
+    bubble::show(&body, l.is_rtl(), None, 0, false);
+}
 
 pub fn post_welcome() {
     let h = STATE.with(|s| s.hwnd.get());
@@ -872,6 +930,7 @@ pub fn show_report_notification() -> bool {
         nid.uID = TRAY_ID;
         nid.uFlags = NIF_INFO;
         nid.dwInfoFlags = NIIF_INFO | NIIF_RESPECT_QUIET_TIME;
+        NOTICE_SHOWN.store(false, Ordering::SeqCst); // the click is about the report now
         copy_wide(&mut nid.szInfoTitle, text(l, Msg::ReportAskTitle));
         copy_wide(&mut nid.szInfo, text(l, Msg::ReportAskText));
         Shell_NotifyIconW(NIM_MODIFY, &nid) != 0
@@ -1518,6 +1577,8 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 // the first click, then WM_LBUTTONDBLCLK; an open window only comes to the front)
                 NIN_SELECT | NIN_KEYSELECT | WM_LBUTTONDBLCLK => settings_ui::open(),
                 // the only notification we show: "Send an anonymous report?" (1.6.1)
+                // 2.0.0: or the "6 tabs" notice, whose click opens the settings
+                NIN_BALLOONUSERCLICK if NOTICE_SHOWN.swap(false, Ordering::SeqCst) => settings_ui::open(),
                 NIN_BALLOONUSERCLICK => crate::report::send_pending(hwnd),
                 _ => {}
             }
@@ -1605,6 +1666,10 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
         }
         crate::report::WM_APP_REPORT => {
             crate::report::on_result(wparam);
+            0
+        }
+        WM_APP_TABS_NOTICE => {
+            show_tabs_notice(wparam != 0);
             0
         }
         WM_APP_WELCOME => {

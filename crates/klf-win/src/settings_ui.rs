@@ -1,10 +1,12 @@
 //! The settings window: native Windows controls (Common Controls v6), system font at the
 //! right DPI, mirrored right-to-left in Hebrew (WS_EX_LAYOUTRTL set at creation).
-//! 2.0.0: six tabs, General (language, "fixer on", start, indicator, bubble, sound, converter),
-//! Conversion (keys and how F10 works), Typing (correction while typing, replacements), Apps
-//! (rules per program, terminals, one-language programs), Diagnostics (last attempt, reports,
-//! export/import) and About (version, updates, GitHub, license). The controls of every tab are
-//! children of the window, shown or hidden with the tab; Ctrl+Tab changes the tab.
+//! 2.0.0, in plain words: six tabs, General (language, "fixer on", start, language sign, message
+//! after a fix, sound, a box to try or convert a text), Keys (the two keys and how they act),
+//! While typing (suggestions, my words, text shortcuts), Programs (lists of programs), Advanced
+//! (what one normally never changes, with a line saying what was changed) and Help (what happened
+//! last time, keyboards, technical details, problem reports, updates, previous settings, origin of
+//! the program). The controls of every tab are children of the window, shown or hidden with the
+//! tab; Ctrl+Tab changes the tab. A grey line under an option explains it in one sentence.
 
 use crate::app::{self, HotkeyState};
 use crate::platform::sys;
@@ -41,108 +43,132 @@ const ID_INDICATOR: i32 = 259;
 const ID_BUBBLE: i32 = 208;
 const ID_BUBBLE_POS: i32 = 263;
 const ID_PREVIEW: i32 = 268;
+const ID_NOTE_PREVIEW: i32 = 298;
 const ID_SOUND: i32 = 209;
-const ID_LBL_WORK: i32 = 242;
 const ID_WORK_MODE: i32 = 243;
-const ID_COPY_RESULT: i32 = 244;
 const ID_LBL_TRY: i32 = 232;
 const ID_TRY: i32 = 205;
-const ID_LBL_RESULT: i32 = 233;
 const ID_RESULT: i32 = 206;
-// Conversion
+const ID_COPY_RESULT: i32 = 244;
+// Keys
 const ID_LBL_HOTKEY: i32 = 230;
 const ID_HOTKEY: i32 = 203;
+const ID_NOTE_HOTKEY: i32 = 299;
 const ID_LBL_HOTKEY_CASE: i32 = 241;
 const ID_HOTKEY_CASE: i32 = 236;
-const ID_LBL_DIRECTION: i32 = 231;
-const ID_DIRECTION: i32 = 204;
-const ID_NOTE_DIRECTION: i32 = 273;
+const ID_NOTE_HOTKEY_CASE: i32 = 300;
 const ID_SWITCH: i32 = 207;
+const ID_NOTE_SWITCH: i32 = 301;
 const ID_CAREFUL: i32 = 245;
 const ID_NOTE_CAREFUL: i32 = 274;
-const ID_LASTWORD: i32 = 258;
+// While typing
+const ID_TYPING: i32 = 276;
+const ID_NOTE_TYPING_ON: i32 = 302;
+const ID_TYPING_WORDS: i32 = 278;
+const ID_NOTE_WORDS: i32 = 303;
+const ID_REPLACEMENTS: i32 = 279;
+const ID_NOTE_SHORTCUTS: i32 = 304;
+const ID_REPLACEMENTS_FILE: i32 = 280;
+const ID_NOTE_TYPING: i32 = 282;
+// Programs
+const ID_LBL_RULE_OFF: i32 = 284;
+const ID_RULE_OFF: i32 = 285;
+const ID_NOTE_RULE_OFF: i32 = 305;
+const ID_LBL_RULE_SEL: i32 = 286;
+const ID_RULE_SEL: i32 = 287;
+const ID_NOTE_RULE_SEL: i32 = 306;
+const ID_NOTE_RULES2: i32 = 288;
+const ID_ONE_LANGUAGE: i32 = 289;
+const ID_NOTE_ONE_LANGUAGE: i32 = 308;
+const ID_ONE_LANGUAGE_FILE: i32 = 290;
+// Advanced
+const ID_ADV_HEAD: i32 = 309;
+const ID_LBL_DIRECTION: i32 = 231;
+const ID_DIRECTION: i32 = 204;
 const ID_F10_WRONG: i32 = 272;
 const ID_DOUBLE_SHIFT: i32 = 270;
 const ID_CTRL_TAP: i32 = 271;
-const ID_CAPSOFF: i32 = 246;
+/// 1.9.5: F10 in Windows Terminal (hidden on a PC managed by an administrator)
+const ID_TERMINAL: i32 = 265;
+const ID_TYPING_SOUND: i32 = 277;
+const ID_MESSENGER: i32 = 281;
+const ID_NOTE_MESSENGER: i32 = 310;
 const ID_LBL_LIMIT: i32 = 247;
 const ID_LIMIT: i32 = 248;
 const ID_LBL_DELAY: i32 = 249;
 const ID_DELAY: i32 = 250;
 const ID_NOTE_LIMIT: i32 = 275;
-// Typing
-const ID_TYPING: i32 = 276;
-const ID_TYPING_SOUND: i32 = 277;
-const ID_MESSENGER: i32 = 281;
-const ID_TYPING_WORDS: i32 = 278;
-const ID_REPLACEMENTS: i32 = 279;
-const ID_REPLACEMENTS_FILE: i32 = 280;
-const ID_NOTE_TYPING: i32 = 282;
-// Apps
-const ID_NOTE_RULES: i32 = 283;
-const ID_LBL_RULE_OFF: i32 = 284;
-const ID_RULE_OFF: i32 = 285;
-const ID_LBL_RULE_SEL: i32 = 286;
-const ID_RULE_SEL: i32 = 287;
-const ID_LBL_EXCLUDED: i32 = 251;
-const ID_EXCLUDED: i32 = 252;
-const ID_NOTE_RULES2: i32 = 288;
-/// 1.9.5: F10 in Windows Terminal (hidden on a PC managed by an administrator)
-const ID_TERMINAL: i32 = 265;
-const ID_ONE_LANGUAGE: i32 = 289;
-const ID_ONE_LANGUAGE_FILE: i32 = 290;
-// Diagnostics
-const ID_DIAG_LAST: i32 = 254;
-const ID_DIAG_TEXT: i32 = 255;
-const ID_LAYOUTS: i32 = 253;
-const ID_DIAG_COPY: i32 = 256;
-const ID_DIAG_REFRESH: i32 = 257;
-const ID_REPORT_PROBLEM: i32 = 291;
-const ID_REPORT_SEND: i32 = 292;
-const ID_REPORT_ALWAYS: i32 = 293;
-const ID_REPORT_NEVER: i32 = 294;
 const ID_EXPORT: i32 = 260;
 const ID_IMPORT: i32 = 261;
-const ID_UNDO_IMPORT: i32 = 262;
-// About
-const ID_ABOUT_TEXT: i32 = 295;
-/// 1.8.9: "Check for updates" (2.0.0: About page; the Windows test clicks it by this id)
+// Help
+const ID_PRIVACY: i32 = 311;
+const ID_DIAG_LAST: i32 = 254;
+const ID_LAYOUTS: i32 = 253;
+const ID_DIAG_COPY: i32 = 256;
+const ID_SHOW_REPORT: i32 = 312;
+const ID_DIAG_TEXT: i32 = 255;
+const ID_REPORT_PROBLEM: i32 = 291;
+const ID_REPORT_SEND: i32 = 292;
+const ID_LBL_REPORTS: i32 = 313;
+const ID_REPORT_MODE: i32 = 314;
+/// 1.8.9: "Check for updates" (2.0.0: Help page; the Windows test clicks it by this id)
 const ID_CHECK_UPDATE: i32 = 264;
 const ID_AUTO_UPDATE: i32 = 296;
-/// 2.0.0: SysLink « GitHub » (opens one fixed address only)
+const ID_UNDO_IMPORT: i32 = 262;
+const ID_ABOUT_TEXT: i32 = 295;
+/// 2.0.0: SysLinks « Our project on GitHub » and « Original project by Ravid Saadia » (each opens
+/// one fixed address only)
 const ID_GITHUB: i32 = 297;
+const ID_ORIGIN: i32 = 315;
 
-/// The only address the GitHub link opens (the text of the control is never used as an address).
+/// The only addresses the links open (the text of the controls is never used as an address).
 const GITHUB_URL: &str = "https://github.com/breslev558/hebrew-keyboard-layout-fixer";
+const ORIGIN_URL: &str = "https://github.com/RavidSaadia/Keyboard_Layout_Fixer";
 
 const PAGE_GENERAL: &[i32] = &[
-    ID_LBL_LANG, ID_LANG, ID_ENABLED, ID_NOTE_ENABLED, ID_AUTOSTART, ID_INDICATOR, ID_BUBBLE, ID_BUBBLE_POS, ID_PREVIEW, ID_SOUND, ID_LBL_WORK, ID_WORK_MODE, ID_COPY_RESULT, ID_LBL_TRY, ID_TRY,
-    ID_LBL_RESULT, ID_RESULT,
+    ID_LBL_LANG, ID_LANG, ID_ENABLED, ID_NOTE_ENABLED, ID_AUTOSTART, ID_INDICATOR, ID_BUBBLE, ID_BUBBLE_POS, ID_PREVIEW, ID_NOTE_PREVIEW, ID_SOUND, ID_WORK_MODE, ID_LBL_TRY, ID_TRY, ID_RESULT,
+    ID_COPY_RESULT,
 ];
-const PAGE_CONVERSION: &[i32] = &[
-    ID_LBL_HOTKEY, ID_HOTKEY, ID_LBL_HOTKEY_CASE, ID_HOTKEY_CASE, ID_LBL_DIRECTION, ID_DIRECTION, ID_NOTE_DIRECTION, ID_SWITCH, ID_CAREFUL, ID_NOTE_CAREFUL, ID_LASTWORD, ID_F10_WRONG,
-    ID_DOUBLE_SHIFT, ID_CTRL_TAP, ID_CAPSOFF, ID_LBL_LIMIT, ID_LIMIT, ID_LBL_DELAY, ID_DELAY, ID_NOTE_LIMIT,
+const PAGE_KEYS: &[i32] = &[ID_LBL_HOTKEY, ID_HOTKEY, ID_NOTE_HOTKEY, ID_LBL_HOTKEY_CASE, ID_HOTKEY_CASE, ID_NOTE_HOTKEY_CASE, ID_SWITCH, ID_NOTE_SWITCH, ID_CAREFUL, ID_NOTE_CAREFUL];
+const PAGE_TYPING: &[i32] = &[ID_TYPING, ID_NOTE_TYPING_ON, ID_TYPING_WORDS, ID_NOTE_WORDS, ID_REPLACEMENTS, ID_NOTE_SHORTCUTS, ID_REPLACEMENTS_FILE, ID_NOTE_TYPING];
+const PAGE_APPS: &[i32] = &[
+    ID_LBL_RULE_OFF, ID_RULE_OFF, ID_NOTE_RULE_OFF, ID_LBL_RULE_SEL, ID_RULE_SEL, ID_NOTE_RULE_SEL, ID_NOTE_RULES2, ID_ONE_LANGUAGE,
+    ID_NOTE_ONE_LANGUAGE, ID_ONE_LANGUAGE_FILE,
 ];
-const PAGE_TYPING: &[i32] = &[ID_TYPING, ID_TYPING_SOUND, ID_MESSENGER, ID_TYPING_WORDS, ID_REPLACEMENTS, ID_REPLACEMENTS_FILE, ID_NOTE_TYPING];
-const PAGE_APPS: &[i32] = &[ID_NOTE_RULES, ID_LBL_RULE_OFF, ID_RULE_OFF, ID_LBL_RULE_SEL, ID_RULE_SEL, ID_LBL_EXCLUDED, ID_EXCLUDED, ID_NOTE_RULES2, ID_TERMINAL, ID_ONE_LANGUAGE, ID_ONE_LANGUAGE_FILE];
-const PAGE_DIAG: &[i32] = &[
-    ID_DIAG_LAST, ID_DIAG_TEXT, ID_LAYOUTS, ID_DIAG_COPY, ID_DIAG_REFRESH, ID_REPORT_PROBLEM, ID_REPORT_SEND, ID_REPORT_ALWAYS, ID_REPORT_NEVER, ID_EXPORT, ID_IMPORT, ID_UNDO_IMPORT,
+const PAGE_ADVANCED: &[i32] = &[
+    ID_ADV_HEAD, ID_LBL_DIRECTION, ID_DIRECTION, ID_F10_WRONG, ID_DOUBLE_SHIFT, ID_CTRL_TAP, ID_TERMINAL, ID_TYPING_SOUND, ID_MESSENGER, ID_NOTE_MESSENGER, ID_LBL_LIMIT,
+    ID_LIMIT, ID_LBL_DELAY, ID_DELAY, ID_NOTE_LIMIT, ID_EXPORT, ID_IMPORT,
 ];
-const PAGE_ABOUT_IDS: &[i32] = &[ID_ABOUT_TEXT, ID_CHECK_UPDATE, ID_AUTO_UPDATE, ID_GITHUB];
+const PAGE_HELP: &[i32] = &[
+    ID_PRIVACY, ID_DIAG_LAST, ID_LAYOUTS, ID_DIAG_COPY, ID_SHOW_REPORT, ID_DIAG_TEXT, ID_REPORT_PROBLEM, ID_REPORT_SEND, ID_LBL_REPORTS, ID_REPORT_MODE, ID_CHECK_UPDATE, ID_AUTO_UPDATE,
+    ID_UNDO_IMPORT, ID_ABOUT_TEXT, ID_GITHUB, ID_ORIGIN,
+];
 /// 2.0.0: the pages, in the order of the tabs (never a number written by hand elsewhere)
-const PAGES: [&[i32]; 6] = [PAGE_GENERAL, PAGE_CONVERSION, PAGE_TYPING, PAGE_APPS, PAGE_DIAG, PAGE_ABOUT_IDS];
-const TABS: [Msg; 6] = [Msg::TabGeneral, Msg::TabConversion, Msg::TabTyping, Msg::TabApps, Msg::TabDiagnostic, Msg::TabAbout];
-const PAGE_DIAGNOSTIC: usize = 4;
-/// The About tab (opened by « About » in the tray menu).
+const PAGES: [&[i32]; 6] = [PAGE_GENERAL, PAGE_KEYS, PAGE_TYPING, PAGE_APPS, PAGE_ADVANCED, PAGE_HELP];
+const TABS: [Msg; 6] = [Msg::TabGeneral, Msg::TabConversion, Msg::TabTyping, Msg::TabApps, Msg::TabAdvanced, Msg::TabAbout];
+const PAGE_ADV: usize = 4;
+/// The Help tab (opened by « About » in the tray menu; holds what was the Diagnostic page).
 pub const PAGE_ABOUT: usize = 5;
 /// grey explanation lines (never reached by Tab; never just before a field, whose name they would become)
-const NOTE_IDS: &[i32] = &[ID_NOTE_ENABLED, ID_NOTE_DIRECTION, ID_NOTE_CAREFUL, ID_NOTE_LIMIT, ID_NOTE_TYPING, ID_NOTE_RULES, ID_NOTE_RULES2];
+const NOTE_IDS: &[i32] = &[
+    ID_NOTE_ENABLED, ID_NOTE_PREVIEW, ID_NOTE_HOTKEY, ID_NOTE_HOTKEY_CASE, ID_NOTE_SWITCH, ID_NOTE_CAREFUL, ID_NOTE_TYPING_ON, ID_NOTE_WORDS, ID_NOTE_SHORTCUTS, ID_NOTE_TYPING, ID_NOTE_RULE_OFF,
+    ID_NOTE_RULE_SEL, ID_NOTE_RULES2, ID_NOTE_ONE_LANGUAGE, ID_ADV_HEAD, ID_NOTE_MESSENGER, ID_NOTE_LIMIT,
+];
+/// 2.0.0: what a page gives up when it does not fit any more, all at
+/// once: its grey lines, and on the Help page the privacy line and the About text. The options
+/// keep their explanation as a description for a screen reader.
+const HIDEABLE_IDS: &[i32] = &[
+    ID_NOTE_ENABLED, ID_NOTE_PREVIEW, ID_NOTE_HOTKEY, ID_NOTE_HOTKEY_CASE, ID_NOTE_SWITCH, ID_NOTE_CAREFUL, ID_NOTE_TYPING_ON, ID_NOTE_WORDS, ID_NOTE_SHORTCUTS, ID_NOTE_RULE_OFF, ID_NOTE_RULE_SEL,
+    ID_NOTE_RULES2, ID_NOTE_ONE_LANGUAGE, ID_ADV_HEAD, ID_NOTE_MESSENGER, ID_NOTE_LIMIT, ID_PRIVACY, ID_ABOUT_TEXT,
+];
+/// Help page: the controls the technical report covers when it is shown
+const UNDER_REPORT: &[i32] = &[ID_REPORT_PROBLEM, ID_REPORT_SEND, ID_LBL_REPORTS, ID_REPORT_MODE, ID_CHECK_UPDATE, ID_AUTO_UPDATE, ID_UNDO_IMPORT, ID_ABOUT_TEXT, ID_GITHUB, ID_ORIGIN];
 
 /// 1.8.9: every control of the window has its own id (checked when compiling; 1.8.9 first gave the
 /// new button the id of the bubble position list). 2.0.0: every control is on one page.
 const _: () = {
     let common = [ID_STATUS, ID_TAB, ID_SAVE, ID_CLOSE, ID_DEFAULTS];
-    let mut ids = [0i32; 128];
+    let mut ids = [0i32; 160];
     let mut n = 0;
     let mut i = 0;
     while i < common.len() {
@@ -169,7 +195,7 @@ const _: () = {
         }
         i += 1;
     }
-    assert!(PAGES.len() == TABS.len() && PAGE_ABOUT < PAGES.len() && PAGE_DIAGNOSTIC < PAGES.len());
+    assert!(PAGES.len() == TABS.len() && PAGE_ABOUT < PAGES.len() && PAGE_ADV < PAGES.len());
 };
 
 const HKM_SETHOTKEY: u32 = WM_USER + 1;
@@ -225,22 +251,13 @@ const TIMER_LANG: usize = 1;
 const WM_APP_LANG: u32 = WM_APP + 21;
 
 /// Client size in 96-DPI units. When the screen is too small (200 % on 768 px), up to SHRINK_MAX
-/// units are taken from the elastic parts only: text boxes, report, spacing of the check boxes
-///.
-/// 2.0.0: sized for the fullest page in French (Conversion); 452 units = 904 px at 200 %, under a
-/// 1080 px screen with its taskbar.
+/// units are taken from the elastic parts only: text boxes, spacing of the check boxes, and (2.0.0)
+/// the grey lines of a page that would not fit.
+/// 2.0.0: 452 units = 904 px at 200 %, under a 1080 px screen with its taskbar; 368 at least
+/// (768 px at 175 % with the taskbar).
 const WIDTH: i32 = 500;
 const FULL_HEIGHT: i32 = 452;
 const SHRINK_MAX: i32 = 84;
-/// 2.0.0: beyond this shrink, the grey lines of the fullest pages are hidden (the
-/// options keep them as their description for a screen reader), so that the bottom buttons stay
-/// on a small screen (768 px at 175 %: about 368 units of client height).
-const NOTES_HIDDEN_FROM: i32 = 25;
-const ELASTIC_NOTES: [i32; 5] = [ID_NOTE_ENABLED, ID_NOTE_DIRECTION, ID_NOTE_CAREFUL, ID_NOTE_LIMIT, ID_NOTE_RULES2];
-
-fn notes_hidden() -> bool {
-    SHRINK.with(|s| s.get()) >= NOTES_HIDDEN_FROM
-}
 
 fn height() -> i32 {
     FULL_HEIGHT - SHRINK.with(|s| s.get())
@@ -257,6 +274,12 @@ thread_local! {
     static PENDING_REFRESH: Cell<bool> = const { Cell::new(false) };
     /// 2.0.0: a language was picked in the open list: applied when the list closes
     static LANG_PENDING: Cell<bool> = const { Cell::new(false) };
+    /// 2.0.0: pages whose grey lines are hidden (small screen; worked out by layout)
+    static HIDDEN_NOTES: Cell<[bool; 6]> = const { Cell::new([false; 6]) };
+    /// 2.0.0: the technical report of the Help tab is shown
+    static REPORT_SHOWN: Cell<bool> = const { Cell::new(false) };
+    /// 2.0.0: the key in the box (fix key, capitals key) is held by another program
+    static HOTKEY_WARN: Cell<[bool; 2]> = const { Cell::new([false; 2]) };
 }
 
 pub fn window() -> HWND {
@@ -333,8 +356,8 @@ const IID_IACC_PROP_SERVICES: windows_sys::core::GUID = windows_sys::core::GUID:
 const PROPID_ACC_NAME_: windows_sys::core::GUID = windows_sys::core::GUID::from_u128(0x608d3df8_8128_4aa7_a428_f55e49267291);
 /// PROPID_ACC_DESCRIPTION (oleacc.h: 4d48dfe4-bd3f-491f-a648-492d6f20c588)
 const PROPID_ACC_DESCRIPTION_: windows_sys::core::GUID = windows_sys::core::GUID::from_u128(0x4d48dfe4_bd3f_491f_a648_492d6f20c588);
-const NAMED_IDS: [i32; 4] = [ID_BUBBLE_POS, ID_TAB, ID_GITHUB, ID_ABOUT_TEXT];
-const DESCRIBED_IDS: [i32; 7] = [ID_ENABLED, ID_DIRECTION, ID_CAREFUL, ID_LIMIT, ID_DELAY, ID_RULE_OFF, ID_RULE_SEL];
+const NAMED_IDS: [i32; 9] = [ID_BUBBLE_POS, ID_TAB, ID_GITHUB, ID_ORIGIN, ID_ABOUT_TEXT, ID_WORK_MODE, ID_RESULT, ID_DIAG_TEXT, ID_TYPING_WORDS];
+const DESCRIBED_IDS: [i32; 12] = [ID_ENABLED, ID_DIRECTION, ID_CAREFUL, ID_LIMIT, ID_DELAY, ID_RULE_OFF, ID_RULE_SEL, ID_PREVIEW, ID_SWITCH, ID_TYPING, ID_REPLACEMENTS, ID_MESSENGER];
 // Method numbers in the vtable, from oleacc.h (IAccPropServicesVtbl: QueryInterface 0, AddRef 1,
 // Release 2, SetPropValue 3, SetPropServer 4, ClearProps 5, SetHwndProp 6, SetHwndPropStr 7,
 // SetHwndPropServer 8, ClearHwndProps 9). Checked against the header by tools/verifier-vtables.py
@@ -365,19 +388,31 @@ fn with_acc_props(f: impl FnOnce(*mut std::ffi::c_void)) {
     }
 }
 
-fn set_acc_names(l: Lang) {
-    let names = [
-        (ID_BUBBLE_POS, PROPID_ACC_NAME_, text(l, Msg::NameBubblePosition)),
-        (ID_TAB, PROPID_ACC_NAME_, text(l, Msg::NameSettingsPages)),
-        (ID_GITHUB, PROPID_ACC_NAME_, "GitHub"),
-        (ID_ABOUT_TEXT, PROPID_ACC_NAME_, text(l, Msg::TabAbout)),
-        (ID_ENABLED, PROPID_ACC_DESCRIPTION_, text(l, Msg::NoteEnabled)),
-        (ID_DIRECTION, PROPID_ACC_DESCRIPTION_, text(l, Msg::NoteDirection)),
-        (ID_CAREFUL, PROPID_ACC_DESCRIPTION_, text(l, Msg::NoteCareful)),
-        (ID_LIMIT, PROPID_ACC_DESCRIPTION_, text(l, Msg::NoteLimitDelay)),
-        (ID_DELAY, PROPID_ACC_DESCRIPTION_, text(l, Msg::NoteLimitDelay)),
-        (ID_RULE_OFF, PROPID_ACC_DESCRIPTION_, text(l, Msg::NoteRulesHow)),
-        (ID_RULE_SEL, PROPID_ACC_DESCRIPTION_, text(l, Msg::NoteRulesHow)),
+fn set_acc_names(l: Lang, key: &str) {
+    let t = |m: Msg| text(l, m).to_string();
+    let names: Vec<(i32, windows_sys::core::GUID, String)> = vec![
+        (ID_BUBBLE_POS, PROPID_ACC_NAME_, t(Msg::NameBubblePosition)),
+        (ID_TAB, PROPID_ACC_NAME_, t(Msg::NameSettingsPages)),
+        (ID_GITHUB, PROPID_ACC_NAME_, t(Msg::LinkOurs)),
+        (ID_ORIGIN, PROPID_ACC_NAME_, t(Msg::LinkOrigin)),
+        (ID_ABOUT_TEXT, PROPID_ACC_NAME_, t(Msg::MenuAbout)),
+        (ID_WORK_MODE, PROPID_ACC_NAME_, t(Msg::NameWorkMode)),
+        (ID_RESULT, PROPID_ACC_NAME_, t(Msg::LabelResult)),
+        (ID_DIAG_TEXT, PROPID_ACC_NAME_, t(Msg::NameReport)),
+        // a button keeps its own text as name; the description is read after it
+        (ID_TYPING_WORDS, PROPID_ACC_DESCRIPTION_, t(Msg::NoteWords)),
+        (ID_ENABLED, PROPID_ACC_DESCRIPTION_, t(Msg::NoteEnabled)),
+        (ID_DIRECTION, PROPID_ACC_DESCRIPTION_, t(Msg::NoteDirection)),
+        (ID_CAREFUL, PROPID_ACC_DESCRIPTION_, t(Msg::NoteCareful)),
+        (ID_LIMIT, PROPID_ACC_DESCRIPTION_, text_with_key(l, Msg::NoteLimitDelay, key)),
+        (ID_DELAY, PROPID_ACC_DESCRIPTION_, text_with_key(l, Msg::NoteLimitDelay, key)),
+        (ID_RULE_OFF, PROPID_ACC_DESCRIPTION_, t(Msg::NoteRuleOff)),
+        (ID_RULE_SEL, PROPID_ACC_DESCRIPTION_, t(Msg::NoteRuleSel)),
+        (ID_PREVIEW, PROPID_ACC_DESCRIPTION_, t(Msg::NotePreview)),
+        (ID_SWITCH, PROPID_ACC_DESCRIPTION_, t(Msg::NoteSwitch)),
+        (ID_TYPING, PROPID_ACC_DESCRIPTION_, t(Msg::NoteTypingOn)),
+        (ID_REPLACEMENTS, PROPID_ACC_DESCRIPTION_, t(Msg::NoteShortcuts)),
+        (ID_MESSENGER, PROPID_ACC_DESCRIPTION_, text_with_key(l, Msg::NoteMessenger, key)),
     ];
     with_acc_props(|p| {
         type SetHwndPropStr = unsafe extern "system" fn(*mut std::ffi::c_void, HWND, u32, u32, windows_sys::core::GUID, *const u16) -> i32;
@@ -387,7 +422,7 @@ fn set_acc_names(l: Lang) {
             let vtbl = *(p as *const *const usize);
             let set: SetHwndPropStr = std::mem::transmute(*vtbl.add(ACC_SET_HWND_PROP_STR));
             for (id, prop, value) in names {
-                let w = wide(value);
+                let w = wide(&value);
                 set(p, item(id), OBJID_CLIENT as u32, CHILDID_SELF, prop, w.as_ptr());
             }
         }
@@ -415,7 +450,7 @@ fn clear_acc_names() {
 /// other control is mirrored here, one by one. (1.8.5 took the mirroring off AFTER creation, which
 /// an EDIT ignores: the text stayed on the right.)
 /// 2.0.0: the program lists of the rules and the two key boxes too ("Ctrl + F10" stays in order).
-const LTR_IDS: &[i32] = &[ID_DIAG_TEXT, ID_EXCLUDED, ID_RULE_OFF, ID_RULE_SEL, ID_LIMIT, ID_DELAY, ID_HOTKEY, ID_HOTKEY_CASE];
+const LTR_IDS: &[i32] = &[ID_DIAG_TEXT, ID_RULE_OFF, ID_RULE_SEL, ID_LIMIT, ID_DELAY, ID_HOTKEY, ID_HOTKEY_CASE];
 
 thread_local! {
     static MIRRORED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
@@ -431,11 +466,16 @@ fn create(class: &str, txt: &str, style: u32, ex: u32, id: i32) {
     }
 }
 
-/// (id, x, y, width, height) in 96-DPI units.
-fn layout() -> Vec<(i32, i32, i32, i32, i32)> {
-    let k = SHRINK.with(|s| s.get());
-    #[allow(non_snake_case)]
-    let HEIGHT = height();
+type Place = (i32, i32, i32, i32, i32);
+
+/// The bottom of the page area (96-DPI units): content never goes lower.
+fn page_limit() -> i32 {
+    height() - 46 - 4
+}
+
+/// One page laid out from its top; `notes`: with its grey lines. Returns the places and the
+/// bottom reached. Hidden grey lines keep a place (they are hidden), they take no room.
+fn page_layout(page: usize, k: i32, notes: bool) -> (Vec<Place>, i32) {
     let m = 16;
     let x0 = m + 10; // inside the tab
     let lw = 158; // label column
@@ -443,8 +483,168 @@ fn layout() -> Vec<(i32, i32, i32, i32, i32)> {
     let right = WIDTH - m - 10;
     let cw = right - cx;
     let full = right - x0;
-    let ind = 18; // an option that depends on the one above
+    let ind = 18; // an option that depends on the one above, or the grey line of an option
     let note = 18; // one grey line
+    let note2 = 2 * note - 2; // room for two lines (pages with room: a longer translation never cut)
+    let gap = |n: i32| if notes { n } else { 0 }; // the room of a grey line, or none
+    let ch = if k > 0 { 18 } else { 20 }; // check boxes a little closer on a small screen
+    let mut v: Vec<Place> = Vec::new();
+    let mut y = 74;
+    match page {
+        0 => {
+            // « Language · שפה · Langue » in three scripts: a wider label than the others
+            v.push((ID_LBL_LANG, x0, y + 2, 190, 22));
+            v.push((ID_LANG, x0 + 194, y, full - 194, 200));
+            y += 30;
+            v.push((ID_ENABLED, x0, y, full, 20));
+            y += 20;
+            v.push((ID_NOTE_ENABLED, x0 + ind, y, full - ind, note));
+            y += gap(note + 4);
+            v.push((ID_AUTOSTART, x0, y, full, ch));
+            y += ch;
+            v.push((ID_INDICATOR, x0, y, full, ch));
+            y += ch;
+            // the message box and its place on one line (the list is named for a screen reader)
+            v.push((ID_BUBBLE, x0, y + 1, 262, ch));
+            v.push((ID_BUBBLE_POS, x0 + 266, y - 1, full - 266, 200));
+            y += ch + 4;
+            v.push((ID_PREVIEW, x0 + ind, y, full - ind, ch));
+            y += ch;
+            v.push((ID_NOTE_PREVIEW, x0 + 2 * ind, y, full - 2 * ind, note));
+            y += gap(note + 4);
+            v.push((ID_SOUND, x0, y, full, ch));
+            y += ch + 8;
+            v.push((ID_LBL_TRY, x0, y + 2, 204, 22));
+            v.push((ID_WORK_MODE, x0 + 208, y, full - 208, 200));
+            y += 28;
+            let half = (full - 8) / 2;
+            let tk = (k / 2).min(22); // the text boxes give some of the room on a small screen
+            v.push((ID_TRY, x0, y, half, 52 - tk));
+            v.push((ID_RESULT, x0 + half + 8, y, half, 52 - tk));
+            y += 56 - tk;
+            v.push((ID_COPY_RESULT, right - 160, y, 160, 26));
+            y += 26;
+        }
+        1 => {
+            for (lbl, id, n) in [(ID_LBL_HOTKEY, ID_HOTKEY, ID_NOTE_HOTKEY), (ID_LBL_HOTKEY_CASE, ID_HOTKEY_CASE, ID_NOTE_HOTKEY_CASE)] {
+                v.push((lbl, x0, y + 2, lw - 6, 22));
+                v.push((id, cx, y, cw, 24));
+                y += 26;
+                v.push((n, x0, y, full, note2));
+                y += gap(note2) + 6;
+            }
+            for (id, n) in [(ID_SWITCH, ID_NOTE_SWITCH), (ID_CAREFUL, ID_NOTE_CAREFUL)] {
+                v.push((id, x0, y, full, 20));
+                y += 20;
+                v.push((n, x0 + ind, y, full - ind, note2));
+                y += gap(note2) + 6;
+            }
+        }
+        2 => {
+            v.push((ID_TYPING, x0, y, full, 20));
+            y += 20;
+            v.push((ID_NOTE_TYPING_ON, x0 + ind, y, full - ind, note2));
+            y += gap(note2) + 6;
+            v.push((ID_TYPING_WORDS, x0 + ind, y, 180, 26));
+            y += 28;
+            v.push((ID_NOTE_WORDS, x0 + ind, y, full - ind, note2));
+            y += gap(note2) + 12;
+            v.push((ID_REPLACEMENTS, x0, y, full, 20));
+            y += 20;
+            v.push((ID_NOTE_SHORTCUTS, x0 + ind, y, full - ind, note2));
+            y += gap(note2) + 6;
+            v.push((ID_REPLACEMENTS_FILE, x0 + ind, y, 180, 26));
+            y += 38;
+            v.push((ID_NOTE_TYPING, x0, y, full, 3 * note - 4));
+            y += 3 * note - 4;
+        }
+        3 => {
+            // the label above its list (long labels; a screen reader names the list after it)
+            for (lbl, id, n) in [(ID_LBL_RULE_OFF, ID_RULE_OFF, ID_NOTE_RULE_OFF), (ID_LBL_RULE_SEL, ID_RULE_SEL, ID_NOTE_RULE_SEL)] {
+                v.push((lbl, x0, y, full, 18));
+                y += 18;
+                v.push((id, x0, y, full, 22));
+                y += 24;
+                v.push((n, x0, y, full, note));
+                y += gap(note) + 4;
+            }
+            v.push((ID_NOTE_RULES2, x0, y, full, 2 * note - 2));
+            y += gap(2 * note + 4);
+            v.push((ID_ONE_LANGUAGE, x0, y, full, 20));
+            y += 20;
+            v.push((ID_NOTE_ONE_LANGUAGE, x0 + ind, y, full - ind, note));
+            y += gap(note) + 4;
+            v.push((ID_ONE_LANGUAGE_FILE, x0 + ind, y, 180, 26));
+            y += 26;
+        }
+        4 => {
+            v.push((ID_ADV_HEAD, x0, y, full, 2 * note - 2));
+            y += gap(2 * note + 2);
+            v.push((ID_LBL_DIRECTION, x0, y + 2, lw - 6, 22));
+            v.push((ID_DIRECTION, cx, y, cw, 200));
+            y += 28;
+            for id in [ID_F10_WRONG, ID_DOUBLE_SHIFT, ID_CTRL_TAP, ID_TERMINAL, ID_TYPING_SOUND, ID_MESSENGER] {
+                v.push((id, x0, y, full, ch));
+                y += ch;
+                if id == ID_MESSENGER {
+                    v.push((ID_NOTE_MESSENGER, x0 + ind, y, full - ind, note));
+                    y += gap(note + 2);
+                }
+            }
+            y += 4;
+            v.push((ID_LBL_LIMIT, x0, y + 2, 186, 22));
+            v.push((ID_LIMIT, x0 + 190, y, 50, 22));
+            v.push((ID_LBL_DELAY, x0 + 250, y + 2, 150, 22));
+            v.push((ID_DELAY, right - 46, y, 46, 22));
+            y += 24;
+            v.push((ID_NOTE_LIMIT, x0, y, full, note));
+            y += gap(note) + 4;
+            v.push((ID_EXPORT, x0, y, 180, 26));
+            v.push((ID_IMPORT, x0 + 186, y, 180, 26));
+            y += 26;
+        }
+        _ => {
+            v.push((ID_PRIVACY, x0, y, full, note));
+            y += gap(note + 2);
+            v.push((ID_DIAG_LAST, x0, y, full, 32));
+            y += 34;
+            // 1.9.9: the keyboards line on two lines (three keyboards did not fit on one, Windows test)
+            v.push((ID_LAYOUTS, x0, y, full, 32));
+            y += 34;
+            v.push((ID_DIAG_COPY, x0, y, 228, 26));
+            v.push((ID_SHOW_REPORT, x0 + 234, y, full - 234, 26));
+            y += 28;
+            let report_top = y;
+            v.push((ID_REPORT_PROBLEM, x0, y, 176, 26));
+            v.push((ID_REPORT_SEND, x0 + 182, y, full - 182, 26));
+            y += 28;
+            v.push((ID_LBL_REPORTS, x0, y + 2, 190, 22));
+            v.push((ID_REPORT_MODE, x0 + 194, y, full - 194, 200));
+            y += 26;
+            v.push((ID_CHECK_UPDATE, x0, y, 210, 26));
+            v.push((ID_AUTO_UPDATE, x0 + 218, y + 3, full - 218, 20));
+            y += 28;
+            v.push((ID_UNDO_IMPORT, x0, y, 210, 26));
+            y += 28;
+            v.push((ID_ABOUT_TEXT, x0, y, full, 80));
+            y += gap(82);
+            v.push((ID_GITHUB, x0, y, 210, 18));
+            v.push((ID_ORIGIN, x0 + 214, y, full - 214, 18));
+            y += 18;
+            // the technical report, when shown, covers everything from the problem reports down
+            v.push((ID_DIAG_TEXT, x0, report_top, full, (y - report_top).max(60)));
+        }
+    }
+    (v, y)
+}
+
+/// (id, x, y, width, height) in 96-DPI units, for every control. 2.0.0: a page that does not fit
+/// on a small screen gives up its grey lines (kept in HIDDEN_NOTES for show_page).
+fn layout() -> Vec<Place> {
+    let k = SHRINK.with(|s| s.get());
+    #[allow(non_snake_case)]
+    let HEIGHT = height();
+    let m = 16;
     let mut v = vec![
         (ID_STATUS, m, 10, WIDTH - 2 * m, 26),
         (ID_TAB, m, 42, WIDTH - 2 * m, HEIGHT - 42 - 46),
@@ -452,140 +652,16 @@ fn layout() -> Vec<(i32, i32, i32, i32, i32)> {
         (ID_SAVE, WIDTH - m - 230, HEIGHT - 38, 110, 28),
         (ID_CLOSE, WIDTH - m - 110, HEIGHT - 38, 110, 28),
     ];
-    let ch = 20 - (k > 0) as i32 * 2;
-    // General
-    let mut y = 74;
-    // « Language · שפה · Langue » in three scripts: a wider label than the others
-    v.push((ID_LBL_LANG, x0, y + 2, 190, 22));
-    v.push((ID_LANG, x0 + 194, y, full - 194, 200));
-    y += 30;
-    v.push((ID_ENABLED, x0, y, full, 20));
-    y += 20;
-    v.push((ID_NOTE_ENABLED, x0 + ind, y, full - ind, note));
-    y += (note + 4) * !notes_hidden() as i32;
-    v.push((ID_AUTOSTART, x0, y, full, ch));
-    y += ch;
-    v.push((ID_INDICATOR, x0, y, full, ch));
-    y += ch;
-    // bubble: check box + position list on the same line (1.5.2), a little more room
-    v.push((ID_BUBBLE, x0, y + 1, lw + 56, ch));
-    v.push((ID_BUBBLE_POS, cx + 62, y - 1, cw - 62, 200));
-    y += ch + 4;
-    v.push((ID_PREVIEW, x0 + ind, y, full - ind, ch));
-    y += ch;
-    v.push((ID_SOUND, x0, y, full, ch));
-    y += ch + 8;
-    // 1.9.9: « Convertisseur : » needs 78 units (the Windows test found it cut at 70)
-    v.push((ID_LBL_WORK, x0, y + 2, 86, 22));
-    v.push((ID_WORK_MODE, x0 + 88, y, full - 88 - 158, 200));
-    v.push((ID_COPY_RESULT, right - 152, y, 152, 24));
-    y += 28;
-    let half = (full - 8) / 2;
-    v.push((ID_LBL_TRY, x0, y, half, 18));
-    v.push((ID_LBL_RESULT, x0 + half + 8, y, half, 18));
-    y += 18;
-    let tk = (k / 2).min(24); // the text boxes give some of the room on a small screen
-    v.push((ID_TRY, x0, y, half, 52 - tk));
-    v.push((ID_RESULT, x0 + half + 8, y, half, 52 - tk));
-    // Conversion (the fullest page: the check boxes give the room on a small screen)
-    let mut y = 74;
-    v.push((ID_LBL_HOTKEY, x0, y + 2, lw - 6, 22));
-    v.push((ID_HOTKEY, cx, y, cw, 24));
-    y += 28;
-    v.push((ID_LBL_HOTKEY_CASE, x0, y + 2, lw - 6, 22));
-    v.push((ID_HOTKEY_CASE, cx, y, cw, 24));
-    y += 30;
-    v.push((ID_LBL_DIRECTION, x0, y + 2, lw - 6, 22));
-    v.push((ID_DIRECTION, cx, y, cw, 200));
-    y += 26;
-    let shown = !notes_hidden();
-    v.push((ID_NOTE_DIRECTION, x0 + ind, y, full - ind, note));
-    y += (note + 2) * shown as i32;
-    let step = 20 - ((k + 7) / 8).min(4); // 20 .. 16
-    for id in [ID_SWITCH, ID_CAREFUL, ID_LASTWORD, ID_F10_WRONG, ID_DOUBLE_SHIFT, ID_CTRL_TAP, ID_CAPSOFF] {
-        v.push((id, x0, y, full, step));
-        y += step;
-        if id == ID_CAREFUL {
-            v.push((ID_NOTE_CAREFUL, x0 + ind, y, full - ind, note));
-            y += (note + 2) * shown as i32;
+    let mut hidden = [false; 6];
+    for (page, h) in hidden.iter_mut().enumerate() {
+        let (mut places, end) = page_layout(page, k, true);
+        if end > page_limit() {
+            places = page_layout(page, k, false).0;
+            *h = true;
         }
+        v.extend(places);
     }
-    y += 4 - (k > 0) as i32 * 4;
-    v.push((ID_LBL_LIMIT, x0, y + 2, 170, 22));
-    v.push((ID_LIMIT, x0 + 172, y, 56, 22));
-    v.push((ID_LBL_DELAY, x0 + 236, y + 2, 128, 22));
-    v.push((ID_DELAY, right - 58, y, 58, 22));
-    y += 26;
-    v.push((ID_NOTE_LIMIT, x0, y, full, 2 * note - 2));
-    // Typing
-    let mut y = 74;
-    v.push((ID_TYPING, x0, y, full, 20));
-    y += 20;
-    v.push((ID_TYPING_SOUND, x0 + ind, y, full - ind, 20));
-    y += 20;
-    v.push((ID_MESSENGER, x0, y, full, 20));
-    y += 24;
-    v.push((ID_TYPING_WORDS, x0, y, 170, 26));
-    y += 38;
-    v.push((ID_REPLACEMENTS, x0, y, full, 20));
-    y += 24;
-    v.push((ID_REPLACEMENTS_FILE, x0, y, 170, 26));
-    y += 38;
-    v.push((ID_NOTE_TYPING, x0, y, full, 3 * note - 4));
-    // Apps
-    let lr = 200; // the labels of the program lists
-    let mut y = 74;
-    v.push((ID_NOTE_RULES, x0, y, full, 3 * note - 4));
-    y += 3 * note;
-    for (lbl, id) in [(ID_LBL_RULE_OFF, ID_RULE_OFF), (ID_LBL_RULE_SEL, ID_RULE_SEL), (ID_LBL_EXCLUDED, ID_EXCLUDED)] {
-        v.push((lbl, x0, y + 2, lr - 4, 22));
-        v.push((id, x0 + lr, y, full - lr, 22));
-        y += 28;
-    }
-    v.push((ID_NOTE_RULES2, x0, y, full, 3 * note - 4));
-    y += (3 * note + 2) * !notes_hidden() as i32;
-    v.push((ID_TERMINAL, x0, y, full, 20));
-    y += 20;
-    v.push((ID_ONE_LANGUAGE, x0, y, full, 20));
-    y += 24;
-    v.push((ID_ONE_LANGUAGE_FILE, x0, y, 170, 26));
-    // Diagnostics
-    let mut y = 74;
-    let dl = (k - 40).clamp(0, 24); // beyond 40 units, the last attempt gives some room too
-    v.push((ID_DIAG_LAST, x0, y, full, 56 - dl));
-    y += 60 - dl;
-    // 1.9.9: the keyboards line on two lines (three keyboards did not fit on one, Windows test)
-    let dk = k.min(40);
-    v.push((ID_DIAG_TEXT, x0, y, full, 70 - dk));
-    y += 74 - dk;
-    v.push((ID_LAYOUTS, x0, y, full, 34)); // installed keyboards, ✓ / ✗
-    y += 38;
-    v.push((ID_DIAG_COPY, x0, y, 180, 26));
-    v.push((ID_DIAG_REFRESH, x0 + 186, y, 100, 26));
-    y += 34;
-    v.push((ID_REPORT_PROBLEM, x0, y, 190, 26));
-    v.push((ID_REPORT_SEND, x0 + 196, y, full - 196, 26));
-    y += 28;
-    v.push((ID_REPORT_ALWAYS, x0, y, full, 20));
-    y += 20;
-    v.push((ID_REPORT_NEVER, x0, y, full, 20));
-    y += 26;
-    // export / import of the settings (1.5.0)
-    let bw = (full - 12) / 3;
-    v.push((ID_EXPORT, x0, y, bw, 26));
-    v.push((ID_IMPORT, x0 + bw + 6, y, bw, 26));
-    v.push((ID_UNDO_IMPORT, x0 + 2 * (bw + 6), y, bw, 26));
-    // About
-    let mut y = 74;
-    // shrunk only on a very small screen (10 lines need 160 units): ends at 318 at SHRINK_MAX
-    let ak = (k - 36).clamp(0, 24);
-    v.push((ID_ABOUT_TEXT, x0, y, full, 184 - ak));
-    y += 190 - ak;
-    v.push((ID_CHECK_UPDATE, x0, y, 240, 26));
-    y += 30;
-    v.push((ID_AUTO_UPDATE, x0, y, full, 20));
-    y += 28;
-    v.push((ID_GITHUB, x0, y, 120, 20));
+    HIDDEN_NOTES.with(|c| c.set(hidden));
     v
 }
 
@@ -633,16 +709,22 @@ fn show_page(page: usize) {
     let page = page.min(PAGES.len() - 1);
     PAGE.with(|p| p.set(page));
     send(ID_TAB, TCM_SETCURSEL, page, 0);
+    let hidden = HIDDEN_NOTES.with(|c| c.get());
+    let report = REPORT_SHOWN.with(|r| r.get());
     for (i, ids) in PAGES.iter().enumerate() {
         for id in *ids {
-            let show = i == page && !(*id == ID_TERMINAL && school_pc()) && !(ELASTIC_NOTES.contains(id) && notes_hidden());
+            let show = i == page
+                && !(*id == ID_TERMINAL && school_pc())
+                && !(hidden[i] && HIDEABLE_IDS.contains(id))
+                && (*id != ID_DIAG_TEXT || report)
+                && !(report && UNDER_REPORT.contains(id));
             // SAFETY: our child windows.
             unsafe { ShowWindow(item(*id), if show { SW_SHOW } else { SW_HIDE }) };
         }
     }
     // "Defaults" only where there are settings to put back
-    enable(ID_DEFAULTS, page != PAGE_DIAGNOSTIC && page != PAGE_ABOUT);
-    if page == PAGE_DIAGNOSTIC {
+    enable(ID_DEFAULTS, page != PAGE_ABOUT);
+    if page == PAGE_ABOUT {
         refresh_diagnostic();
     }
 }
@@ -809,7 +891,6 @@ fn rules_text(s: &AppSettings, mode: RuleMode) -> String {
     s.app_rules.iter().filter(|r| r.mode == mode).map(|r| r.process.as_str()).collect::<Vec<_>>().join(", ")
 }
 
-
 /// 2.0.0: a rule changed from the tray menu while the window is open: its two lists shown again
 /// (otherwise « Apply » would write the old lists back).
 pub fn refresh_rules() {
@@ -823,6 +904,20 @@ pub fn refresh_rules() {
             set_text(id, &rules_text(&u, mode)); // (WM_SETTEXT clears the "modified" flag)
         }
     }
+}
+
+/// 2.0.0: the top of the Advanced tab says which of its settings are no longer as they came.
+fn refresh_advanced_head() {
+    let s = app::settings();
+    let l = app::lang_of(&s);
+    let changed = klf_core::settings::advanced_changes(&s);
+    let head = if changed.is_empty() {
+        text(l, Msg::AdvancedNothing).to_string()
+    } else {
+        let names: Vec<&str> = changed.iter().map(|m| text(l, *m)).collect();
+        text(l, Msg::AdvancedChanged).replace("{list}", &names.join(", "))
+    };
+    set_text(ID_ADV_HEAD, &head);
 }
 
 fn fill_work_modes(l: Lang) {
@@ -872,22 +967,70 @@ fn lang_of_index(i: isize) -> UiLanguage {
     }
 }
 
-/// The options that only matter when the one above is ticked (bubble, correction while typing).
+fn report_index(mode: u32) -> usize {
+    match mode {
+        klf_core::report::ALWAYS => 1,
+        klf_core::report::NEVER => 2,
+        _ => 0,
+    }
+}
+
+/// The options that only matter when the one above is ticked: the message (its place, the fixed
+/// text in it), the suggestions (my words, their sound, chat apps), the shortcuts (my shortcuts).
 fn update_dependents() {
     let lk = app::locked();
     let bubble = checked(ID_BUBBLE);
     enable(ID_BUBBLE_POS, !lk.bubble_position && bubble);
     enable(ID_PREVIEW, !lk.show_preview && bubble);
-    let typing = crate::typing::allowed() && checked(ID_TYPING);
-    enable(ID_TYPING_SOUND, typing);
-    enable(ID_MESSENGER, typing);
+    let allowed = crate::typing::allowed();
+    let typing = allowed && checked(ID_TYPING);
+    for id in [ID_TYPING_WORDS, ID_TYPING_SOUND, ID_MESSENGER] {
+        enable(id, typing);
+    }
+    enable(ID_REPLACEMENTS_FILE, allowed && checked(ID_REPLACEMENTS));
+}
+
+/// 2.0.0: a key that another program already holds is said as soon as it is chosen in its box
+/// (a trial registration, released at once; our own keys are never tried: we hold them).
+fn check_hotkey_box(id: i32) {
+    let (note, normal, slot) = if id == ID_HOTKEY { (ID_NOTE_HOTKEY, Msg::NoteHotkey, 0) } else { (ID_NOTE_HOTKEY_CASE, Msg::NoteHotkeyCase, 1) };
+    let hk = send(id, HKM_GETHOTKEY, 0, 0) as u32;
+    let s = app::settings();
+    let taken = match vk_to_key(hk & 0xFF) {
+        Some(k) => {
+            let mods = hotkeyf_to_mods((hk >> 8) & 0xFF);
+            let ours = (mods, k) == (s.hotkey_modifiers, s.hotkey_key) || (mods, k) == (s.case_hotkey_modifiers, s.case_hotkey_key);
+            hotkey_allowed(mods, k) && !ours && !app::hotkey_free(mods, k)
+        }
+        None => false,
+    };
+    HOTKEY_WARN.with(|w| {
+        let mut v = w.get();
+        v[slot] = taken;
+        w.set(v);
+    });
+    let l = app::lang_of(&s);
+    set_text(note, text(l, if taken { Msg::HotkeyTaken } else { normal }));
+    // SAFETY: repaint our control (its colour changes).
+    unsafe { InvalidateRect(item(note), null(), 1) };
+}
+
+/// A setting imposed by the administrator: a small lock after its text (or after its label).
+const LOCK: &str = " 🔒";
+
+fn add_lock(id: i32) {
+    let t = get_text(id);
+    if !t.ends_with(LOCK) {
+        set_text(id, &format!("{t}{LOCK}"));
+    }
 }
 
 fn fill_controls() {
     let s = app::settings();
     let u = app::user_settings();
     let l = app::lang_of(&s);
-    set_acc_names(l);
+    let key = s.hotkey_description();
+    set_acc_names(l, &key);
     for (i, m) in TABS.iter().enumerate() {
         let mut t = wide(text(l, *m));
         // SAFETY: TCITEMW read during the call; text buffer alive.
@@ -903,70 +1046,78 @@ fn fill_controls() {
         (ID_INDICATOR, Msg::CheckIndicator),
         (ID_BUBBLE, Msg::CheckBubble),
         (ID_PREVIEW, Msg::MenuPreview),
+        (ID_NOTE_PREVIEW, Msg::NotePreview),
         (ID_SOUND, Msg::CheckSound),
-        (ID_LBL_WORK, Msg::LabelWorkshop),
-        (ID_COPY_RESULT, Msg::ButtonCopyResult),
         (ID_LBL_TRY, Msg::LabelText),
-        (ID_LBL_RESULT, Msg::LabelResult),
+        (ID_COPY_RESULT, Msg::ButtonCopyResult),
         (ID_LBL_HOTKEY, Msg::LabelHotkeyLayout),
+        (ID_NOTE_HOTKEY, Msg::NoteHotkey),
         (ID_LBL_HOTKEY_CASE, Msg::LabelHotkeyCase),
-        (ID_LBL_DIRECTION, Msg::LabelDirection),
-        (ID_NOTE_DIRECTION, Msg::NoteDirection),
+        (ID_NOTE_HOTKEY_CASE, Msg::NoteHotkeyCase),
         (ID_SWITCH, Msg::CheckSwitchLanguage),
+        (ID_NOTE_SWITCH, Msg::NoteSwitch),
         (ID_CAREFUL, Msg::CheckCareful),
         (ID_NOTE_CAREFUL, Msg::NoteCareful),
-        (ID_LASTWORD, Msg::CheckLastWord),
-        (ID_F10_WRONG, Msg::MenuF10WrongWords),
-        (ID_DOUBLE_SHIFT, Msg::MenuDoubleShift),
-        (ID_CTRL_TAP, Msg::MenuCtrlTap),
-        (ID_CAPSOFF, Msg::CheckCapsOff),
-        (ID_LBL_LIMIT, Msg::LabelLimit),
-        (ID_LBL_DELAY, Msg::LabelDelay),
-        (ID_NOTE_LIMIT, Msg::NoteLimitDelay),
         (ID_TYPING, Msg::MenuTyping),
+        (ID_NOTE_TYPING_ON, Msg::NoteTypingOn),
+        (ID_TYPING_WORDS, Msg::MenuTypingWords),
+        (ID_NOTE_WORDS, Msg::NoteWords),
+        (ID_REPLACEMENTS, Msg::MenuReplacements),
+        (ID_NOTE_SHORTCUTS, Msg::NoteShortcuts),
+        (ID_REPLACEMENTS_FILE, Msg::MenuReplacementsFile),
+        (ID_LBL_RULE_OFF, Msg::LabelRulesDisabled),
+        (ID_NOTE_RULE_OFF, Msg::NoteRuleOff),
+        (ID_LBL_RULE_SEL, Msg::LabelRulesSelection),
+        (ID_NOTE_RULE_SEL, Msg::NoteRuleSel),
+        (ID_NOTE_RULES2, Msg::NoteRulesHow),
+        (ID_ONE_LANGUAGE, Msg::MenuOneLanguage),
+        (ID_NOTE_ONE_LANGUAGE, Msg::NoteOneLanguage),
+        (ID_ONE_LANGUAGE_FILE, Msg::MenuOneLanguageFile),
+        (ID_LBL_DIRECTION, Msg::LabelDirection),
+        (ID_F10_WRONG, Msg::MenuF10WrongWords),
+        (ID_CTRL_TAP, Msg::MenuCtrlTap),
+        (ID_TERMINAL, Msg::CheckTerminal),
         (ID_TYPING_SOUND, Msg::MenuTypingSound),
         (ID_MESSENGER, Msg::MenuMessengerGuard),
-        (ID_TYPING_WORDS, Msg::MenuTypingWords),
-        (ID_REPLACEMENTS, Msg::MenuReplacements),
-        (ID_REPLACEMENTS_FILE, Msg::MenuReplacementsFile),
-        (ID_NOTE_RULES, Msg::NoteRules),
-        (ID_LBL_RULE_OFF, Msg::LabelRulesDisabled),
-        (ID_LBL_RULE_SEL, Msg::LabelRulesSelection),
-        (ID_LBL_EXCLUDED, Msg::LabelExcluded),
-        (ID_NOTE_RULES2, Msg::NoteRulesHow),
-        (ID_TERMINAL, Msg::CheckTerminal),
-        (ID_ONE_LANGUAGE, Msg::MenuOneLanguage),
-        (ID_ONE_LANGUAGE_FILE, Msg::MenuOneLanguageFile),
-        (ID_DIAG_COPY, Msg::ButtonCopyDiag),
-        (ID_DIAG_REFRESH, Msg::ButtonRefresh),
-        (ID_REPORT_PROBLEM, Msg::MenuReportProblem),
-        (ID_REPORT_SEND, Msg::ButtonSendReport),
-        (ID_REPORT_ALWAYS, Msg::MenuReportAlways),
-        (ID_REPORT_NEVER, Msg::MenuReportNever),
+        (ID_LBL_LIMIT, Msg::LabelLimit),
+        (ID_LBL_DELAY, Msg::LabelDelay),
         (ID_EXPORT, Msg::ButtonExport),
         (ID_IMPORT, Msg::ButtonImport),
-        (ID_UNDO_IMPORT, Msg::ButtonUndoImport),
+        (ID_PRIVACY, Msg::PrivacyLine),
+        (ID_DIAG_COPY, Msg::ButtonCopyDiag),
+        (ID_SHOW_REPORT, if REPORT_SHOWN.with(|r| r.get()) { Msg::ButtonHideReport } else { Msg::ButtonShowReport }),
+        (ID_REPORT_PROBLEM, Msg::MenuReportProblem),
+        (ID_REPORT_SEND, Msg::ButtonSendReport),
+        (ID_LBL_REPORTS, Msg::LabelReports),
         (ID_CHECK_UPDATE, Msg::ButtonCheckUpdate),
         (ID_AUTO_UPDATE, Msg::MenuCheckUpdates),
+        (ID_UNDO_IMPORT, Msg::ButtonUndoImport),
         (ID_DEFAULTS, Msg::ButtonDefaults),
         (ID_SAVE, Msg::ButtonSave),
         (ID_CLOSE, Msg::ButtonClose),
     ] {
         set_text(id, text(l, m));
     }
-    // About: version, what it does, nothing sent, license and credit (one text, as the old box)
-    set_text(ID_ABOUT_TEXT, &text_with_key(l, Msg::AboutText, &s.hotkey_description()).replace("{version}", klf_core::VERSION).replace('\n', "\r\n"));
+    // the texts that name the key really chosen (F10 or another)
+    for (id, m) in [(ID_DOUBLE_SHIFT, Msg::MenuDoubleShift), (ID_NOTE_MESSENGER, Msg::NoteMessenger), (ID_NOTE_LIMIT, Msg::NoteLimitDelay)] {
+        set_text(id, &text_with_key(l, m, &key));
+    }
+    // Help: version, independent project, license (one text, read by Tab)
+    set_text(ID_ABOUT_TEXT, &text(l, Msg::AboutText).replace("{version}", klf_core::VERSION).replace('\n', "\r\n"));
     set_text(ID_LAYOUTS, &layouts_line(l));
+    refresh_advanced_head();
     fill_work_modes(l);
-    for m in [Msg::DirectionAuto, Msg::DirectionToHebrew, Msg::DirectionToEnglish] {
-        let w = wide(text(l, m));
-        send(ID_DIRECTION, CB_ADDSTRING, 0, w.as_ptr() as isize);
+    for (combo, items) in [
+        (ID_DIRECTION, [Msg::DirectionAuto, Msg::DirectionToHebrew, Msg::DirectionToEnglish]),
+        (ID_BUBBLE_POS, [Msg::BubbleTop, Msg::BubbleBottom, Msg::BubbleCaret]),
+        (ID_REPORT_MODE, [Msg::ReportModeAsk, Msg::ReportModeAlways, Msg::ReportModeNever]),
+    ] {
+        for m in items {
+            let w = wide(text(l, m));
+            send(combo, CB_ADDSTRING, 0, w.as_ptr() as isize);
+        }
     }
     send(ID_DIRECTION, CB_SETCURSEL, s.mixed_text_mode.as_number() as usize, 0);
-    for m in [Msg::BubbleTop, Msg::BubbleBottom, Msg::BubbleCaret] {
-        let w = wide(text(l, m));
-        send(ID_BUBBLE_POS, CB_ADDSTRING, 0, w.as_ptr() as isize);
-    }
     send(ID_BUBBLE_POS, CB_SETCURSEL, s.bubble_position.min(klf_core::settings::BUBBLE_CARET) as usize, 0);
     for t in [text(l, Msg::LanguageAuto), "עברית", "Français", "English"] {
         let w = wide(t);
@@ -982,15 +1133,12 @@ fn fill_controls() {
     set_checked(ID_PREVIEW, s.show_preview);
     set_checked(ID_SOUND, s.play_sound);
     set_checked(ID_CAREFUL, s.require_selection);
-    set_checked(ID_LASTWORD, s.last_word_only);
-    set_checked(ID_CAPSOFF, s.turn_off_caps_lock);
     set_checked(ID_TERMINAL, s.terminal_support);
     set_checked(ID_INDICATOR, s.indicator);
     set_text(ID_LIMIT, &s.max_character_limit.to_string());
-    set_text(ID_DELAY, &s.paste_delay_ms.to_string());
+    set_text(ID_DELAY, &klf_core::settings::delay_text(s.paste_delay_ms, l == Lang::Fr));
     // only the user's own lists (the administrator's programs and rules are added on top, never
-    // saved here)
-    set_text(ID_EXCLUDED, &u.excluded_processes.join(", "));
+    // saved here; 2.0.0: the « Excluded » list of older versions is in the first list now)
     set_text(ID_RULE_OFF, &rules_text(&u, RuleMode::Disabled));
     set_text(ID_RULE_SEL, &rules_text(&u, RuleMode::SelectionOnly));
     // public per-user install only (as the menu before 2.0.0): shown greyed and unticked elsewhere
@@ -1008,38 +1156,37 @@ fn fill_controls() {
         set_checked(id, on && typing);
         enable(id, typing);
     }
-    for id in [ID_TYPING_WORDS, ID_REPLACEMENTS_FILE, ID_ONE_LANGUAGE_FILE] {
-        enable(id, typing);
-    }
+    enable(ID_ONE_LANGUAGE_FILE, typing);
     set_text(ID_NOTE_TYPING, if typing { "" } else { text(l, Msg::NoteNotHere) });
     let reports = crate::report::enabled();
-    set_checked(ID_REPORT_ALWAYS, reports && s.report_mode == klf_core::report::ALWAYS);
-    set_checked(ID_REPORT_NEVER, reports && s.report_mode == klf_core::report::NEVER);
-    for id in [ID_REPORT_PROBLEM, ID_REPORT_ALWAYS, ID_REPORT_NEVER] {
+    send(ID_REPORT_MODE, CB_SETCURSEL, if reports { report_index(s.report_mode) } else { 0 }, 0);
+    for id in [ID_REPORT_PROBLEM, ID_REPORT_MODE] {
         enable(id, reports);
     }
     let updates = crate::update::allowed(true);
     set_checked(ID_AUTO_UPDATE, updates && s.check_updates);
-    // settings imposed by the administrator: shown, greyed out
+    // settings imposed by the administrator: shown, greyed out, with a small lock
     let lk = app::locked();
     enable(ID_AUTO_UPDATE, updates && !lk.check_updates);
-    for (id, locked) in [
-        (ID_HOTKEY, lk.hotkey),
-        (ID_HOTKEY_CASE, lk.case_hotkey),
-        (ID_DIRECTION, lk.mixed_text_mode),
-        (ID_SWITCH, lk.switch_language_after_convert),
-        (ID_BUBBLE, lk.show_bubble),
-        (ID_SOUND, lk.play_sound),
-        (ID_CAREFUL, lk.require_selection),
-        (ID_LASTWORD, lk.last_word_only),
-        (ID_CAPSOFF, lk.turn_off_caps_lock),
-        (ID_LIMIT, lk.max_character_limit),
-        (ID_DELAY, lk.paste_delay_ms),
-        (ID_LANG, lk.ui_language),
-        (ID_INDICATOR, lk.indicator),
+    for (id, locked, mark) in [
+        (ID_HOTKEY, lk.hotkey, ID_LBL_HOTKEY),
+        (ID_HOTKEY_CASE, lk.case_hotkey, ID_LBL_HOTKEY_CASE),
+        (ID_DIRECTION, lk.mixed_text_mode, ID_LBL_DIRECTION),
+        (ID_SWITCH, lk.switch_language_after_convert, ID_SWITCH),
+        (ID_BUBBLE, lk.show_bubble, ID_BUBBLE),
+        (ID_BUBBLE_POS, lk.bubble_position, ID_BUBBLE),
+        (ID_PREVIEW, lk.show_preview, ID_PREVIEW),
+        (ID_SOUND, lk.play_sound, ID_SOUND),
+        (ID_CAREFUL, lk.require_selection, ID_CAREFUL),
+        (ID_LIMIT, lk.max_character_limit, ID_LBL_LIMIT),
+        (ID_DELAY, lk.paste_delay_ms, ID_LBL_DELAY),
+        (ID_LANG, lk.ui_language, ID_LBL_LANG),
+        (ID_INDICATOR, lk.indicator, ID_INDICATOR),
+        (ID_AUTO_UPDATE, lk.check_updates && updates, ID_AUTO_UPDATE),
     ] {
         if locked {
             enable(id, false);
+            add_lock(mark);
         }
     }
     update_dependents();
@@ -1056,7 +1203,7 @@ fn fill_controls() {
 }
 
 /// 2.0.0 « Defaults »: the default values of the page shown, put in its controls only (saved by
-/// « Apply »). Never the lists (words, replacements, rules, excluded programs, one-language
+/// « Apply »). Never the lists (words, shortcuts, rules, one-language
 /// programs), never a setting imposed by the administrator, never the pause state nor the start
 /// with Windows (a state of Windows, set by the installer).
 fn on_defaults() {
@@ -1089,32 +1236,34 @@ fn on_defaults() {
             if !lk.case_hotkey {
                 set_box(ID_HOTKEY_CASE, d.case_hotkey_modifiers, d.case_hotkey_key);
             }
+            check_hotkey_box(ID_HOTKEY);
+            check_hotkey_box(ID_HOTKEY_CASE);
+            check(ID_SWITCH, lk.switch_language_after_convert, d.switch_language_after_convert);
+            check(ID_CAREFUL, lk.require_selection, d.require_selection);
+        }
+        2 => {
+            check(ID_TYPING, !typing, d.typing_suggestions);
+            check(ID_REPLACEMENTS, !typing, d.text_replacements);
+        }
+        3 => {
+            check(ID_ONE_LANGUAGE, !typing, d.one_language_programs);
+        }
+        PAGE_ADV => {
             if !lk.mixed_text_mode {
                 send(ID_DIRECTION, CB_SETCURSEL, d.mixed_text_mode.as_number() as usize, 0);
             }
-            check(ID_SWITCH, lk.switch_language_after_convert, d.switch_language_after_convert);
-            check(ID_CAREFUL, lk.require_selection, d.require_selection);
-            check(ID_LASTWORD, lk.last_word_only, d.last_word_only);
-            check(ID_CAPSOFF, lk.turn_off_caps_lock, d.turn_off_caps_lock);
             check(ID_F10_WRONG, !typing, d.f10_only_wrong_words);
             check(ID_DOUBLE_SHIFT, !typing, d.double_shift_convert);
             check(ID_CTRL_TAP, !typing, d.ctrl_tap_language);
+            check(ID_TERMINAL, school_pc(), d.terminal_support);
+            check(ID_TYPING_SOUND, !typing, d.typing_sound);
+            check(ID_MESSENGER, !typing, d.messenger_guard);
             if !lk.max_character_limit {
                 set_text(ID_LIMIT, &d.max_character_limit.to_string());
             }
             if !lk.paste_delay_ms {
-                set_text(ID_DELAY, &d.paste_delay_ms.to_string());
+                set_text(ID_DELAY, &klf_core::settings::delay_text(d.paste_delay_ms, app::lang() == Lang::Fr));
             }
-        }
-        2 => {
-            check(ID_TYPING, !typing, d.typing_suggestions);
-            check(ID_TYPING_SOUND, !typing, d.typing_sound);
-            check(ID_MESSENGER, !typing, d.messenger_guard);
-            check(ID_REPLACEMENTS, !typing, d.text_replacements);
-        }
-        3 => {
-            check(ID_TERMINAL, school_pc(), d.terminal_support);
-            check(ID_ONE_LANGUAGE, !typing, d.one_language_programs);
         }
         _ => {}
     }
@@ -1166,14 +1315,14 @@ fn read_controls() -> Option<AppSettings> {
         }
     }
     let limit: Option<i64> = if lk.max_character_limit { Some(old.max_character_limit) } else { get_text(ID_LIMIT).trim().parse().ok().filter(|n| *n >= 0) };
-    let delay: Option<i64> = if lk.paste_delay_ms { Some(old.paste_delay_ms) } else { get_text(ID_DELAY).trim().parse().ok().filter(|n| (100..=10_000).contains(n)) };
+    // 2.0.0: the delay is typed in seconds (0.1 to 10), kept in ms
+    let delay: Option<i64> = if lk.paste_delay_ms { Some(old.paste_delay_ms) } else { klf_core::settings::parse_delay_seconds(&get_text(ID_DELAY)) };
     let (Some(limit), Some(delay)) = (limit, delay) else {
         set_error(text(l, Msg::NumberInvalid));
         return None;
     };
     s.max_character_limit = limit;
     s.paste_delay_ms = delay;
-    s.excluded_processes = klf_core::settings::program_list(&get_text(ID_EXCLUDED));
     // 2.0.0: the rules of the tray menu, as two lists (a program in both: disabled)
     s.app_rules = klf_core::settings::rules_from_lists(&get_text(ID_RULE_OFF), &get_text(ID_RULE_SEL));
     let keep = |locked: bool, mine: bool, id: i32| if locked { mine } else { checked(id) };
@@ -1191,8 +1340,6 @@ fn read_controls() -> Option<AppSettings> {
     s.show_preview = keep(lk.show_preview, old.show_preview, ID_PREVIEW);
     s.play_sound = keep(lk.play_sound, old.play_sound, ID_SOUND);
     s.require_selection = keep(lk.require_selection, old.require_selection, ID_CAREFUL);
-    s.last_word_only = keep(lk.last_word_only, old.last_word_only, ID_LASTWORD);
-    s.turn_off_caps_lock = keep(lk.turn_off_caps_lock, old.turn_off_caps_lock, ID_CAPSOFF);
     // 1.9.5: hidden (and forced off) on a PC managed by an administrator
     s.terminal_support = keep(school_pc(), old.terminal_support, ID_TERMINAL);
     s.indicator = keep(lk.indicator, old.indicator, ID_INDICATOR);
@@ -1208,12 +1355,10 @@ fn read_controls() -> Option<AppSettings> {
     s.one_language_programs = keep(no_typing, old.one_language_programs, ID_ONE_LANGUAGE);
     s.check_updates = keep(!crate::update::allowed(true) || lk.check_updates, old.check_updates, ID_AUTO_UPDATE);
     if crate::report::enabled() {
-        s.report_mode = if checked(ID_REPORT_ALWAYS) {
-            klf_core::report::ALWAYS
-        } else if checked(ID_REPORT_NEVER) {
-            klf_core::report::NEVER
-        } else {
-            klf_core::report::ASK
+        s.report_mode = match send(ID_REPORT_MODE, CB_GETCURSEL, 0, 0) {
+            1 => klf_core::report::ALWAYS,
+            2 => klf_core::report::NEVER,
+            _ => klf_core::report::ASK,
         };
     }
     if !lk.ui_language {
@@ -1223,7 +1368,6 @@ fn read_controls() -> Option<AppSettings> {
     Some(s)
 }
 
-/// Saves; returns true when the window was made again (language changed).
 fn on_save() -> bool {
     let Some(new_user) = read_controls() else { return false };
     let old = app::settings();
@@ -1277,6 +1421,7 @@ fn on_save() -> bool {
             send(id, EM_SETMODIFY, 0, 0);
         }
         refresh_rules();
+        refresh_advanced_head();
         refresh_status();
     }
     relang
@@ -1501,14 +1646,14 @@ fn copy_text(t: &str) {
     }
 }
 
-/// 2.0.0: the GitHub link (click or Enter): only the fixed address of the project, never the text
-/// of the control. Opened on a short thread of its own: ShellExecute can wait for the browser, and
-/// the interface thread carries the keyboard hooks.
-fn open_github() {
-    let started = std::thread::Builder::new().name("klf-link".into()).spawn(|| {
+/// 2.0.0: the two links (click or Enter): only their fixed address, never the text of the control.
+/// Opened on a short thread of its own: ShellExecute can wait for the browser, and the interface
+/// thread carries the keyboard hooks.
+fn open_link(url: &'static str) {
+    let started = std::thread::Builder::new().name("klf-link".into()).spawn(move || {
         use windows_sys::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE};
         use windows_sys::Win32::UI::Shell::ShellExecuteW;
-        let (verb, url) = (wide("open"), wide(GITHUB_URL));
+        let (verb, url) = (wide("open"), wide(url));
         // SAFETY: COM for this thread only (the Shell needs it), released before the thread ends;
         // valid strings; no owner window (it belongs to the interface thread), no parameters.
         unsafe {
@@ -1520,15 +1665,24 @@ fn open_github() {
         }
     });
     if started.is_err() {
-        log("GitHub link: thread not started");
+        log("Link: thread not started");
     }
 }
 
-/// Enter with the focus on the GitHub link opens the link (NM_RETURN), never « Apply » too.
+/// Enter with the focus on a link opens the link (NM_RETURN), never « Apply » too.
 fn focus_on_link() -> bool {
     // SAFETY: GetFocus for our own thread.
     let f = unsafe { GetFocus() };
-    !f.is_null() && f == item(ID_GITHUB)
+    !f.is_null() && (f == item(ID_GITHUB) || f == item(ID_ORIGIN))
+}
+
+/// 2.0.0: the technical report of the Help tab, shown or folded away again.
+fn toggle_report() {
+    let shown = !REPORT_SHOWN.with(|r| r.get());
+    REPORT_SHOWN.with(|r| r.set(shown));
+    let l = app::lang();
+    set_text(ID_SHOW_REPORT, text(l, if shown { Msg::ButtonHideReport } else { Msg::ButtonShowReport }));
+    show_page(PAGE.with(|p| p.get()));
 }
 
 extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
@@ -1563,10 +1717,10 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 (ID_TRY, EN_CHANGE) => update_try(),
                 (ID_WORK_MODE, CBN_SELCHANGE) | (ID_DIRECTION, CBN_SELCHANGE) => update_try(),
                 // the position list and the preview only matter when the bubble is shown
-                (ID_BUBBLE, BN_CLICKED) | (ID_TYPING, BN_CLICKED) => update_dependents(),
-                // "always send" and "never offer" cannot both be ticked
-                (ID_REPORT_ALWAYS, BN_CLICKED) if checked(ID_REPORT_ALWAYS) => set_checked(ID_REPORT_NEVER, false),
-                (ID_REPORT_NEVER, BN_CLICKED) if checked(ID_REPORT_NEVER) => set_checked(ID_REPORT_ALWAYS, false),
+                (ID_BUBBLE, BN_CLICKED) | (ID_TYPING, BN_CLICKED) | (ID_REPLACEMENTS, BN_CLICKED) => update_dependents(),
+                // 2.0.0: a key another program holds is said at once
+                (ID_HOTKEY, EN_CHANGE) | (ID_HOTKEY_CASE, EN_CHANGE) => check_hotkey_box(id),
+                (ID_SHOW_REPORT, BN_CLICKED) => toggle_report(),
                 (ID_REPORT_PROBLEM, BN_CLICKED) if crate::report::enabled() => crate::report::open(),
                 (ID_REPORT_SEND, BN_CLICKED) if crate::report::enabled() => {
                     crate::report::send_pending(app::main_window());
@@ -1576,7 +1730,6 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 (ID_REPLACEMENTS_FILE, BN_CLICKED) if crate::typing::allowed() => crate::typing::open_replacements(),
                 (ID_ONE_LANGUAGE_FILE, BN_CLICKED) if crate::typing::allowed() => crate::typing::open_one_language(),
                 (ID_COPY_RESULT, _) => copy_text(&get_text(ID_RESULT)),
-                (ID_DIAG_REFRESH, _) => refresh_diagnostic(),
                 (ID_EXPORT, _) => on_export(),
                 (ID_IMPORT, _) => on_import(),
                 (ID_UNDO_IMPORT, _) => on_undo_import(),
@@ -1618,8 +1771,12 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             let nm = unsafe { &*(lparam as *const NMHDR) };
             if nm.idFrom == ID_TAB as usize && nm.code == TCN_SELCHANGE {
                 show_page(send(ID_TAB, TCM_GETCURSEL, 0, 0).max(0) as usize);
-            } else if nm.idFrom == ID_GITHUB as usize && nm.hwndFrom == item(ID_GITHUB) && (nm.code == NM_CLICK || nm.code == NM_RETURN) {
-                open_github();
+            } else if nm.code == NM_CLICK || nm.code == NM_RETURN {
+                if nm.idFrom == ID_GITHUB as usize && nm.hwndFrom == item(ID_GITHUB) {
+                    open_link(GITHUB_URL);
+                } else if nm.idFrom == ID_ORIGIN as usize && nm.hwndFrom == item(ID_ORIGIN) {
+                    open_link(ORIGIN_URL);
+                }
             }
             0
         }
@@ -1652,6 +1809,9 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     SetBkMode(dc, OPAQUE as i32);
                     SetBkColor(dc, GetSysColor(COLOR_WINDOW));
                     return GetSysColorBrush(COLOR_WINDOW) as LRESULT;
+                } else if !sys::high_contrast() && ((child == item(ID_NOTE_HOTKEY) && HOTKEY_WARN.with(|w| w.get()[0])) || (child == item(ID_NOTE_HOTKEY_CASE) && HOTKEY_WARN.with(|w| w.get()[1]))) {
+                    // 2.0.0: « this key is already used by another program », in red
+                    SetTextColor(dc, 0x002020C0);
                 } else if NOTE_IDS.iter().any(|id| child == item(*id)) && !sys::high_contrast() {
                     // 2.0.0: the explanation lines in grey (normal text colour in high contrast)
                     SetTextColor(dc, GetSysColor(COLOR_GRAYTEXT));
@@ -1800,76 +1960,83 @@ pub fn open() {
         create("BUTTON", "", check, 0, ID_AUTOSTART);
         create("BUTTON", "", check, 0, ID_INDICATOR);
         create("BUTTON", "", check, 0, ID_BUBBLE);
-        create("COMBOBOX", "", combo, 0, ID_BUBBLE_POS);
+        create("COMBOBOX", "", combo, 0, ID_BUBBLE_POS); // named « Where to show the message »
         create("BUTTON", "", check, 0, ID_PREVIEW);
+        create("STATIC", "", note, 0, ID_NOTE_PREVIEW);
         create("BUTTON", "", check, 0, ID_SOUND);
-        create("STATIC", "", stat, 0, ID_LBL_WORK);
-        create("COMBOBOX", "", combo, 0, ID_WORK_MODE);
-        create("BUTTON", "", button, 0, ID_COPY_RESULT);
-        create("STATIC", "", SS_LEFT | SS_ENDELLIPSIS, 0, ID_LBL_TRY);
+        create("COMBOBOX", "", combo, 0, ID_WORK_MODE); // named « Conversion direction »
+        create("STATIC", "", SS_LEFT | SS_CENTERIMAGE | SS_ENDELLIPSIS, 0, ID_LBL_TRY);
         create("EDIT", "", ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | WS_VSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE, ID_TRY);
-        create("STATIC", "", SS_LEFT | SS_ENDELLIPSIS, 0, ID_LBL_RESULT);
-        create("EDIT", "", ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | WS_VSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE, ID_RESULT);
-        // Conversion
+        create("EDIT", "", ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | WS_VSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE, ID_RESULT); // named « Result »
+        create("BUTTON", "", button, 0, ID_COPY_RESULT);
+        // Keys
         create("STATIC", "", stat, 0, ID_LBL_HOTKEY);
         create("msctls_hotkey32", "", WS_TABSTOP | WS_BORDER, 0, ID_HOTKEY);
+        create("STATIC", "", note, 0, ID_NOTE_HOTKEY);
         create("STATIC", "", stat, 0, ID_LBL_HOTKEY_CASE);
         create("msctls_hotkey32", "", WS_TABSTOP | WS_BORDER, 0, ID_HOTKEY_CASE);
+        create("STATIC", "", note, 0, ID_NOTE_HOTKEY_CASE);
+        create("BUTTON", "", check, 0, ID_SWITCH);
+        create("STATIC", "", note, 0, ID_NOTE_SWITCH);
+        create("BUTTON", "", check, 0, ID_CAREFUL);
+        create("STATIC", "", note, 0, ID_NOTE_CAREFUL);
+        // While typing
+        create("BUTTON", "", check, 0, ID_TYPING);
+        create("STATIC", "", note, 0, ID_NOTE_TYPING_ON);
+        create("BUTTON", "", button, 0, ID_TYPING_WORDS);
+        create("STATIC", "", note, 0, ID_NOTE_WORDS);
+        create("BUTTON", "", check, 0, ID_REPLACEMENTS);
+        create("STATIC", "", note, 0, ID_NOTE_SHORTCUTS);
+        create("BUTTON", "", button, 0, ID_REPLACEMENTS_FILE);
+        create("STATIC", "", note, 0, ID_NOTE_TYPING);
+        // Programs
+        create("STATIC", "", stat, 0, ID_LBL_RULE_OFF);
+        create("EDIT", "", ES_AUTOHSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE, ID_RULE_OFF);
+        create("STATIC", "", note, 0, ID_NOTE_RULE_OFF);
+        create("STATIC", "", stat, 0, ID_LBL_RULE_SEL);
+        create("EDIT", "", ES_AUTOHSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE, ID_RULE_SEL);
+        create("STATIC", "", note, 0, ID_NOTE_RULE_SEL);
+        create("STATIC", "", note, 0, ID_NOTE_RULES2);
+        create("BUTTON", "", check, 0, ID_ONE_LANGUAGE);
+        create("STATIC", "", note, 0, ID_NOTE_ONE_LANGUAGE);
+        create("BUTTON", "", button, 0, ID_ONE_LANGUAGE_FILE);
+        // Advanced
+        create("STATIC", "", note, 0, ID_ADV_HEAD);
         create("STATIC", "", stat, 0, ID_LBL_DIRECTION);
         create("COMBOBOX", "", combo, 0, ID_DIRECTION);
-        create("STATIC", "", note, 0, ID_NOTE_DIRECTION);
-        for id in [ID_SWITCH, ID_CAREFUL, ID_LASTWORD, ID_F10_WRONG, ID_DOUBLE_SHIFT, ID_CTRL_TAP, ID_CAPSOFF] {
+        for id in [ID_F10_WRONG, ID_DOUBLE_SHIFT, ID_CTRL_TAP, ID_TERMINAL, ID_TYPING_SOUND, ID_MESSENGER] {
             create("BUTTON", "", check, 0, id);
-            if id == ID_CAREFUL {
-                create("STATIC", "", note, 0, ID_NOTE_CAREFUL);
-            }
         }
+        create("STATIC", "", note, 0, ID_NOTE_MESSENGER);
         create("STATIC", "", stat, 0, ID_LBL_LIMIT);
         create("EDIT", "", ES_NUMBER | ES_AUTOHSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE, ID_LIMIT);
         create("STATIC", "", stat, 0, ID_LBL_DELAY);
-        create("EDIT", "", ES_NUMBER | ES_AUTOHSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE, ID_DELAY);
+        // seconds, with a decimal point or comma (2.0.0): not ES_NUMBER
+        create("EDIT", "", ES_AUTOHSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE, ID_DELAY);
         create("STATIC", "", note, 0, ID_NOTE_LIMIT);
-        // Typing
-        create("BUTTON", "", check, 0, ID_TYPING);
-        create("BUTTON", "", check, 0, ID_TYPING_SOUND);
-        create("BUTTON", "", check, 0, ID_MESSENGER);
-        create("BUTTON", "", button, 0, ID_TYPING_WORDS);
-        create("BUTTON", "", check, 0, ID_REPLACEMENTS);
-        create("BUTTON", "", button, 0, ID_REPLACEMENTS_FILE);
-        create("STATIC", "", note, 0, ID_NOTE_TYPING);
-        // Apps
-        create("STATIC", "", note, 0, ID_NOTE_RULES);
-        create("STATIC", "", stat, 0, ID_LBL_RULE_OFF);
-        create("EDIT", "", ES_AUTOHSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE, ID_RULE_OFF);
-        create("STATIC", "", stat, 0, ID_LBL_RULE_SEL);
-        create("EDIT", "", ES_AUTOHSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE, ID_RULE_SEL);
-        create("STATIC", "", stat, 0, ID_LBL_EXCLUDED);
-        create("EDIT", "", ES_AUTOHSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE, ID_EXCLUDED);
-        create("STATIC", "", note, 0, ID_NOTE_RULES2);
-        create("BUTTON", "", check, 0, ID_TERMINAL);
-        create("BUTTON", "", check, 0, ID_ONE_LANGUAGE);
-        create("BUTTON", "", button, 0, ID_ONE_LANGUAGE_FILE);
-        // Diagnostics
-        create("STATIC", "", SS_LEFT, 0, ID_DIAG_LAST);
-        create("EDIT", "", ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | WS_VSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE, ID_DIAG_TEXT);
-        create("STATIC", "", SS_LEFT | SS_EDITCONTROL | SS_NOPREFIX, 0, ID_LAYOUTS);
-        create("BUTTON", "", button, 0, ID_DIAG_COPY);
-        create("BUTTON", "", button, 0, ID_DIAG_REFRESH);
-        create("BUTTON", "", button, 0, ID_REPORT_PROBLEM);
-        create("BUTTON", "", button, 0, ID_REPORT_SEND);
-        create("BUTTON", "", check, 0, ID_REPORT_ALWAYS);
-        create("BUTTON", "", check, 0, ID_REPORT_NEVER);
         create("BUTTON", "", button, 0, ID_EXPORT);
         create("BUTTON", "", button, 0, ID_IMPORT);
+        // Help
+        create("STATIC", "", note, 0, ID_PRIVACY);
+        create("STATIC", "", SS_LEFT | SS_NOPREFIX, 0, ID_DIAG_LAST);
+        create("STATIC", "", SS_LEFT | SS_EDITCONTROL | SS_NOPREFIX, 0, ID_LAYOUTS);
+        create("BUTTON", "", button, 0, ID_DIAG_COPY);
+        create("BUTTON", "", button, 0, ID_SHOW_REPORT);
+        create("EDIT", "", ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | WS_VSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE, ID_DIAG_TEXT); // named « Technical report »
+        create("BUTTON", "", button, 0, ID_REPORT_PROBLEM);
+        create("BUTTON", "", button, 0, ID_REPORT_SEND);
+        create("STATIC", "", stat, 0, ID_LBL_REPORTS);
+        create("COMBOBOX", "", combo, 0, ID_REPORT_MODE);
+        create("BUTTON", "", button, 0, ID_CHECK_UPDATE);
+        create("BUTTON", "", check, 0, ID_AUTO_UPDATE);
         create("BUTTON", "", button, 0, ID_UNDO_IMPORT);
-        // About
         // a read-only edit, reached by Tab: a screen reader reads the version and the license
         // (a static never gets the focus); no border, the window's background
         create("EDIT", "", ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | WS_TABSTOP, 0, ID_ABOUT_TEXT);
-        create("BUTTON", "", button, 0, ID_CHECK_UPDATE);
-        create("BUTTON", "", check, 0, ID_AUTO_UPDATE);
-        let link = format!("<a href=\"{GITHUB_URL}\">GitHub</a>");
-        create("SysLink", &link, WS_TABSTOP | LWS_TRANSPARENT, 0, ID_GITHUB);
+        for (id, url, m) in [(ID_GITHUB, GITHUB_URL, Msg::LinkOurs), (ID_ORIGIN, ORIGIN_URL, Msg::LinkOrigin)] {
+            let link = format!("<a href=\"{url}\">{}</a>", text(l, m));
+            create("SysLink", &link, WS_TABSTOP | LWS_TRANSPARENT, 0, id);
+        }
         // common bottom row
         create("BUTTON", "", button, 0, ID_DEFAULTS);
         create("BUTTON", "", BS_DEFPUSHBUTTON | WS_TABSTOP, 0, ID_SAVE);

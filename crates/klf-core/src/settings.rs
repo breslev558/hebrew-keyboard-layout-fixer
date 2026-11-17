@@ -200,7 +200,9 @@ pub struct AppSettings {
     #[serde(rename = "UpdateSkipAt", default, deserialize_with = "de_u64")]
     pub update_skip_at: u64,
     // --- new in 1.5.2 ---
-    /// Where the bubble appears: BUBBLE_TOP (default), BUBBLE_BOTTOM or BUBBLE_CARET.
+    /// Where the bubble appears: BUBBLE_TOP, BUBBLE_BOTTOM or BUBBLE_CARET. 2.0.0: near the text
+    /// (BUBBLE_CARET) by default, for a new install only: a file written before always holds its
+    /// value (every field is written), which is kept.
     #[serde(rename = "BubblePosition", deserialize_with = "de_bubble_position")]
     pub bubble_position: u32,
     #[serde(rename = "UiLanguage", deserialize_with = "de_lang", serialize_with = "ser_lang")]
@@ -257,6 +259,10 @@ pub struct AppSettings {
     /// Small "HE / EN" sign when the keyboard language changes (off by default).
     #[serde(rename = "Indicator", deserialize_with = "de_bool_false")]
     pub indicator: bool,
+    /// 2.0.0: the notice "New settings layout: 6 tabs" was shown (once, to a user of an older
+    /// version; a new install never sees it).
+    #[serde(rename = "TabsNoticeDone", deserialize_with = "de_bool_false")]
+    pub tabs_notice_done: bool,
     /// 0 (absent) = file written before 1.3.3, when ConsoleSupport was ON by default.
     #[serde(rename = "SettingsVersion", default, deserialize_with = "de_u32")]
     pub settings_version: u32,
@@ -318,7 +324,7 @@ impl Default for AppSettings {
             run_at_startup: false,
             show_bubble: true,
             play_sound: false,
-            bubble_position: BUBBLE_TOP,
+            bubble_position: BUBBLE_CARET,
             check_updates: true,
             show_preview: true,
             welcome_done: false,
@@ -344,6 +350,7 @@ impl Default for AppSettings {
             app_rules: Vec::new(),
             last_word_only: false,
             indicator: false,
+            tabs_notice_done: false,
             require_selection: false,
             case_hotkey_modifiers: 0,
             case_hotkey_key: KEY_F9,
@@ -385,6 +392,9 @@ impl AppSettings {
                 if s.settings_version != SETTINGS_VERSION {
                     s.settings_version = SETTINGS_VERSION;
                     s.migrated = true;
+                }
+                if s.merge_excluded_into_rules() {
+                    s.migrated = true; // written again: done once
                 }
                 s.validate();
                 (s, true)
@@ -447,6 +457,25 @@ impl AppSettings {
         }
         rules.truncate(MAX_RULES);
         self.app_rules = rules;
+    }
+
+    /// 2.0.0 (choice of the owner): the « Excluded » list is gone from the settings window; its
+    /// programs become « fix nothing in these programs » rules (Disabled), each once, a rule
+    /// « only with a selection » for the same program becoming Disabled. True if something moved.
+    /// (The administrator's excluded programs are not here: they are added on top, as before.)
+    pub fn merge_excluded_into_rules(&mut self) -> bool {
+        if self.excluded_processes.is_empty() {
+            return false;
+        }
+        for p in std::mem::take(&mut self.excluded_processes) {
+            let n = crate::policy::exe_base_name(p.trim());
+            if n.is_empty() || !crate::policy::rule_allowed_for(&n) {
+                continue;
+            }
+            self.app_rules.retain(|r| r.process != n);
+            self.app_rules.push(AppRule { process: n, mode: RuleMode::Disabled });
+        }
+        true
     }
 
     /// The rule of a program (None: no rule).
@@ -532,7 +561,7 @@ fn de_value<'de, D: Deserializer<'de>>(d: D) -> Result<serde_json::Value, D::Err
 
 fn de_bubble_position<'de, D: Deserializer<'de>>(d: D) -> Result<u32, D::Error> {
     let v = de_value(d)?;
-    Ok(v.as_u64().and_then(|n| u32::try_from(n).ok()).filter(|n| *n <= BUBBLE_CARET).unwrap_or(BUBBLE_TOP))
+    Ok(v.as_u64().and_then(|n| u32::try_from(n).ok()).filter(|n| *n <= BUBBLE_CARET).unwrap_or(BUBBLE_CARET))
 }
 
 fn de_u32<'de, D: Deserializer<'de>>(d: D) -> Result<u32, D::Error> {
@@ -650,6 +679,50 @@ fn de_strings<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> 
     })
 }
 
+/// 2.0.0: the paste delay shown in SECONDS ("1", "0,5" with a comma in French), stored in ms.
+pub fn delay_text(ms: i64, comma: bool) -> String {
+    let t = if ms % 1000 == 0 { (ms / 1000).to_string() } else { format!("{}.{}", ms / 1000, (ms % 1000) / 100) };
+    if comma { t.replace('.', ",") } else { t }
+}
+
+/// 2.0.0: seconds typed by the user ("1", "1.5", "0,5") -> ms, only from 0.1 to 10 s, tenths only.
+pub fn parse_delay_seconds(t: &str) -> Option<i64> {
+    let t = t.trim().replace(',', ".");
+    let (int, frac) = t.split_once('.').unwrap_or((&t, ""));
+    if int.is_empty() && frac.is_empty() || !int.chars().all(|c| c.is_ascii_digit()) || !frac.chars().all(|c| c.is_ascii_digit()) || frac.len() > 1 || int.len() > 3 {
+        return None;
+    }
+    let ms = int.parse::<i64>().unwrap_or(0) * 1000 + frac.parse::<i64>().unwrap_or(0) * 100;
+    (100..=10_000).contains(&ms).then_some(ms)
+}
+
+/// 2.0.0: which settings of the Advanced tab are not at their default value (shown at the top of
+/// the tab, by their short names).
+pub fn advanced_changes(s: &AppSettings) -> Vec<crate::i18n::Msg> {
+    use crate::i18n::Msg::*;
+    let d = AppSettings::default();
+    [
+        (s.mixed_text_mode != d.mixed_text_mode, AdvDirection),
+        (s.f10_only_wrong_words != d.f10_only_wrong_words, AdvWrongWords),
+        (s.double_shift_convert != d.double_shift_convert, AdvDoubleShift),
+        (s.ctrl_tap_language != d.ctrl_tap_language, AdvCtrlTap),
+        (s.terminal_support != d.terminal_support, AdvTerminal),
+        (s.typing_sound != d.typing_sound, AdvTypingSound),
+        (s.messenger_guard != d.messenger_guard, AdvMessenger),
+        (s.max_character_limit != d.max_character_limit, AdvLimit),
+        (s.paste_delay_ms != d.paste_delay_ms, AdvDelay),
+    ]
+    .into_iter()
+    .filter_map(|(changed, m)| changed.then_some(m))
+    .collect()
+}
+
+/// 2.0.0: the "6 tabs" notice is due: a settings file was there before this start (an older
+/// version was used) and the notice was never shown.
+pub fn tabs_notice_due(file_existed: bool, s: &AppSettings) -> bool {
+    file_existed && !s.tabs_notice_done
+}
+
 /// 2.0.0: a list of programs typed in the settings window ("a.exe, b.exe"; commas, semicolons or
 /// line breaks), trimmed, empty items left out.
 pub fn program_list(text: &str) -> Vec<String> {
@@ -680,12 +753,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bubble_position_defaults_to_top_and_rejects_bad_values() {
-        assert_eq!(AppSettings::default().bubble_position, BUBBLE_TOP);
-        assert_eq!(AppSettings::from_json("{}").0.bubble_position, BUBBLE_TOP);
+    fn bubble_position_defaults_to_near_the_text_and_keeps_a_saved_value() {
+        // 2.0.0: near the text for a new install (absent from the file), a saved value kept
+        assert_eq!(AppSettings::default().bubble_position, BUBBLE_CARET);
+        assert_eq!(AppSettings::from_json("{}").0.bubble_position, BUBBLE_CARET);
+        assert_eq!(AppSettings::from_json("{\"BubblePosition\":0}").0.bubble_position, BUBBLE_TOP);
         assert_eq!(AppSettings::from_json("{\"BubblePosition\":2}").0.bubble_position, BUBBLE_CARET);
-        assert_eq!(AppSettings::from_json("{\"BubblePosition\":9}").0.bubble_position, BUBBLE_TOP);
-        assert_eq!(AppSettings::from_json("{\"BubblePosition\":\"x\"}").0.bubble_position, BUBBLE_TOP);
+        assert_eq!(AppSettings::from_json("{\"BubblePosition\":9}").0.bubble_position, BUBBLE_CARET);
+        assert_eq!(AppSettings::from_json("{\"BubblePosition\":\"x\"}").0.bubble_position, BUBBLE_CARET);
+        // a file of an older version always holds the field: written again unchanged
+        let old = AppSettings { bubble_position: BUBBLE_TOP, ..AppSettings::default() }.to_json();
+        assert_eq!(AppSettings::from_json(&old).0.bubble_position, BUBBLE_TOP);
         let (s, _) = AppSettings::from_json("{\"BubblePosition\":1}");
         assert!(s.to_json().contains("\"BubblePosition\": 1"));
     }
@@ -767,7 +845,9 @@ mod tests {
         assert!(!ok && s == AppSettings::default());
         let (s, _) = AppSettings::from_json("{\"HotkeyKey\":\"xyz\",\"ExcludedProcesses\":[\" Game.EXE \", 3, \"\"]}");
         assert_eq!(s.hotkey_key, KEY_F10);
-        assert_eq!(s.excluded_processes, vec!["game.exe".to_string()]);
+        // 2.0.0: the excluded programs become Disabled rules (read tolerantly first)
+        assert!(s.excluded_processes.is_empty());
+        assert_eq!(s.rule_for("game.exe"), Some(RuleMode::Disabled));
     }
 
     #[test]
@@ -890,7 +970,7 @@ mod tests {
         for bad in [r#""1""#, "-1", "null", "7", r#"{"a":1}"#] {
             let j = format!(r#"{{"ExcludedProcesses":["game.exe"],"ReportMode":{bad},"UpdateSkipTag":{bad},"UpdateSkipAt":{bad},"SettingsVersion":4}}"#);
             let (s, _) = AppSettings::from_json(&j);
-            assert_eq!(s.excluded_processes, vec!["game.exe".to_string()], "{bad}");
+            assert_eq!(s.rule_for("game.exe"), Some(RuleMode::Disabled), "{bad}"); // 2.0.0: moved to the rules
             assert!(s.report_mode <= 2, "{bad}");
         }
         let (s, _) = AppSettings::from_json(r#"{"ReportMode":2,"UpdateSkipTag":"v1.8.7","UpdateSkipAt":5,"SettingsVersion":4}"#);
@@ -918,5 +998,56 @@ mod tests {
         assert_eq!(s.rule_for("x.exe"), Some(RuleMode::Disabled));
         assert_eq!(s.rule_for("y.exe"), Some(RuleMode::SelectionOnly));
         assert!(rules_from_lists("", " , ").is_empty());
+    }
+
+    #[test]
+    fn delay_in_seconds() {
+        assert_eq!(delay_text(1000, true), "1");
+        assert_eq!(delay_text(1500, true), "1,5");
+        assert_eq!(delay_text(1500, false), "1.5");
+        assert_eq!(delay_text(100, false), "0.1");
+        for (t, ms) in [("1", Some(1000)), ("1,5", Some(1500)), (" 0.5 ", Some(500)), ("10", Some(10_000)), ("0,1", Some(100)), (".5", Some(500)), ("0", None), ("11", None), ("1.25", None), ("abc", None), ("", None), ("-1", None), ("1,5,5", None)] {
+            assert_eq!(parse_delay_seconds(t), ms, "{t}");
+        }
+        for ms in (100..=10_000).step_by(100) {
+            assert_eq!(parse_delay_seconds(&delay_text(ms, true)), Some(ms));
+        }
+    }
+
+    #[test]
+    fn advanced_changes_lists_what_differs() {
+        use crate::i18n::Msg;
+        assert!(advanced_changes(&AppSettings::default()).is_empty());
+        let s = AppSettings { paste_delay_ms: 2000, terminal_support: false, double_shift_convert: true, ..AppSettings::default() };
+        assert_eq!(advanced_changes(&s), vec![Msg::AdvDoubleShift, Msg::AdvTerminal, Msg::AdvDelay]);
+    }
+
+    #[test]
+    fn tabs_notice_once_for_an_older_install() {
+        let s = AppSettings::default();
+        assert!(tabs_notice_due(true, &s), "older install: shown");
+        assert!(!tabs_notice_due(false, &s), "new install: never");
+        let done = AppSettings { tabs_notice_done: true, ..s };
+        assert!(!tabs_notice_due(true, &done), "once only");
+        assert!(AppSettings::from_json(&done.to_json()).0.tabs_notice_done, "kept in the file");
+        assert!(!AppSettings::from_json("{}").0.tabs_notice_done);
+    }
+
+    /// 2.0.0: the « Excluded » programs of an older file become Disabled rules, once, without
+    /// doubles; the file is written again (nothing left to move).
+    #[test]
+    fn excluded_programs_become_disabled_rules_once() {
+        let old = r#"{"ExcludedProcesses":["Game.exe","notepad.exe"," "],"AppRules":[{"Process":"notepad.exe","Mode":"SelectionOnly"},{"Process":"word.exe","Mode":"Disabled"}],"SettingsVersion":4}"#;
+        let (s, ok) = AppSettings::from_json(old);
+        assert!(ok && s.migrated && s.excluded_processes.is_empty());
+        assert_eq!(s.rule_for("game.exe"), Some(RuleMode::Disabled));
+        assert_eq!(s.rule_for("notepad.exe"), Some(RuleMode::Disabled), "the stronger rule");
+        assert_eq!(s.rule_for("word.exe"), Some(RuleMode::Disabled));
+        assert_eq!(s.app_rules.len(), 3, "no double");
+        let (again, _) = AppSettings::from_json(&s.to_json());
+        assert!(!again.migrated, "once only");
+        assert_eq!(again.app_rules, s.app_rules);
+        let (none, _) = AppSettings::from_json(r#"{"SettingsVersion":4}"#);
+        assert!(!none.migrated);
     }
 }

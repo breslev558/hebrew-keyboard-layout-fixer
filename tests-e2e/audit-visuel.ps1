@@ -8,10 +8,10 @@
 # 1.9.9 (audit du 17/11) : trois VERIFICATIONS qui font echouer l'essai (« DEFAUT », sortie 1 a la fin) :
 #  texte coupe ou controle hors de la fenetre dans les reglages (3 langues, 100/150/200 %), controle
 #  sans nom pour un lecteur d'ecran (UI Automation), bulle qui prend le premier plan ou le focus.
-# 2.0.0 : SIX onglets (General, Conversion, Frappe, Programmes, Diagnostic, A propos) ; menu de l'icone a
+# 2.0.0 : SIX onglets (General, Touches, Pendant la frappe, Programmes, Avance, Aide) ; menu de l'icone a
 #  plat (aucun sous-menu, « Parametres » en gras, 10 lignes au plus) ; « Valeurs par defaut » remet la page
-#  affichee sans rien enregistrer et reste inactif sur Diagnostic et A propos ; lien SysLink « GitHub »
-#  (nom pour le lecteur d'ecran, adresse exacte, jamais ouvert ici).
+#  affichee sans rien enregistrer et reste inactif sur Aide ; deux liens SysLink (nom pour le lecteur
+#  d'ecran, adresse exacte, jamais ouverts ici) ; grisages ; rapports en une liste ; bulle pres du texte par defaut.
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 Add-Type -ReferencedAssemblies System.Drawing, Accessibility -TypeDefinition @'
@@ -168,6 +168,19 @@ public static class A {
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr SendMessage(IntPtr h, uint m, IntPtr w, StringBuilder l);
   public static string EditText(IntPtr h) { var sb = new StringBuilder(1024); SendMessage(h, 0x000D, (IntPtr)1024, sb); return sb.ToString(); }
   [DllImport("user32.dll")] public static extern bool IsWindowEnabled(IntPtr h);
+  // 2.0.0: how far the bubble is from the text cursor of the window in front (or the mouse)
+  [StructLayout(LayoutKind.Sequential)] public struct GUITHREADINFO { public int cbSize, flags; public IntPtr hwndActive, hwndFocus, hwndCapture, hwndMenuOwner, hwndMoveSize, hwndCaret; public RECT rcCaret; }
+  [DllImport("user32.dll")] public static extern bool GetGUIThreadInfo(uint tid, ref GUITHREADINFO g);
+  [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT p);
+  static int Far(RECT r, int x, int y) { int dx = Math.Max(Math.Max(r.L - x, 0), x - r.R), dy = Math.Max(Math.Max(r.T - y, 0), y - r.B); return (int)Math.Sqrt((double)dx * dx + (double)dy * dy); }
+  public static int BubbleDistance(IntPtr b) {
+    RECT r; GetWindowRect(b, out r); int best = int.MaxValue;
+    var g = new GUITHREADINFO(); g.cbSize = Marshal.SizeOf(typeof(GUITHREADINFO));
+    uint tid = GetWindowThreadProcessId(GetForegroundWindow(), IntPtr.Zero);
+    if (GetGUIThreadInfo(tid, ref g) && g.hwndCaret != IntPtr.Zero) { var c = new POINT(); c.X = g.rcCaret.L; c.Y = g.rcCaret.B; ClientToScreen(g.hwndCaret, ref c); best = Far(r, c.X, c.Y); }
+    POINT m; if (GetCursorPos(out m)) best = Math.Min(best, Far(r, m.X, m.Y));
+    return best;
+  }
   [DllImport("user32.dll")] public static extern int GetMenuItemCount(IntPtr m);
   [DllImport("user32.dll")] public static extern IntPtr GetSubMenu(IntPtr m, int i);
   [DllImport("user32.dll")] public static extern int GetMenuDefaultItem(IntPtr m, uint byPos, uint flags);
@@ -311,9 +324,11 @@ foreach ($lg in 'he', 'fr', 'en') {
   } else { Manque "menu de l'icône ($lg)" }
   Start-Sleep 1
 
-  # --- bulle F10, en haut puis en bas
-  foreach ($pos in @(@(0, 'haut'), @(1, 'bas'))) {
-    $p = Demarrer ('{ "WelcomeDone": true, "ShowBubble": true, "ShowPreview": true, "BubblePosition": ' + $pos[0] + ', "UiLanguage": "' + $lg + '" }') $null
+  # --- bulle F10, en haut, en bas, puis (2.0.0) sans BubblePosition dans le fichier comme une
+  # installation neuve : la bulle doit apparaitre pres du texte (curseur de texte ou souris)
+  foreach ($pos in @(@(0, 'haut'), @(1, 'bas'), @(-1, 'defaut'))) {
+    $placeJson = if ($pos[0] -ge 0) { '"BubblePosition": ' + $pos[0] + ', ' } else { '' }
+    $p = Demarrer ('{ "WelcomeDone": true, "ShowBubble": true, "ShowPreview": true, ' + $placeJson + '"UiLanguage": "' + $lg + '" }') $null
     $n = Bloc-notes 'akuo'
     if (-not $n) { Manque "Bloc-notes ($lg)"; continue }
     $avantF10 = [A]::GetForegroundWindow()   # (Notepad of Windows 11: its MainWindowHandle may be stale, avis Fable)
@@ -321,6 +336,10 @@ foreach ($lg in 'he', 'fr', 'en') {
     $b = Attendre { [A]::Visible('KBLayoutFixerBubble', 0) } 4000
     if ($b -ne [IntPtr]::Zero) {
       Start-Sleep -Milliseconds 250; Photo $b "bulle-f10-$($pos[1])-$lg.png"
+      if ($pos[0] -lt 0) {
+        $loin = [A]::BubbleDistance($b)
+        if ($loin -gt 250) { Defaut "bulle F10 par defaut ($lg) : a $loin px du curseur et de la souris (attendu : pres du texte)" } else { Write-Host "OK    bulle F10 par defaut ($lg) : pres du texte ($loin px)" }
+      }
       # 1.9.9: the bubble never takes the foreground nor the focus (the user keeps typing)
       $fg = [A]::GetForegroundWindow(); $ex = [A]::GetWindowLong($b, -20)
       if ($fg -ne $avantF10) { Defaut "bulle F10 $($pos[1]) ($lg) : Bloc-notes n'est plus au premier plan" }
@@ -332,7 +351,7 @@ foreach ($lg in 'he', 'fr', 'en') {
     Start-Sleep 1
   }
 
-  # --- bouton « Rechercher une mise à jour » (2.0.0 : onglet À propos) : bulle de réponse
+  # --- bouton « Rechercher une mise à jour » (2.0.0 : onglet Aide) : bulle de réponse
   $p = Demarrer ('{ "WelcomeDone": true, "ShowBubble": true, "UiLanguage": "' + $lg + '" }') $null
   $w = Reglages $lg 'normal' @(1, 2, 3, 4, 5, 6) -noms
   if ($w -ne [IntPtr]::Zero) {
@@ -341,43 +360,65 @@ foreach ($lg in 'he', 'fr', 'en') {
     if ($b -ne [IntPtr]::Zero) { Start-Sleep -Milliseconds 250; Photo $b "bulle-mise-a-jour-$lg.png" } else { Manque "bulle de mise à jour ($lg)" }
     Start-Sleep 4   # the bubble goes away
     $tc = [A]::GetDlgItem($w, 240)
-    # 2.0.0 « Valeurs par defaut » (bouton 269) sur l'onglet Conversion : mode prudent (245) coche, limite
-    # (248) a 123, delai (250) a 5000, puis le bouton : la case est decochee, limite 0, delai 1000, et rien
-    # n'est enregistre. (Essai 200 : SetWindowText / GetWindowText sur le champ d'un AUTRE programme ne
-    # touchent que le titre interne de la fenetre, pas le texte du champ : WM_SETTEXT / WM_GETTEXT ici.)
-    [A]::Ask($tc, 0x1330, [IntPtr]1, [IntPtr]::Zero); Start-Sleep -Milliseconds 400   # TCM_SETCURFOCUS onglet 2
-    $prudent = [A]::GetDlgItem($w, 245); $limite = [A]::GetDlgItem($w, 248); $delai = [A]::GetDlgItem($w, 250)
-    [A]::Ask($prudent, 0x00F1, [IntPtr]1, [IntPtr]::Zero)   # BM_SETCHECK
-    [void][A]::SendMessage($limite, 0x000C, [IntPtr]::Zero, '123')   # WM_SETTEXT
-    [void][A]::SendMessage($delai, 0x000C, [IntPtr]::Zero, '5000')
-    $avant123 = [A]::EditText($limite)
-    if ($avant123 -ne '123') { Manque "valeurs par defaut ($lg) : limite non ecrite par l'essai ('$avant123')" }
+    # 2.0.0 'Valeurs par defaut' (bouton 269), rien enregistre sans 'Appliquer' :
+    #  - onglet Touches : 'seulement le texte selectionne' (245) coche puis decoche par le bouton ;
+    #  - onglet Avance : longueur (248) a 123 et delai (250, en secondes) a 5, remis a 0 et 1.
+    # (Essai 200 : SetWindowText / GetWindowText sur le champ d'un AUTRE programme ne touchent que
+    # le titre interne de la fenetre, pas le texte du champ : WM_SETTEXT / WM_GETTEXT ici.)
     $avantJson = Get-Content (Join-Path $dir 'settings.json') -Raw
-    [A]::Ask($w, 0x0111, [IntPtr]269, [A]::GetDlgItem($w, 269))   # WM_COMMAND, bouton 269
-    Start-Sleep -Milliseconds 300
+    [A]::Ask($tc, 0x1330, [IntPtr]1, [IntPtr]::Zero); Start-Sleep -Milliseconds 400   # TCM_SETCURFOCUS onglet 2
+    $prudent = [A]::GetDlgItem($w, 245)
+    [A]::Ask($prudent, 0x00F1, [IntPtr]1, [IntPtr]::Zero)   # BM_SETCHECK
+    [A]::Ask($w, 0x0111, [IntPtr]269, [A]::GetDlgItem($w, 269)); Start-Sleep -Milliseconds 300   # WM_COMMAND, bouton 269
     $coche = [int][A]::SendMessage($prudent, 0x00F0, [IntPtr]::Zero, [IntPtr]::Zero)   # BM_GETCHECK
+    [A]::Ask($tc, 0x1330, [IntPtr]4, [IntPtr]::Zero); Start-Sleep -Milliseconds 400   # onglet 5 (Avance)
+    $limite = [A]::GetDlgItem($w, 248); $delai = [A]::GetDlgItem($w, 250)
+    [void][A]::SendMessage($limite, 0x000C, [IntPtr]::Zero, '123')   # WM_SETTEXT
+    [void][A]::SendMessage($delai, 0x000C, [IntPtr]::Zero, '5')
+    $avant123 = [A]::EditText($limite)
+    if ($avant123 -ne '123') { Manque "valeurs par defaut ($lg) : longueur non ecrite par l'essai ('$avant123')" }
+    [A]::Ask($w, 0x0111, [IntPtr]269, [A]::GetDlgItem($w, 269)); Start-Sleep -Milliseconds 300
     $lim = [A]::EditText($limite); $del = [A]::EditText($delai); $apresJson = Get-Content (Join-Path $dir 'settings.json') -Raw
-    if ($coche -ne 0 -or $lim -ne '0' -or $del -ne '1000') { Defaut "valeurs par defaut ($lg) : mode prudent $coche, limite '$lim', delai '$del' (attendu 0, '0' et '1000')" }
+    if ($coche -ne 0 -or $lim -ne '0' -or $del -ne '1') { Defaut "valeurs par defaut ($lg) : texte selectionne $coche, longueur '$lim', delai '$del' (attendu 0, '0' et '1')" }
     elseif ($apresJson -ne $avantJson) { Defaut "valeurs par defaut ($lg) : settings.json change sans 'Appliquer'" }
-    else { Write-Host "OK    valeurs par defaut ($lg) : page Conversion remise, rien enregistre" }
-    foreach ($tab in 5, 6) {
-      [A]::Ask($tc, 0x1330, [IntPtr]($tab - 1), [IntPtr]::Zero); Start-Sleep -Milliseconds 300
-      if ([A]::IsWindowEnabled([A]::GetDlgItem($w, 269))) { Defaut "valeurs par defaut ($lg) : bouton actif sur l'onglet $tab" }
-    }
-    # 2.0.0 lien « GitHub » (SysLink 297, onglet A propos) : present, visible, nomme, la bonne adresse (jamais ouvert ici)
-    $gh = [A]::GetDlgItem($w, 297)
-    if ($gh -eq [IntPtr]::Zero) { Defaut "lien GitHub ($lg) : absent" }
-    else {
+    else { Write-Host "OK    valeurs par defaut ($lg) : Touches et Avance remis, rien enregistre" }
+    [A]::Ask($tc, 0x1330, [IntPtr]5, [IntPtr]::Zero); Start-Sleep -Milliseconds 300
+    if ([A]::IsWindowEnabled([A]::GetDlgItem($w, 269))) { Defaut "valeurs par defaut ($lg) : bouton actif sur l'onglet Aide" }
+    # 2.0.0 grisages : sans message (208 decoche), ni sa place (263) ni le texte corrige (268) ;
+    # 'Mes raccourcis' (280) grise tant que les raccourcis (279) sont decoches, 'Mes mots' (278)
+    # tant que les suggestions (276) le sont (installation publique : options disponibles)
+    [A]::Ask($tc, 0x1330, [IntPtr]0, [IntPtr]::Zero); Start-Sleep -Milliseconds 300
+    $bulle = [A]::GetDlgItem($w, 208)
+    if ([int][A]::SendMessage($bulle, 0x00F0, [IntPtr]::Zero, [IntPtr]::Zero) -eq 1) { [A]::Ask($bulle, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero) }   # BM_CLICK
+    if ([A]::IsWindowEnabled([A]::GetDlgItem($w, 263)) -or [A]::IsWindowEnabled([A]::GetDlgItem($w, 268))) { Defaut "grisage ($lg) : place ou texte du message actifs sans message" }
+    [A]::Ask($bulle, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero)
+    if (-not [A]::IsWindowEnabled([A]::GetDlgItem($w, 263))) { Defaut "grisage ($lg) : place du message grisee avec le message" }
+    [A]::Ask($tc, 0x1330, [IntPtr]2, [IntPtr]::Zero); Start-Sleep -Milliseconds 300
+    $racc = [A]::GetDlgItem($w, 279); $sugg = [A]::GetDlgItem($w, 276)
+    if ([A]::IsWindowEnabled($racc)) {
+      $r0 = [int][A]::SendMessage($racc, 0x00F0, [IntPtr]::Zero, [IntPtr]::Zero); $s0 = [int][A]::SendMessage($sugg, 0x00F0, [IntPtr]::Zero, [IntPtr]::Zero)
+      if (($r0 -eq 0) -eq [A]::IsWindowEnabled([A]::GetDlgItem($w, 280))) { Defaut "grisage ($lg) : 'Mes raccourcis' ne suit pas sa case" }
+      if (($s0 -eq 0) -eq [A]::IsWindowEnabled([A]::GetDlgItem($w, 278))) { Defaut "grisage ($lg) : 'Mes mots' ne suit pas sa case" }
+      [A]::Ask($racc, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero)
+      if (($r0 -eq 0) -ne [A]::IsWindowEnabled([A]::GetDlgItem($w, 280))) { Defaut "grisage ($lg) : 'Mes raccourcis' ne change pas avec sa case" } else { Write-Host "OK    grisages ($lg) : message, Mes mots, Mes raccourcis" }
+    } else { Manque "grisage ($lg) : options de frappe indisponibles sur ce PC" }
+    # 2.0.0 rapports : UNE liste a 3 choix (314)
+    $nbChoix = [int][A]::SendMessage([A]::GetDlgItem($w, 314), 0x0146, [IntPtr]::Zero, [IntPtr]::Zero)   # CB_GETCOUNT
+    if ($nbChoix -ne 3) { Defaut "rapports ($lg) : $nbChoix choix dans la liste (attendu 3)" } else { Write-Host "OK    rapports ($lg) : une liste a 3 choix" }
+    # 2.0.0 deux liens (SysLink 297 et 315, onglet Aide) : presents, visibles, nommes, la bonne adresse (jamais ouverts ici)
+    [A]::Ask($tc, 0x1330, [IntPtr]5, [IntPtr]::Zero); Start-Sleep -Milliseconds 300
+    foreach ($lien in @(@(297, 'https://github.com/breslev558/hebrew-keyboard-layout-fixer', 'notre projet'), @(315, 'https://github.com/RavidSaadia/Keyboard_Layout_Fixer', "projet d'origine"))) {
+      $gh = [A]::GetDlgItem($w, $lien[0])
+      if ($gh -eq [IntPtr]::Zero) { Defaut "lien $($lien[2]) ($lg) : absent"; continue }
       $cn = New-Object Text.StringBuilder 64; [void][A]::GetClassName($gh, $cn, 64)
       $nom = [A]::AccNameOf($gh); $txt = [A]::Text($gh); $val = [A]::AccLinkValue($gh)
-      $url = 'https://github.com/breslev558/hebrew-keyboard-layout-fixer'
       $vu = if ($txt -match 'href="([^"]*)"') { $Matches[1] } elseif ($val) { $val } else { $null }
-      if ($cn.ToString() -ne 'SysLink') { Defaut "lien GitHub ($lg) : classe $($cn.ToString())" }
-      if (-not [A]::IsWindowVisible($gh)) { Defaut "lien GitHub ($lg) : pas visible sur l'onglet A propos" }
-      if ([string]::IsNullOrWhiteSpace($nom)) { Defaut "lien GitHub ($lg) : sans nom pour le lecteur d'ecran" }
-      if ($null -eq $vu) { Manque "lien GitHub ($lg) : adresse non lisible (texte '$txt')" }
-      elseif ($vu -ne $url) { Defaut "lien GitHub ($lg) : adresse '$vu'" }
-      else { Write-Host "OK    lien GitHub ($lg) : '$nom', $vu" }
+      if ($cn.ToString() -ne 'SysLink') { Defaut "lien $($lien[2]) ($lg) : classe $($cn.ToString())" }
+      if (-not [A]::IsWindowVisible($gh)) { Defaut "lien $($lien[2]) ($lg) : pas visible sur l'onglet Aide" }
+      if ([string]::IsNullOrWhiteSpace($nom)) { Defaut "lien $($lien[2]) ($lg) : sans nom pour le lecteur d'ecran" }
+      if ($null -eq $vu) { Manque "lien $($lien[2]) ($lg) : adresse non lisible" }
+      elseif ($vu -ne $lien[1]) { Defaut "lien $($lien[2]) ($lg) : adresse '$vu'" }
+      else { Write-Host "OK    lien $($lien[2]) ($lg) : $vu" }
     }
     [void][A]::PostMessage($w, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)
   }

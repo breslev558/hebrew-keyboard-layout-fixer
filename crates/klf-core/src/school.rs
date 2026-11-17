@@ -275,6 +275,13 @@ pub fn effective(user: &AppSettings, p: &Policy) -> (AppSettings, Locked) {
         }
         l.excluded_processes = true;
     }
+    // 2.0.0 (choice of the owner): Caps Lock is always switched off after a capitals fix, and F10
+    // with nothing selected always takes the line (the « last word » trial is gone): whatever the
+    // user's file or the administrator's policy says (the two settings are no longer shown)
+    s.turn_off_caps_lock = true;
+    s.last_word_only = false;
+    l.turn_off_caps_lock = false;
+    l.last_word_only = false;
     (s, l)
 }
 
@@ -425,5 +432,18 @@ mod tests {
         assert!(r.iter().any(|x| x.starts_with("Indicator")));
         assert!(r.iter().any(|x| x.starts_with("IGNORÉ")));
         assert_eq!(report_lines(&Policy::default()), vec!["aucun".to_string()]);
+    }
+
+    /// 2.0.0: Caps Lock always switched off after F9, never « last word only », even if a file or
+    /// a policy says otherwise.
+    #[test]
+    fn caps_lock_off_and_whole_line_always() {
+        let user = AppSettings { turn_off_caps_lock: false, last_word_only: true, ..AppSettings::default() };
+        let (s, l) = effective(&user, &Policy::default());
+        assert!(s.turn_off_caps_lock && !s.last_word_only);
+        let p = Policy { turn_off_caps_lock: Some(false), last_word_only: Some(true), ..Policy::default() };
+        let (s, l2) = effective(&user, &p);
+        assert!(s.turn_off_caps_lock && !s.last_word_only, "a policy has no effect any more");
+        assert!(!l.turn_off_caps_lock && !l2.turn_off_caps_lock && !l2.last_word_only);
     }
 }

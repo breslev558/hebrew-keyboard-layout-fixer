@@ -10,7 +10,7 @@
 #  sans nom pour un lecteur d'ecran (UI Automation), bulle qui prend le premier plan ou le focus.
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
-Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
+Add-Type -ReferencedAssemblies System.Drawing, Accessibility -TypeDefinition @'
 using System; using System.Runtime.InteropServices; using System.Text;
 public static class A {
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
@@ -120,6 +120,25 @@ public static class A {
     DeleteObject(font);
     return bad.ToString();
   }
+  // 1.9.9 (4th trial): the name and role a screen reader gets for each control that Tab reaches,
+  // through MSAA (System.Windows.Automation in PowerShell 5.1 sees classic controls as « Pane »)
+  [DllImport("oleacc.dll")] public static extern int AccessibleObjectFromWindow(IntPtr h, uint id, ref Guid iid, [MarshalAs(UnmanagedType.IUnknown)] out object acc);
+  public static string AccNames(IntPtr w, out int seen) {
+    var bad = new StringBuilder(); int n = 0;
+    EnumChildWindows(w, (h, l) => {
+      if (!IsWindowVisible(h) || (GetWindowLong(h, -16) & 0x00010000) == 0) return true;   // WS_TABSTOP
+      var cn = new StringBuilder(64); GetClassName(h, cn, 64);
+      Guid iid = new Guid("618736E0-3C3D-11CF-810C-00AA00389B71");                          // IID_IAccessible
+      object o;
+      if (AccessibleObjectFromWindow(h, 0xFFFFFFFC, ref iid, out o) != 0 || o == null) { bad.AppendFormat("{0} sans objet accessible; ", cn); return true; }   // OBJID_CLIENT
+      var a = (Accessibility.IAccessible)o; string name = null; object role = null;
+      try { name = a.get_accName(0); role = a.get_accRole(0); } catch { }
+      n++;
+      if (string.IsNullOrWhiteSpace(name)) bad.AppendFormat("{0} (role {1}) sans nom; ", cn, role);
+      return true;
+    }, IntPtr.Zero);
+    seen = n; return bad.ToString();
+  }
   [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int w, int ht, uint f);
   [DllImport("user32.dll")] public static extern IntPtr GetDC(IntPtr h);
   [DllImport("user32.dll")] public static extern int ReleaseDC(IntPtr h, IntPtr dc);
@@ -148,34 +167,15 @@ $manques = New-Object System.Collections.ArrayList
 function Manque($m) { Write-Host "MANQUE : $m"; [void]$manques.Add($m) }
 $defauts = New-Object System.Collections.ArrayList
 function Defaut($m) { Write-Host "DEFAUT : $m"; [void]$defauts.Add($m) }
-Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, UIAutomationClientsideProviders
-# 1.9.9 (3rd trial): without the client-side providers, PowerShell sees every classic Win32 control as
-# a « Pane » that cannot take the focus (what a screen reader sees comes through these providers)
-try { [Windows.Automation.ClientSettings]::RegisterClientSideProviderAssembly([UIAutomationClientsideProviders.UIAutomationClientSideProviders].Assembly.GetName()) }
-catch { Write-Host "UIA : traducteurs Win32 non charges ($($_.Exception.Message))" }
 # 1.9.9: every control reachable from the keyboard has a name for a screen reader
 function Noms($w, $quoi) {
   try {
-    $el = [Windows.Automation.AutomationElement]::FromHandle($w)
-    $tous = $el.FindAll([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.Condition]::TrueCondition)
-    $types = @('ControlType.Edit', 'ControlType.ComboBox', 'ControlType.CheckBox', 'ControlType.Button', 'ControlType.RadioButton', 'ControlType.TabItem', 'ControlType.Spinner', 'ControlType.Slider', 'ControlType.Hyperlink')
-    $vus = 0; $d0 = $defauts.Count
-    # (1st 1.9.9 trial: nothing seen on any page: what UI Automation gives is written down)
-    Write-Host "       UIA $quoi : $($tous.Count) element(s) sous la fenetre"
-    $tous | Select-Object -First 12 | ForEach-Object { $q = $_.Current; Write-Host "         $($q.ControlType.ProgrammaticName) | focus $($q.IsKeyboardFocusable) | hors ecran $($q.IsOffscreen) | classe $($q.ClassName) | nom '$($q.Name)'" }
-    $horsEcran = 0; $inactif = 0; $autreType = 0
-    foreach ($e in $tous) {
-      $c = $e.Current
-      if ($c.IsOffscreen) { $horsEcran++; continue }
-      if (-not $c.IsEnabled) { $inactif++; continue }
-      if ($types -notcontains $c.ControlType.ProgrammaticName) { $autreType++; continue }
-      $vus++
-      if ([string]::IsNullOrWhiteSpace($c.Name)) { Defaut "$quoi : controle sans nom pour un lecteur d'ecran ($($c.ControlType.ProgrammaticName), classe $($c.ClassName), id $($c.AutomationId))" }
-    }
-    Write-Host "       UIA $quoi : $vus verifie(s), $horsEcran hors ecran, $inactif inactif(s), $autreType d'un autre type ; premier plan = fenetre : $([A]::GetForegroundWindow() -eq $w)"
-    if ($defauts.Count -eq $d0 -and $vus -gt 0) { Write-Host "OK    $quoi : $vus controles nommes verifies" }
-    if ($vus -eq 0) { Defaut "$quoi : aucun controle vu par UI Automation" }
-  } catch { Manque "noms UI Automation ($quoi) : $($_.Exception.Message)" }
+    $vus = 0
+    $b = [A]::AccNames($w, [ref]$vus)
+    if ($b) { Defaut "$quoi : $b" }
+    if ($vus -eq 0) { Defaut "$quoi : aucun controle atteint par Tab vu par MSAA" }
+    elseif (-not $b) { Write-Host "OK    $quoi : $vus controles nommes verifies (MSAA)" }
+  } catch { Manque "noms MSAA ($quoi) : $($_.Exception.Message)" }
 }
 function Photo($hw, $nom) {
   try {

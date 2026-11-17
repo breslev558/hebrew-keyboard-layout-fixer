@@ -224,6 +224,13 @@ const CLSID_ACC_PROP_SERVICES: windows_sys::core::GUID = windows_sys::core::GUID
 const IID_IACC_PROP_SERVICES: windows_sys::core::GUID = windows_sys::core::GUID::from_u128(0x6e26e776_04f0_495d_80e4_3330352e3169);
 const PROPID_ACC_NAME_: windows_sys::core::GUID = windows_sys::core::GUID::from_u128(0x608d3df8_8128_4aa7_a428_f55e49267291);
 const NAMED_IDS: [i32; 2] = [ID_BUBBLE_POS, ID_TAB];
+// Method numbers in the vtable, from oleacc.h (IAccPropServicesVtbl: QueryInterface 0, AddRef 1,
+// Release 2, SetPropValue 3, SetPropServer 4, ClearProps 5, SetHwndProp 6, SetHwndPropStr 7,
+// SetHwndPropServer 8, ClearHwndProps 9). Checked against the header by tools/verifier-vtables.py
+// in the CI: keep the « vtable » comments as they are.
+const ACC_RELEASE: usize = 2; // vtable IAccPropServices::Release
+const ACC_SET_HWND_PROP_STR: usize = 7; // vtable IAccPropServices::SetHwndPropStr
+const ACC_CLEAR_HWND_PROPS: usize = 9; // vtable IAccPropServices::ClearHwndProps
 
 /// Runs `f` with an IAccPropServices (nothing if COM or the service is not available).
 fn with_acc_props(f: impl FnOnce(*mut std::ffi::c_void)) {
@@ -242,7 +249,7 @@ fn with_acc_props(f: impl FnOnce(*mut std::ffi::c_void)) {
         }
         f(p);
         let vtbl = *(p as *const *const usize);
-        let release: unsafe extern "system" fn(*mut std::ffi::c_void) -> u32 = std::mem::transmute(*vtbl.add(2));
+        let release: unsafe extern "system" fn(*mut std::ffi::c_void) -> u32 = std::mem::transmute(*vtbl.add(ACC_RELEASE));
         release(p);
     }
 }
@@ -255,7 +262,7 @@ fn set_acc_names(l: Lang) {
         // then SetHwndPropStr = method 7); OBJID_CLIENT, CHILDID_SELF; the string is copied by oleacc.
         unsafe {
             let vtbl = *(p as *const *const usize);
-            let set: SetHwndPropStr = std::mem::transmute(*vtbl.add(7));
+            let set: SetHwndPropStr = std::mem::transmute(*vtbl.add(ACC_SET_HWND_PROP_STR));
             for (id, name) in names {
                 let w = wide(name);
                 set(p, item(id), OBJID_CLIENT as u32, CHILDID_SELF, PROPID_ACC_NAME_, w.as_ptr());
@@ -271,7 +278,7 @@ fn clear_acc_names() {
         // SetHwndPropServer 8, oleacc.idl; avis Fable); one property id in the array.
         unsafe {
             let vtbl = *(p as *const *const usize);
-            let clear: ClearHwndProps = std::mem::transmute(*vtbl.add(9));
+            let clear: ClearHwndProps = std::mem::transmute(*vtbl.add(ACC_CLEAR_HWND_PROPS));
             for id in NAMED_IDS {
                 clear(p, item(id), OBJID_CLIENT as u32, CHILDID_SELF, &PROPID_ACC_NAME_, 1);
             }

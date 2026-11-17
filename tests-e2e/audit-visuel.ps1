@@ -295,6 +295,35 @@ foreach ($lg in 'he', 'fr', 'en') {
   Remove-Item Env:\KLF_TEST_DPI -ErrorAction SilentlyContinue
 }
 
+# --- 1.9.9 : Paramètres ouverts et fermés 5 fois par langue (noms MSAA posés puis effacés à chaque
+# fois), onglets changés ; ensuite le programme tourne toujours, F10 marche encore, et le journal
+# Windows n'a aucune erreur d'application pour lui
+$t0 = Get-Date
+foreach ($lg in 'he', 'fr', 'en') {
+  $p = Demarrer ('{ "WelcomeDone": true, "ShowBubble": false, "UiLanguage": "' + $lg + '" }') $null
+  for ($i = 1; $i -le 5; $i++) {
+    Start-Process -FilePath $exe -ArgumentList '--settings' | Out-Null
+    $w = Attendre { [A]::FindWindow('KBLayoutFixerSettings', [NullString]::Value) } 10000
+    if ($w -eq [IntPtr]::Zero) { Defaut "ouverture-fermeture $lg : fenetre $i pas ouverte"; break }
+    $tc = [A]::GetDlgItem($w, 240)
+    foreach ($tab in 1, 2, 3, 1) { [A]::Ask($tc, 0x1330, [IntPtr]($tab - 1), [IntPtr]::Zero); Start-Sleep -Milliseconds 150 }
+    [void][A]::PostMessage($w, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)   # WM_CLOSE
+    $parti = Attendre { if ([A]::FindWindow('KBLayoutFixerSettings', [NullString]::Value) -eq [IntPtr]::Zero) { 1 } else { 0 } } 5000
+    if (-not $parti) { Defaut "ouverture-fermeture $lg : fenetre $i pas fermee"; break }
+  }
+  $p.Refresh()
+  if ($p.HasExited) { Defaut "ouverture-fermeture $lg : le programme s'est arrete (code $($p.ExitCode))"; continue }
+  $log = Join-Path $dir 'debug.log'; $n0 = @(Get-Content $log -ErrorAction SilentlyContinue).Count
+  $n = Bloc-notes 'akuo'
+  if (-not $n) { Manque "Bloc-notes (ouverture-fermeture $lg)"; continue }
+  [A]::Key(0x79)   # F10
+  $ok = Attendre { if (@(Get-Content $log -ErrorAction SilentlyContinue | Select-Object -Skip $n0 | Where-Object { $_ -match 'Ctrl\+V sent' }).Count -gt 0) { 1 } else { 0 } } 5000
+  Stop-Process -Id $n.Id -Force -ErrorAction SilentlyContinue
+  if ($ok) { Write-Host "OK    ouverture-fermeture $lg : 5 fois, programme vivant, F10 corrige ensuite" } else { Defaut "ouverture-fermeture $lg : F10 sans effet apres les 5 ouvertures" }
+}
+$err = @(Get-WinEvent -FilterHashtable @{ LogName = 'Application'; StartTime = $t0 } -ErrorAction SilentlyContinue | Where-Object { $_.ProviderName -in 'Application Error', 'Windows Error Reporting', 'Application Hang' -and $_.Message -match 'KeyboardLayoutFixer' })
+if ($err.Count) { $err | Select-Object -First 3 | ForEach-Object { Defaut "journal Windows : $($_.ProviderName) $($_.Id) : $(($_.Message -split "`n")[0])" } } else { Write-Host "OK    journal Windows : aucune erreur d'application pour le programme" }
+
 # --- contraste élevé (hébreu et français, tous les onglets) ; l'état d'avant est TOUJOURS remis
 $avant = [A]::HighContrastFlags()
 try {

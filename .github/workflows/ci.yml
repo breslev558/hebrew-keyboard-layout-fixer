@@ -32,6 +32,8 @@ jobs:
         run: cargo test --locked -p klf-core
       - name: Licences des dépendances
         run: python3 tools/verifier-licences.py
+      - name: Numéros de méthode COM écrits à la main (contre les en-têtes Windows de mingw-w64)
+        run: python3 tools/verifier-vtables.py
       - name: Compilation Windows
         run: cargo build --locked --release --target x86_64-pc-windows-gnu -p KeyboardLayoutFixer
       - name: Mise en forme (indicatif)

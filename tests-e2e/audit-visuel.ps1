@@ -109,6 +109,15 @@ public static class A {
         if (need.B > cr0.B + 1 || need.R > cr0.R + 1) bad.AppendFormat("{0} '{1}' coupe ({2} px de haut pour {3}); ", cls, txt, need.B, cr0.B);
         return true;
       }
+      // 2.0.0: a read-only multi-line edit without scroll bar (About text): its lines must all fit
+      if (cls == "Edit" && (st & 0x0804) == 0x0804 && (st & 0x00200000) == 0) {   // ES_MULTILINE | ES_READONLY, no WS_VSCROLL
+        IntPtr dc3 = GetDC(h); IntPtr old3 = SelectObject(dc3, font); RECT cr3; GetClientRect(h, out cr3);
+        RECT need3 = new RECT(); need3.R = cr3.R - 8;                              // the edit's own margins
+        DrawText(dc3, txt, txt.Length, ref need3, 0x0400 | 0x0010 | 0x2000 | 0x0800);
+        SelectObject(dc3, old3); ReleaseDC(h, dc3);
+        if (need3.B > cr3.B + 1) bad.AppendFormat("{0} '{1}' coupe ({2} px de haut pour {3}); ", cls, txt.Length > 40 ? txt.Substring(0, 40) : txt, need3.B, cr3.B);
+        return true;
+      }
       if (cls == "Static" && (st & 0x4000) != 0) extra = 0;                       // SS_ENDELLIPSIS: cut silently
       else if (cls == "Button" && (st & 0x2000) == 0) {                            // not BS_MULTILINE
         int t = st & 0xF;
@@ -155,11 +164,13 @@ public static class A {
     try { return ((Accessibility.IAccessible)o).get_accValue(1); } catch { return null; }
   }
   public static string Text(IntPtr h) { var sb = new StringBuilder(1024); GetWindowText(h, sb, 1024); return sb.ToString(); }
+  // the text of a field of another program (WM_GETTEXT; GetWindowText gives only its internal title)
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr SendMessage(IntPtr h, uint m, IntPtr w, StringBuilder l);
+  public static string EditText(IntPtr h) { var sb = new StringBuilder(1024); SendMessage(h, 0x000D, (IntPtr)1024, sb); return sb.ToString(); }
   [DllImport("user32.dll")] public static extern bool IsWindowEnabled(IntPtr h);
   [DllImport("user32.dll")] public static extern int GetMenuItemCount(IntPtr m);
   [DllImport("user32.dll")] public static extern IntPtr GetSubMenu(IntPtr m, int i);
   [DllImport("user32.dll")] public static extern int GetMenuDefaultItem(IntPtr m, uint byPos, uint flags);
-  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int SetWindowText(IntPtr h, string s);
   [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int w, int ht, uint f);
   [DllImport("user32.dll")] public static extern IntPtr GetDC(IntPtr h);
   [DllImport("user32.dll")] public static extern int ReleaseDC(IntPtr h, IntPtr dc);
@@ -264,15 +275,25 @@ function Bloc-notes($texte) {
 foreach ($lg in 'he', 'fr', 'en') {
   # --- bienvenue (premier démarrage)
   $p = Demarrer ('{ "WelcomeDone": false, "ShowBubble": true, "UiLanguage": "' + $lg + '" }') $null
-  $d = Attendre { [A]::Visible('#32770', [uint32]$p.Id) } 8000
+  # 2.0.0 (essai 200) : le tout premier demarrage de l'audit (hebreu) est lent (demarrage a froid apres
+  # l'installation) : la bienvenue arrivait apres 8 s, puis restait ouverte et empechait le menu
+  $attente = if ($lg -eq 'he') { 25000 } else { 12000 }
+  $d = Attendre { [A]::Visible('#32770', [uint32]$p.Id) } $attente
   if ($d -ne [IntPtr]::Zero) { Start-Sleep -Milliseconds 400; Photo $d "bienvenue-$lg.png"; [void][A]::PostMessage($d, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) } else { Manque "bienvenue ($lg)" }
   Start-Sleep 1
+  # a welcome box shown late is closed before the menu (a modal box keeps the menu from opening)
+  $reste = [A]::Visible('#32770', [uint32]$p.Id)
+  if ($reste -ne [IntPtr]::Zero) { [void][A]::PostMessage($reste, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero); Start-Sleep 1 }
 
   # --- menu de l'icône (le clic droit sur l'icône envoie WM_CONTEXTMENU à la fenêtre cachée)
   $m = [A]::FindWindow('KBLayoutFixerMain', [NullString]::Value)
   [void][A]::Front($m)
   [void][A]::PostMessage($m, 0x8001, [IntPtr]::Zero, [IntPtr]0x007B)   # WM_APP_TRAY, WM_CONTEXTMENU
-  $menu = Attendre { [A]::Visible('#32768', 0) } 5000
+  $menu = Attendre { [A]::Visible('#32768', 0) } 8000
+  if ($menu -eq [IntPtr]::Zero) {   # once more (first start still busy)
+    [void][A]::Front($m); [void][A]::PostMessage($m, 0x8001, [IntPtr]::Zero, [IntPtr]0x007B)
+    $menu = Attendre { [A]::Visible('#32768', 0) } 8000
+  }
   if ($menu -ne [IntPtr]::Zero) {
     Start-Sleep -Milliseconds 400; Photo $menu "menu-icone-$lg.png"
     # 2.0.0: a flat menu (MN_GETHMENU gives the menu shown; menus can be read from another process)
@@ -320,18 +341,23 @@ foreach ($lg in 'he', 'fr', 'en') {
     if ($b -ne [IntPtr]::Zero) { Start-Sleep -Milliseconds 250; Photo $b "bulle-mise-a-jour-$lg.png" } else { Manque "bulle de mise à jour ($lg)" }
     Start-Sleep 4   # the bubble goes away
     $tc = [A]::GetDlgItem($w, 240)
-    # 2.0.0 « Valeurs par defaut » (bouton 269) sur l'onglet Conversion : mode prudent (245) coche et limite
-    # (248) a 123, puis le bouton : la case est decochee, la limite revient a 0, et rien n'est enregistre
+    # 2.0.0 « Valeurs par defaut » (bouton 269) sur l'onglet Conversion : mode prudent (245) coche, limite
+    # (248) a 123, delai (250) a 5000, puis le bouton : la case est decochee, limite 0, delai 1000, et rien
+    # n'est enregistre. (Essai 200 : SetWindowText / GetWindowText sur le champ d'un AUTRE programme ne
+    # touchent que le titre interne de la fenetre, pas le texte du champ : WM_SETTEXT / WM_GETTEXT ici.)
     [A]::Ask($tc, 0x1330, [IntPtr]1, [IntPtr]::Zero); Start-Sleep -Milliseconds 400   # TCM_SETCURFOCUS onglet 2
-    $prudent = [A]::GetDlgItem($w, 245); $limite = [A]::GetDlgItem($w, 248)
+    $prudent = [A]::GetDlgItem($w, 245); $limite = [A]::GetDlgItem($w, 248); $delai = [A]::GetDlgItem($w, 250)
     [A]::Ask($prudent, 0x00F1, [IntPtr]1, [IntPtr]::Zero)   # BM_SETCHECK
-    [void][A]::SetWindowText($limite, '123')
+    [void][A]::SendMessage($limite, 0x000C, [IntPtr]::Zero, '123')   # WM_SETTEXT
+    [void][A]::SendMessage($delai, 0x000C, [IntPtr]::Zero, '5000')
+    $avant123 = [A]::EditText($limite)
+    if ($avant123 -ne '123') { Manque "valeurs par defaut ($lg) : limite non ecrite par l'essai ('$avant123')" }
     $avantJson = Get-Content (Join-Path $dir 'settings.json') -Raw
     [A]::Ask($w, 0x0111, [IntPtr]269, [A]::GetDlgItem($w, 269))   # WM_COMMAND, bouton 269
     Start-Sleep -Milliseconds 300
     $coche = [int][A]::SendMessage($prudent, 0x00F0, [IntPtr]::Zero, [IntPtr]::Zero)   # BM_GETCHECK
-    $lim = [A]::Text($limite); $apresJson = Get-Content (Join-Path $dir 'settings.json') -Raw
-    if ($coche -ne 0 -or $lim -ne '0') { Defaut "valeurs par defaut ($lg) : mode prudent $coche, limite '$lim' (attendu 0 et '0')" }
+    $lim = [A]::EditText($limite); $del = [A]::EditText($delai); $apresJson = Get-Content (Join-Path $dir 'settings.json') -Raw
+    if ($coche -ne 0 -or $lim -ne '0' -or $del -ne '1000') { Defaut "valeurs par defaut ($lg) : mode prudent $coche, limite '$lim', delai '$del' (attendu 0, '0' et '1000')" }
     elseif ($apresJson -ne $avantJson) { Defaut "valeurs par defaut ($lg) : settings.json change sans 'Appliquer'" }
     else { Write-Host "OK    valeurs par defaut ($lg) : page Conversion remise, rien enregistre" }
     foreach ($tab in 5, 6) {

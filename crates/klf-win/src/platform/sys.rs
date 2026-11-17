@@ -134,12 +134,14 @@ fn sound_sender() -> &'static std::sync::Mutex<Option<std::sync::mpsc::Sender<So
         let ok = std::thread::Builder::new().name("klf-sound".into()).spawn(move || {
             use windows_sys::Win32::Media::Audio::{PlaySoundW, SND_MEMORY, SND_NODEFAULT};
             while let Ok((w, since)) = rx.recv() {
-                if let Some(t) = since {
-                    // 2.0.0: no typed text, only the delay (the Windows test measures it)
-                    crate::util::log(&format!("Sound started ({} ms after Ctrl+V)", t.elapsed().as_millis()));
-                }
+                // 2.0.0: the delay is taken now, the sound played, and only then written (writing
+                // the log first would delay the very sound it measures); no typed text
+                let delay = since.map(|t| t.elapsed().as_millis());
                 // SAFETY: static bytes; played to the end on this thread.
                 unsafe { PlaySoundW(w.as_ptr() as *const u16, null_mut(), SND_MEMORY | SND_NODEFAULT) };
+                if let Some(ms) = delay {
+                    crate::util::log(&format!("Sound started ({ms} ms after Ctrl+V)"));
+                }
             }
         });
         std::sync::Mutex::new(ok.is_ok().then_some(tx))

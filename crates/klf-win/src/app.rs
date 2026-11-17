@@ -677,9 +677,10 @@ pub fn set_active(on: bool) {
         toggle_pause();
     } else if !on && !paused {
         toggle_pause();
-    } else {
-        settings_ui::refresh_status(); // the box shows the state again
     }
+    // always: the box (already flipped by the click) shows the real state again, whatever
+    // happened above
+    settings_ui::refresh_status();
 }
 
 /// Pause gives the key back to the other programs (UnregisterHotKey); resume takes it again.

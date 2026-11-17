@@ -13,7 +13,7 @@ use klf_core::convert::{convert_with, swap_case};
 use klf_core::i18n::{text, text_with_key, Lang, Msg};
 use klf_core::layouts::{KeyMap, LatinKind};
 use klf_core::settings::{
-    hotkey_allowed, Action, KEY_NONE, key_to_vk, vk_to_key, AppRule, AppSettings, MixedTextMode, RuleMode, UiLanguage, MOD_ALT, MOD_CONTROL, MOD_SHIFT,
+    hotkey_allowed, Action, KEY_NONE, key_to_vk, vk_to_key, AppSettings, MixedTextMode, RuleMode, UiLanguage, MOD_ALT, MOD_CONTROL, MOD_SHIFT,
 };
 use std::cell::Cell;
 use std::ptr::{null, null_mut};
@@ -199,6 +199,8 @@ const EN_CHANGE: u32 = 0x0300;
 const EM_GETSEL: u32 = 0x00B0;
 const EM_SETSEL: u32 = 0x00B1;
 const EM_REPLACESEL: u32 = 0x00C2;
+const EM_GETMODIFY: u32 = 0x00B8;
+const EM_SETMODIFY: u32 = 0x00B9;
 const CBN_SELCHANGE: u32 = 1;
 const CBN_CLOSEUP: u32 = 8;
 const SS_LEFT: u32 = 0;
@@ -229,7 +231,16 @@ const WM_APP_LANG: u32 = WM_APP + 21;
 /// 1080 px screen with its taskbar.
 const WIDTH: i32 = 500;
 const FULL_HEIGHT: i32 = 452;
-const SHRINK_MAX: i32 = 36;
+const SHRINK_MAX: i32 = 84;
+/// 2.0.0: beyond this shrink, the grey lines of the fullest pages are hidden (the
+/// options keep them as their description for a screen reader), so that the bottom buttons stay
+/// on a small screen (768 px at 175 %: about 368 units of client height).
+const NOTES_HIDDEN_FROM: i32 = 25;
+const ELASTIC_NOTES: [i32; 5] = [ID_NOTE_ENABLED, ID_NOTE_DIRECTION, ID_NOTE_CAREFUL, ID_NOTE_LIMIT, ID_NOTE_RULES2];
+
+fn notes_hidden() -> bool {
+    SHRINK.with(|s| s.get()) >= NOTES_HIDDEN_FROM
+}
 
 fn height() -> i32 {
     FULL_HEIGHT - SHRINK.with(|s| s.get())
@@ -322,7 +333,7 @@ const IID_IACC_PROP_SERVICES: windows_sys::core::GUID = windows_sys::core::GUID:
 const PROPID_ACC_NAME_: windows_sys::core::GUID = windows_sys::core::GUID::from_u128(0x608d3df8_8128_4aa7_a428_f55e49267291);
 /// PROPID_ACC_DESCRIPTION (oleacc.h: 4d48dfe4-bd3f-491f-a648-492d6f20c588)
 const PROPID_ACC_DESCRIPTION_: windows_sys::core::GUID = windows_sys::core::GUID::from_u128(0x4d48dfe4_bd3f_491f_a648_492d6f20c588);
-const NAMED_IDS: [i32; 3] = [ID_BUBBLE_POS, ID_TAB, ID_GITHUB];
+const NAMED_IDS: [i32; 4] = [ID_BUBBLE_POS, ID_TAB, ID_GITHUB, ID_ABOUT_TEXT];
 const DESCRIBED_IDS: [i32; 7] = [ID_ENABLED, ID_DIRECTION, ID_CAREFUL, ID_LIMIT, ID_DELAY, ID_RULE_OFF, ID_RULE_SEL];
 // Method numbers in the vtable, from oleacc.h (IAccPropServicesVtbl: QueryInterface 0, AddRef 1,
 // Release 2, SetPropValue 3, SetPropServer 4, ClearProps 5, SetHwndProp 6, SetHwndPropStr 7,
@@ -359,6 +370,7 @@ fn set_acc_names(l: Lang) {
         (ID_BUBBLE_POS, PROPID_ACC_NAME_, text(l, Msg::NameBubblePosition)),
         (ID_TAB, PROPID_ACC_NAME_, text(l, Msg::NameSettingsPages)),
         (ID_GITHUB, PROPID_ACC_NAME_, "GitHub"),
+        (ID_ABOUT_TEXT, PROPID_ACC_NAME_, text(l, Msg::TabAbout)),
         (ID_ENABLED, PROPID_ACC_DESCRIPTION_, text(l, Msg::NoteEnabled)),
         (ID_DIRECTION, PROPID_ACC_DESCRIPTION_, text(l, Msg::NoteDirection)),
         (ID_CAREFUL, PROPID_ACC_DESCRIPTION_, text(l, Msg::NoteCareful)),
@@ -450,7 +462,7 @@ fn layout() -> Vec<(i32, i32, i32, i32, i32)> {
     v.push((ID_ENABLED, x0, y, full, 20));
     y += 20;
     v.push((ID_NOTE_ENABLED, x0 + ind, y, full - ind, note));
-    y += note + 4;
+    y += (note + 4) * !notes_hidden() as i32;
     v.push((ID_AUTOSTART, x0, y, full, ch));
     y += ch;
     v.push((ID_INDICATOR, x0, y, full, ch));
@@ -472,7 +484,7 @@ fn layout() -> Vec<(i32, i32, i32, i32, i32)> {
     v.push((ID_LBL_TRY, x0, y, half, 18));
     v.push((ID_LBL_RESULT, x0 + half + 8, y, half, 18));
     y += 18;
-    let tk = k / 2; // the text boxes give some of the room on a small screen
+    let tk = (k / 2).min(24); // the text boxes give some of the room on a small screen
     v.push((ID_TRY, x0, y, half, 52 - tk));
     v.push((ID_RESULT, x0 + half + 8, y, half, 52 - tk));
     // Conversion (the fullest page: the check boxes give the room on a small screen)
@@ -486,15 +498,16 @@ fn layout() -> Vec<(i32, i32, i32, i32, i32)> {
     v.push((ID_LBL_DIRECTION, x0, y + 2, lw - 6, 22));
     v.push((ID_DIRECTION, cx, y, cw, 200));
     y += 26;
+    let shown = !notes_hidden();
     v.push((ID_NOTE_DIRECTION, x0 + ind, y, full - ind, note));
-    y += note + 2;
+    y += (note + 2) * shown as i32;
     let step = 20 - ((k + 7) / 8).min(4); // 20 .. 16
     for id in [ID_SWITCH, ID_CAREFUL, ID_LASTWORD, ID_F10_WRONG, ID_DOUBLE_SHIFT, ID_CTRL_TAP, ID_CAPSOFF] {
         v.push((id, x0, y, full, step));
         y += step;
         if id == ID_CAREFUL {
             v.push((ID_NOTE_CAREFUL, x0 + ind, y, full - ind, note));
-            y += note + 2;
+            y += (note + 2) * shown as i32;
         }
     }
     y += 4 - (k > 0) as i32 * 4;
@@ -530,7 +543,7 @@ fn layout() -> Vec<(i32, i32, i32, i32, i32)> {
         y += 28;
     }
     v.push((ID_NOTE_RULES2, x0, y, full, 3 * note - 4));
-    y += 3 * note + 2;
+    y += (3 * note + 2) * !notes_hidden() as i32;
     v.push((ID_TERMINAL, x0, y, full, 20));
     y += 20;
     v.push((ID_ONE_LANGUAGE, x0, y, full, 20));
@@ -538,11 +551,13 @@ fn layout() -> Vec<(i32, i32, i32, i32, i32)> {
     v.push((ID_ONE_LANGUAGE_FILE, x0, y, 170, 26));
     // Diagnostics
     let mut y = 74;
-    v.push((ID_DIAG_LAST, x0, y, full, 56));
-    y += 60;
+    let dl = (k - 40).clamp(0, 24); // beyond 40 units, the last attempt gives some room too
+    v.push((ID_DIAG_LAST, x0, y, full, 56 - dl));
+    y += 60 - dl;
     // 1.9.9: the keyboards line on two lines (three keyboards did not fit on one, Windows test)
-    v.push((ID_DIAG_TEXT, x0, y, full, 70 - k));
-    y += 74 - k;
+    let dk = k.min(40);
+    v.push((ID_DIAG_TEXT, x0, y, full, 70 - dk));
+    y += 74 - dk;
     v.push((ID_LAYOUTS, x0, y, full, 34)); // installed keyboards, ✓ / ✗
     y += 38;
     v.push((ID_DIAG_COPY, x0, y, 180, 26));
@@ -562,8 +577,10 @@ fn layout() -> Vec<(i32, i32, i32, i32, i32)> {
     v.push((ID_UNDO_IMPORT, x0 + 2 * (bw + 6), y, bw, 26));
     // About
     let mut y = 74;
-    v.push((ID_ABOUT_TEXT, x0, y, full, 184 - k));
-    y += 190 - k;
+    // shrunk only on a very small screen (10 lines need 160 units): ends at 318 at SHRINK_MAX
+    let ak = (k - 36).clamp(0, 24);
+    v.push((ID_ABOUT_TEXT, x0, y, full, 184 - ak));
+    y += 190 - ak;
     v.push((ID_CHECK_UPDATE, x0, y, 240, 26));
     y += 30;
     v.push((ID_AUTO_UPDATE, x0, y, full, 20));
@@ -612,12 +629,13 @@ fn school_pc() -> bool {
 
 /// Shows the controls of one tab, hides the others.
 fn show_page(page: usize) {
+    cancel_language_timer();
     let page = page.min(PAGES.len() - 1);
     PAGE.with(|p| p.set(page));
     send(ID_TAB, TCM_SETCURSEL, page, 0);
     for (i, ids) in PAGES.iter().enumerate() {
         for id in *ids {
-            let show = i == page && !(*id == ID_TERMINAL && school_pc());
+            let show = i == page && !(*id == ID_TERMINAL && school_pc()) && !(ELASTIC_NOTES.contains(id) && notes_hidden());
             // SAFETY: our child windows.
             unsafe { ShowWindow(item(*id), if show { SW_SHOW } else { SW_HIDE }) };
         }
@@ -791,9 +809,6 @@ fn rules_text(s: &AppSettings, mode: RuleMode) -> String {
     s.app_rules.iter().filter(|r| r.mode == mode).map(|r| r.process.as_str()).collect::<Vec<_>>().join(", ")
 }
 
-fn programs_of(t: &str) -> Vec<String> {
-    t.split([',', ';', '\n']).map(|p| p.trim().to_string()).filter(|p| !p.is_empty()).collect()
-}
 
 /// 2.0.0: a rule changed from the tray menu while the window is open: its two lists shown again
 /// (otherwise « Apply » would write the old lists back).
@@ -802,8 +817,12 @@ pub fn refresh_rules() {
         return;
     }
     let u = app::user_settings();
-    set_text(ID_RULE_OFF, &rules_text(&u, RuleMode::Disabled));
-    set_text(ID_RULE_SEL, &rules_text(&u, RuleMode::SelectionOnly));
+    // a list the user is editing (not applied yet) is left as it is
+    for (id, mode) in [(ID_RULE_OFF, RuleMode::Disabled), (ID_RULE_SEL, RuleMode::SelectionOnly)] {
+        if send(id, EM_GETMODIFY, 0, 0) == 0 {
+            set_text(id, &rules_text(&u, mode)); // (WM_SETTEXT clears the "modified" flag)
+        }
+    }
 }
 
 fn fill_work_modes(l: Lang) {
@@ -1041,6 +1060,7 @@ fn fill_controls() {
 /// programs), never a setting imposed by the administrator, never the pause state nor the start
 /// with Windows (a state of Windows, set by the installer).
 fn on_defaults() {
+    cancel_language_timer();
     let d = AppSettings::default();
     let lk = app::locked();
     let typing = crate::typing::allowed();
@@ -1153,11 +1173,9 @@ fn read_controls() -> Option<AppSettings> {
     };
     s.max_character_limit = limit;
     s.paste_delay_ms = delay;
-    s.excluded_processes = programs_of(&get_text(ID_EXCLUDED));
-    // 2.0.0: the rules of the tray menu, as two lists (a program in both: "only with a selection")
-    let mut rules: Vec<AppRule> = programs_of(&get_text(ID_RULE_OFF)).into_iter().map(|p| AppRule { process: p, mode: RuleMode::Disabled }).collect();
-    rules.extend(programs_of(&get_text(ID_RULE_SEL)).into_iter().map(|p| AppRule { process: p, mode: RuleMode::SelectionOnly }));
-    s.app_rules = rules;
+    s.excluded_processes = klf_core::settings::program_list(&get_text(ID_EXCLUDED));
+    // 2.0.0: the rules of the tray menu, as two lists (a program in both: disabled)
+    s.app_rules = klf_core::settings::rules_from_lists(&get_text(ID_RULE_OFF), &get_text(ID_RULE_SEL));
     let keep = |locked: bool, mine: bool, id: i32| if locked { mine } else { checked(id) };
     if !lk.mixed_text_mode {
         s.mixed_text_mode = direction();
@@ -1254,6 +1272,11 @@ fn on_save() -> bool {
         }
     } else {
         set_error(if autostart_failed { text(app::lang(), Msg::AutostartFailed) } else { "" });
+        // the two rule lists are applied: a rule changed later from the menu is shown again there
+        for id in [ID_RULE_OFF, ID_RULE_SEL] {
+            send(id, EM_SETMODIFY, 0, 0);
+        }
+        refresh_rules();
         refresh_status();
     }
     relang
@@ -1267,12 +1290,29 @@ fn apply_language_now() {
     if window().is_null() || app::locked().ui_language {
         return;
     }
+    // a dialog of ours is open (import, export, message): the window is never destroyed under its
+    // modal loop; tried again later
+    // SAFETY: our window.
+    if unsafe { windows_sys::Win32::UI::Input::KeyboardAndMouse::IsWindowEnabled(window()) } == 0 {
+        // SAFETY: our window.
+        unsafe { SetTimer(window(), TIMER_LANG, 800, None) };
+        return;
+    }
     if lang_of_index(send(ID_LANG, CB_GETCURSEL, 0, 0)) == app::user_settings().ui_language {
         return;
     }
-    if on_save() {
-        // SAFETY: our (new) window's control.
+    if on_save() && PAGE.with(|p| p.get()) == 0 {
+        // SAFETY: our (new) window's control, on the page shown.
         unsafe { SetFocus(item(ID_LANG)) };
+    }
+}
+
+/// 2.0.0: a language waiting to be applied is forgotten (another page, « Defaults »).
+fn cancel_language_timer() {
+    LANG_PENDING.with(|p| p.set(false));
+    if !window().is_null() {
+        // SAFETY: our window.
+        unsafe { KillTimer(window(), TIMER_LANG) };
     }
 }
 
@@ -1462,12 +1502,33 @@ fn copy_text(t: &str) {
 }
 
 /// 2.0.0: the GitHub link (click or Enter): only the fixed address of the project, never the text
-/// of the control.
+/// of the control. Opened on a short thread of its own: ShellExecute can wait for the browser, and
+/// the interface thread carries the keyboard hooks.
 fn open_github() {
-    use windows_sys::Win32::UI::Shell::ShellExecuteW;
-    let (verb, url) = (wide("open"), wide(GITHUB_URL));
-    // SAFETY: valid strings; no parameters, no folder.
-    unsafe { ShellExecuteW(window(), verb.as_ptr(), url.as_ptr(), null(), null(), SW_SHOWNORMAL) };
+    let started = std::thread::Builder::new().name("klf-link".into()).spawn(|| {
+        use windows_sys::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE};
+        use windows_sys::Win32::UI::Shell::ShellExecuteW;
+        let (verb, url) = (wide("open"), wide(GITHUB_URL));
+        // SAFETY: COM for this thread only (the Shell needs it), released before the thread ends;
+        // valid strings; no owner window (it belongs to the interface thread), no parameters.
+        unsafe {
+            let com = CoInitializeEx(null(), (COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) as u32) >= 0;
+            ShellExecuteW(null_mut(), verb.as_ptr(), url.as_ptr(), null(), null(), SW_SHOWNORMAL);
+            if com {
+                CoUninitialize();
+            }
+        }
+    });
+    if started.is_err() {
+        log("GitHub link: thread not started");
+    }
+}
+
+/// Enter with the focus on the GitHub link opens the link (NM_RETURN), never « Apply » too.
+fn focus_on_link() -> bool {
+    // SAFETY: GetFocus for our own thread.
+    let f = unsafe { GetFocus() };
+    !f.is_null() && f == item(ID_GITHUB)
 }
 
 extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
@@ -1476,8 +1537,9 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             let id = (wparam & 0xFFFF) as i32;
             let code = ((wparam >> 16) & 0xFFFF) as u32;
             match (id, code) {
-                (ID_SAVE, _) | (1, _) => {
-                    on_save(); // 1 = IDOK (Enter)
+                // 1 = IDOK (Enter); Enter on the GitHub link is the link's own (NM_RETURN)
+                (ID_SAVE, _) | (1, _) if !focus_on_link() => {
+                    on_save();
                 }
                 (ID_CLOSE, _) => close(),
                 (ID_DEFAULTS, BN_CLICKED) => on_defaults(),
@@ -1584,6 +1646,12 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     SetBkMode(dc, OPAQUE as i32);
                     SetBkColor(dc, GetSysColor(COLOR_BTNFACE));
                     return GetSysColorBrush(COLOR_BTNFACE) as LRESULT;
+                } else if child == item(ID_ABOUT_TEXT) {
+                    // read-only edit: opaque, on the window's own background
+                    SetTextColor(dc, GetSysColor(COLOR_WINDOWTEXT));
+                    SetBkMode(dc, OPAQUE as i32);
+                    SetBkColor(dc, GetSysColor(COLOR_WINDOW));
+                    return GetSysColorBrush(COLOR_WINDOW) as LRESULT;
                 } else if NOTE_IDS.iter().any(|id| child == item(*id)) && !sys::high_contrast() {
                     // 2.0.0: the explanation lines in grey (normal text colour in high contrast)
                     SetTextColor(dc, GetSysColor(COLOR_GRAYTEXT));
@@ -1795,7 +1863,9 @@ pub fn open() {
         create("BUTTON", "", button, 0, ID_IMPORT);
         create("BUTTON", "", button, 0, ID_UNDO_IMPORT);
         // About
-        create("STATIC", "", note, 0, ID_ABOUT_TEXT);
+        // a read-only edit, reached by Tab: a screen reader reads the version and the license
+        // (a static never gets the focus); no border, the window's background
+        create("EDIT", "", ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | WS_TABSTOP, 0, ID_ABOUT_TEXT);
         create("BUTTON", "", button, 0, ID_CHECK_UPDATE);
         create("BUTTON", "", check, 0, ID_AUTO_UPDATE);
         let link = format!("<a href=\"{GITHUB_URL}\">GitHub</a>");
@@ -1828,6 +1898,7 @@ pub fn open() {
         let room = (wa.bottom - wa.top - frame_h) * 96 / dpi as i32; // client height available, 96-DPI units
         SHRINK.with(|s| s.set((FULL_HEIGHT - room).clamp(0, SHRINK_MAX)));
         apply_layout();
+        show_page(0); // the grey lines hidden on a small screen
         let mut rc = RECT { left: 0, top: 0, right: scale(WIDTH), bottom: scale(height()) };
         AdjustWindowRectExForDpi(&mut rc, style, 0, ex, dpi);
         let (ww, wh) = (rc.right - rc.left, rc.bottom - rc.top);

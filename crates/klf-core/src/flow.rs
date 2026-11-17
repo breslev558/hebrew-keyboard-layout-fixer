@@ -195,8 +195,9 @@ pub trait Host {
     /// next F10 may toggle it back without the clipboard.
     fn pasted(&self, _before: &str, _after: &str, _selected: bool) {}
     /// 2.0.0: the fixed text is in the target NOW (Ctrl+V sent, or the terminal/console keys sent
-    /// and checked): the "fixed" sound starts here, once per fix, never after the wait before the
-    /// clipboard is put back. Called only when the sound is on (never blocks: queued).
+    /// AND seen on the screen): the "fixed" sound starts here, once per fix, never after the wait
+    /// before the clipboard is put back; a terminal replacement that could not be confirmed stays
+    /// silent. Called only when the sound is on (never blocks: queued).
     fn fixed_sound(&self) {}
     /// 1.8.7: called once the keys are released and the window checked, before anything is
     /// copied (an autocompletion suggestion is taken away there).
@@ -1171,8 +1172,8 @@ fn terminal_send(host: &mut dyn Host, s: &AppSettings, target: usize, typed: &st
     }
     // confirmed on the screen: a second F10 toggles it back; otherwise forgotten
     let confirmed = terminal_shows(host, out).is_ok();
-    if s.play_sound {
-        host.fixed_sound(); // 2.0.0: the replacement is on the screen (or could not be read)
+    if s.play_sound && confirmed {
+        host.fixed_sound(); // 2.0.0: only a replacement seen on the screen
     }
     // (adopted only if the user typed nothing since: our own keys never change the run)
     if confirmed && host.terminal_generation() == generation {
@@ -1326,8 +1327,8 @@ fn conhost_confirm(host: &mut dyn Host, s: &AppSettings, target: usize, typed: &
         }
     }
     crate::terminal::wipe_string(after);
-    if s.play_sound {
-        host.fixed_sound(); // 2.0.0: as soon as the replacement is seen (the loop stops there)
+    if s.play_sound && confirmed {
+        host.fixed_sound(); // 2.0.0: as soon as the replacement is seen (the loop stops there); never unconfirmed
     }
     if confirmed && host.terminal_generation() == generation {
         host.terminal_adopt(out);
@@ -2417,7 +2418,8 @@ mod tests {
     }
 
     /// 2.0.0: the "fixed" sound starts right at Ctrl+V (before the wait that puts the clipboard
-    /// back), once per fix, and only when the sound is on; in a terminal or a console, once too.
+    /// back), once per fix, and only when the sound is on; in a terminal or a console, once too,
+    /// only when the replacement is seen on the screen.
     #[test]
     fn fixed_sound_starts_at_the_paste_once() {
         let count = |m: &Mock| m.events.borrow().iter().filter(|e| *e == "sound").count();
@@ -2442,6 +2444,18 @@ mod tests {
         let o = run(&mut m, &AppSettings { action: Action::Case, play_sound: true, ..settings() });
         assert_eq!(o.msg, Some(Msg::Converted), "{}", o.log);
         assert_eq!(count(&m), 1, "console");
+        // a terminal replacement not seen on the screen: silent
+        let (mut m, s) = terminal_mock();
+        *m.t_screen.borrow_mut() = vec![Ok("> akuo".into()), Ok("> akuo".into()), Ok("> ???".into())];
+        let o = run(&mut m, &AppSettings { play_sound: true, ..s });
+        assert!(o.log.contains("not confirmed"), "{}", o.log);
+        assert_eq!(count(&m), 0, "terminal not confirmed");
+        // nothing pasted (Ctrl+V refused by Windows): silent
+        let mut m = Mock::new();
+        m.paste_ok = false;
+        let o = run(&mut m, &AppSettings { play_sound: true, ..settings() });
+        assert_ne!(o.msg, Some(Msg::Converted), "{}", o.log);
+        assert_eq!(count(&m), 0, "nothing pasted");
     }
 
     // Audit tests: expected user-facing safety properties, deliberately not implementation mirrors.

@@ -650,6 +650,31 @@ fn de_strings<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> 
     })
 }
 
+/// 2.0.0: a list of programs typed in the settings window ("a.exe, b.exe"; commas, semicolons or
+/// line breaks), trimmed, empty items left out.
+pub fn program_list(text: &str) -> Vec<String> {
+    text.split([',', ';', '\n']).map(|p| p.trim().to_string()).filter(|p| !p.is_empty()).collect()
+}
+
+/// 2.0.0: the rules from the two lists of the Apps tab. A program in both lists is DISABLED
+/// (the stronger rule wins, whatever the order); names as rules keep them (no path, lower case),
+/// each program once, first place kept.
+pub fn rules_from_lists(disabled: &str, selection_only: &str) -> Vec<AppRule> {
+    let off: Vec<String> = program_list(disabled).iter().map(|p| crate::policy::exe_base_name(p)).collect();
+    let mut rules: Vec<AppRule> = Vec::new();
+    for p in &off {
+        if !rules.iter().any(|r| &r.process == p) {
+            rules.push(AppRule { process: p.clone(), mode: RuleMode::Disabled });
+        }
+    }
+    for p in program_list(selection_only).iter().map(|p| crate::policy::exe_base_name(p)) {
+        if !rules.iter().any(|r| r.process == p) {
+            rules.push(AppRule { process: p, mode: RuleMode::SelectionOnly });
+        }
+    }
+    rules
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -870,5 +895,28 @@ mod tests {
         }
         let (s, _) = AppSettings::from_json(r#"{"ReportMode":2,"UpdateSkipTag":"v1.8.7","UpdateSkipAt":5,"SettingsVersion":4}"#);
         assert_eq!((s.report_mode, s.update_skip_tag.as_str(), s.update_skip_at), (2, "v1.8.7", 5));
+    }
+
+    #[test]
+    fn rules_from_the_two_lists() {
+        assert_eq!(program_list(" a.exe, ;b.exe\nc.exe ,"), vec!["a.exe", "b.exe", "c.exe"]);
+        let r = rules_from_lists("Word.EXE, notepad.exe", "notepad.exe, C:\\Apps\\Excel.exe, excel.exe");
+        assert_eq!(
+            r,
+            vec![
+                AppRule { process: "word.exe".into(), mode: RuleMode::Disabled },
+                AppRule { process: "notepad.exe".into(), mode: RuleMode::Disabled },
+                AppRule { process: "excel.exe".into(), mode: RuleMode::SelectionOnly },
+            ]
+        );
+        // in both lists: disabled, whatever the order of the lists
+        assert_eq!(rules_from_lists("x.exe", "x.exe"), rules_from_lists("x.exe", "X.exe"));
+        assert_eq!(rules_from_lists("x.exe", "x.exe")[0].mode, RuleMode::Disabled);
+        // and validate keeps it so
+        let mut s = AppSettings { app_rules: rules_from_lists("x.exe", "x.exe, y.exe"), ..AppSettings::default() };
+        s.validate();
+        assert_eq!(s.rule_for("x.exe"), Some(RuleMode::Disabled));
+        assert_eq!(s.rule_for("y.exe"), Some(RuleMode::SelectionOnly));
+        assert!(rules_from_lists("", " , ").is_empty());
     }
 }

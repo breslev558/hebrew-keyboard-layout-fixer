@@ -148,7 +148,11 @@ $manques = New-Object System.Collections.ArrayList
 function Manque($m) { Write-Host "MANQUE : $m"; [void]$manques.Add($m) }
 $defauts = New-Object System.Collections.ArrayList
 function Defaut($m) { Write-Host "DEFAUT : $m"; [void]$defauts.Add($m) }
-Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, UIAutomationClientsideProviders
+# 1.9.9 (3rd trial): without the client-side providers, PowerShell sees every classic Win32 control as
+# a « Pane » that cannot take the focus (what a screen reader sees comes through these providers)
+try { [Windows.Automation.ClientSettings]::RegisterClientSideProviderAssembly([UIAutomationClientsideProviders.UIAutomationClientSideProviders].Assembly.GetName()) }
+catch { Write-Host "UIA : traducteurs Win32 non charges ($($_.Exception.Message))" }
 # 1.9.9: every control reachable from the keyboard has a name for a screen reader
 function Noms($w, $quoi) {
   try {

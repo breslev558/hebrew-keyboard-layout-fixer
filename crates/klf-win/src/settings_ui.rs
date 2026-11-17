@@ -125,6 +125,10 @@ const EM_REPLACESEL: u32 = 0x00C2;
 const CBN_SELCHANGE: u32 = 1;
 const SS_LEFT: u32 = 0;
 const SS_CENTERIMAGE: u32 = 0x0200;
+/// 1.9.9: a static that wraps its words like a multi-line edit (never with SS_ENDELLIPSIS, which
+/// forces one line); SS_NOPREFIX: an & is shown as it is
+const SS_EDITCONTROL: u32 = 0x2000;
+const SS_NOPREFIX: u32 = 0x0080;
 const SS_ENDELLIPSIS: u32 = 0x4000;
 const TCM_INSERTITEMW: u32 = 0x1300 + 62;
 const TCM_GETCURSEL: u32 = 0x1300 + 11;
@@ -259,8 +263,9 @@ fn layout() -> Vec<(i32, i32, i32, i32, i32)> {
     v.push((ID_LBL_HOTKEY_CASE, x0, y + 2, lw - 6, 22));
     v.push((ID_HOTKEY_CASE, cx, y, cw, 24));
     y += 32;
-    v.push((ID_LBL_WORK, x0, y + 2, 70, 22));
-    v.push((ID_WORK_MODE, x0 + 72, y, right - x0 - 72 - 138, 200));
+    // 1.9.9: « Convertisseur : » needs 78 units (the Windows test found it cut at 70)
+    v.push((ID_LBL_WORK, x0, y + 2, 86, 22));
+    v.push((ID_WORK_MODE, x0 + 88, y, right - x0 - 88 - 138, 200));
     v.push((ID_COPY_RESULT, right - 132, y, 132, 24));
     y += 28;
     let half = (right - x0 - 8) / 2;
@@ -307,8 +312,9 @@ fn layout() -> Vec<(i32, i32, i32, i32, i32)> {
     // Diagnostic
     let y = 74;
     v.push((ID_DIAG_LAST, x0, y, right - x0, 56));
-    v.push((ID_DIAG_TEXT, x0, y + 60, right - x0, 84 - k));
-    v.push((ID_LAYOUTS, x0, y + 148 - k, right - x0, 20)); // installed keyboards, ✓ / ✗
+    // 1.9.9: the keyboards line on two lines (three keyboards did not fit on one, Windows test)
+    v.push((ID_DIAG_TEXT, x0, y + 60, right - x0, 70 - k));
+    v.push((ID_LAYOUTS, x0, y + 134 - k, right - x0, 34)); // installed keyboards, ✓ / ✗
     // 1.8.9: three buttons on this row (copy, refresh, check for updates)
     v.push((ID_DIAG_COPY, x0, y + 172 - k, 150, 26));
     v.push((ID_DIAG_REFRESH, x0 + 156, y + 172 - k, 90, 26));
@@ -1216,7 +1222,7 @@ pub fn open() {
         create("EDIT", "", ES_NUMBER | ES_AUTOHSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE, ID_DELAY);
         create("STATIC", "", stat, 0, ID_LBL_EXCLUDED);
         create("EDIT", "", ES_AUTOHSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE, ID_EXCLUDED);
-        create("STATIC", "", stat, 0, ID_LAYOUTS);
+        create("STATIC", "", SS_LEFT | SS_EDITCONTROL | SS_NOPREFIX, 0, ID_LAYOUTS);
         // Diagnostic
         create("STATIC", "", SS_LEFT, 0, ID_DIAG_LAST);
         create("EDIT", "", ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | WS_VSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE, ID_DIAG_TEXT);

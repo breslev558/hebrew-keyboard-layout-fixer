@@ -70,6 +70,7 @@ public static class A {
   [DllImport("user32.dll")] public static extern int GetSystemMetrics(int i);
   [DllImport("user32.dll")] public static extern int MapWindowPoints(IntPtr from, IntPtr to, ref RECT r, int n);
   [DllImport("gdi32.dll")] public static extern bool DeleteObject(IntPtr o);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int DrawText(IntPtr dc, string s, int n, ref RECT r, uint f);
   [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)] public struct LOGFONT { public int lfHeight, lfWidth, lfEscapement, lfOrientation, lfWeight; public byte lfItalic, lfUnderline, lfStrikeOut, lfCharSet, lfOutPrecision, lfClipPrecision, lfQuality, lfPitchAndFamily; [MarshalAs(UnmanagedType.ByValTStr, SizeConst=32)] public string lfFaceName; }
   [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)] public struct NONCLIENTMETRICS { public uint cbSize; public int iBorderWidth, iScrollWidth, iScrollHeight, iCaptionWidth, iCaptionHeight; public LOGFONT lfCaptionFont; public int iSmCaptionWidth, iSmCaptionHeight; public LOGFONT lfSmCaptionFont; public int iMenuWidth, iMenuHeight; public LOGFONT lfMenuFont, lfStatusFont, lfMessageFont; public int iPaddedBorderWidth; }
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern bool SystemParametersInfoForDpi(uint a, uint b, ref NONCLIENTMETRICS m, uint f, uint dpi);
@@ -97,6 +98,13 @@ public static class A {
         bad.AppendFormat("{0} '{1}' hors de la fenetre ({2},{3},{4},{5}); ", cls, txt, r.L - cl, r.T - ct, r.R - cl, r.B - ct);
       if (txt.Length == 0) return true;
       int st = GetWindowLong(h, -16), extra = -1;
+      if (cls == "Static" && (st & 0x4000) == 0 && (st & 0x2000) != 0) {          // SS_EDITCONTROL: wraps; lines below the box are cut
+        IntPtr dc2 = GetDC(h); IntPtr old2 = SelectObject(dc2, font); RECT cr0; GetClientRect(h, out cr0);
+        RECT need = new RECT(); need.R = cr0.R; DrawText(dc2, txt, txt.Length, ref need, 0x0400 | 0x0010 | 0x2000 | 0x0800);   // DT_CALCRECT | DT_WORDBREAK | DT_EDITCONTROL | DT_NOPREFIX
+        SelectObject(dc2, old2); ReleaseDC(h, dc2);
+        if (need.B > cr0.B + 1 || need.R > cr0.R + 1) bad.AppendFormat("{0} '{1}' coupe ({2} px de haut pour {3}); ", cls, txt, need.B, cr0.B);
+        return true;
+      }
       if (cls == "Static" && (st & 0x4000) != 0) extra = 0;                       // SS_ENDELLIPSIS: cut silently
       else if (cls == "Button" && (st & 0x2000) == 0) {                            // not BS_MULTILINE
         int t = st & 0xF;
@@ -148,13 +156,19 @@ function Noms($w, $quoi) {
     $tous = $el.FindAll([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.Condition]::TrueCondition)
     $types = @('ControlType.Edit', 'ControlType.ComboBox', 'ControlType.CheckBox', 'ControlType.Button', 'ControlType.RadioButton', 'ControlType.TabItem', 'ControlType.Spinner', 'ControlType.Slider', 'ControlType.Hyperlink')
     $vus = 0; $d0 = $defauts.Count
+    # (1st 1.9.9 trial: nothing seen on any page: what UI Automation gives is written down)
+    Write-Host "       UIA $quoi : $($tous.Count) element(s) sous la fenetre"
+    $tous | Select-Object -First 12 | ForEach-Object { $q = $_.Current; Write-Host "         $($q.ControlType.ProgrammaticName) | focus $($q.IsKeyboardFocusable) | hors ecran $($q.IsOffscreen) | classe $($q.ClassName) | nom '$($q.Name)'" }
+    $horsEcran = 0; $inactif = 0; $autreType = 0
     foreach ($e in $tous) {
       $c = $e.Current
-      if ($c.IsOffscreen -or -not $c.IsKeyboardFocusable) { continue }
-      if ($types -notcontains $c.ControlType.ProgrammaticName) { continue }
+      if ($c.IsOffscreen) { $horsEcran++; continue }
+      if (-not $c.IsEnabled) { $inactif++; continue }
+      if ($types -notcontains $c.ControlType.ProgrammaticName) { $autreType++; continue }
       $vus++
       if ([string]::IsNullOrWhiteSpace($c.Name)) { Defaut "$quoi : controle sans nom pour un lecteur d'ecran ($($c.ControlType.ProgrammaticName), classe $($c.ClassName), id $($c.AutomationId))" }
     }
+    Write-Host "       UIA $quoi : $vus verifie(s), $horsEcran hors ecran, $inactif inactif(s), $autreType d'un autre type ; premier plan = fenetre : $([A]::GetForegroundWindow() -eq $w)"
     if ($defauts.Count -eq $d0 -and $vus -gt 0) { Write-Host "OK    $quoi : $vus controles nommes verifies" }
     if ($vus -eq 0) { Defaut "$quoi : aucun controle vu par UI Automation" }
   } catch { Manque "noms UI Automation ($quoi) : $($_.Exception.Message)" }

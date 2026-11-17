@@ -884,7 +884,9 @@ fn remove_tray() {
     }
 }
 
-fn show_menu(hwnd: HWND) {
+/// `anchor`: where the shell asks the menu to open (1.9.9, audit 17/11: opened from the keyboard,
+/// Win+B then the Menu key, it opened where the mouse happened to be instead of at the icon).
+fn show_menu(hwnd: HWND, anchor: Option<(i32, i32)>) {
     let l = lang();
     let paused = hotkey_state() == HotkeyState::Paused;
     let s = settings();
@@ -992,7 +994,12 @@ fn show_menu(hwnd: HWND) {
         }
         SetMenuDefaultItem(menu, CMD_SETTINGS as u32, 0);
         let mut pt = POINT { x: 0, y: 0 };
-        GetCursorPos(&mut pt);
+        match anchor {
+            Some((x, y)) => (pt.x, pt.y) = (x, y),
+            None => {
+                GetCursorPos(&mut pt);
+            }
+        }
         // known Win32 rule: the window must be in the foreground, or the menu does not close
         SetForegroundWindow(hwnd);
         let mut flags = TPM_RIGHTBUTTON | TPM_BOTTOMALIGN;
@@ -1597,7 +1604,9 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             // NOTIFYICON_VERSION_4: the event is in LOWORD(lParam)
             match (lparam as u32) & 0xFFFF {
                 // version 4 also sends WM_RBUTTONUP / WM_LBUTTONUP: reacting to both would open twice
-                WM_CONTEXTMENU => show_menu(hwnd),
+                // NOTIFYICON_VERSION_4: wParam holds the anchor (the click, or the icon when the
+                // menu is asked from the keyboard), as two signed 16-bit screen coordinates
+                WM_CONTEXTMENU => show_menu(hwnd, (wparam != 0).then_some(((wparam & 0xFFFF) as u16 as i16 as i32, ((wparam >> 16) & 0xFFFF) as u16 as i16 as i32))),
                 NIN_SELECT | NIN_KEYSELECT => settings_ui::open(),
                 // the only notification we show: "Send an anonymous report?" (1.6.1)
                 NIN_BALLOONUSERCLICK => crate::report::send_pending(hwnd),

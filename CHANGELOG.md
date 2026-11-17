@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.9.9 (November 2026)
+- **Tray menu from the keyboard**: opened with Win+B and the Menu key (or Shift+F10) on the icon, the menu now appears at the icon instead of wherever the mouse happened to be.
+- In the classic console, a text that the conversion leaves unchanged is now wiped from memory too, like every other one; the conversion no longer leaves smaller copies of the text behind while it builds its result.
+- PRIVACY.md and THREAT_MODEL.md now say 15 seconds (the real delay after which keys followed in a terminal are forgotten), and that the converted text kept for a second F10 is wiped but not locked in memory.
+- New property tests (proptest) on the conversion and the file readers: never a crash on any text, length kept, English → Hebrew → English gives the original, F9 twice gives the original.
+- The Windows test now FAILS on: a text cut or a control outside the window in the settings (3 languages, 100/150/200 %), a control with no name for a screen reader, a bubble that takes the foreground or the clicks.
+
 ## 1.9.8 (November 2026)
 - **F10 faster in Chrome, Edge and Electron apps when the page is busy**: to know whether text is selected, the program asks Windows accessibility, waiting 60 ms. When the page answered later (a busy page, or its accessibility waking up), F10 waited 400 ms for a copy that never came: about half a second before the fix, seen several times in real use. Now the late answer is still listened to while the copy is awaited: nothing selected ends the wait at once, and a selection seen late gets the full wait and is never extended to the start of the line.
 - The Windows test makes the page's accessibility answer 100 ms late, in Edge and Chrome, with and without a selection: under 300 ms until the paste (about 500 ms before).

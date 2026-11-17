@@ -5,6 +5,9 @@
 #  Rechercher une mise à jour), réglages à 150 % et 200 % (KLF_TEST_DPI), contraste élevé, et la
 #  question de la désinstallation. Rien n'échoue pour une capture manquée : chaque manque est ÉCRIT
 #  (« MANQUE ») pour être vu, l'essai ne s'arrête que si le programme ne démarre plus.
+# 1.9.9 (audit du 17/11) : trois VERIFICATIONS qui font echouer l'essai (« DEFAUT », sortie 1 a la fin) :
+#  texte coupe ou controle hors de la fenetre dans les reglages (3 langues, 100/150/200 %), controle
+#  sans nom pour un lecteur d'ecran (UI Automation), bulle qui prend le premier plan ou le focus.
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
@@ -54,6 +57,61 @@ public static class A {
     var hc = new HIGHCONTRAST(); hc.cbSize = (uint)Marshal.SizeOf(typeof(HIGHCONTRAST)); hc.dwFlags = on ? 1u : 0u; hc.lpszDefaultScheme = on ? "High Contrast Black" : null;
     return SystemParametersInfo(0x0043, hc.cbSize, ref hc, 2);   // SPI_SETHIGHCONTRAST, told to the windows, NOT written to the profile
   }
+  // 1.9.9: text cut in a single-line control, or a control outside the window's client area
+  [DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr p, EnumProc f, IntPtr l);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+  [DllImport("user32.dll")] public static extern int GetWindowLong(IntPtr h, int i);
+  [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h, out RECT r);
+  [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h, ref POINT p);
+  [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X, Y; }
+  [StructLayout(LayoutKind.Sequential)] public struct SIZE { public int cx, cy; }
+  [DllImport("gdi32.dll")] public static extern IntPtr SelectObject(IntPtr dc, IntPtr o);
+  [DllImport("gdi32.dll", CharSet=CharSet.Unicode)] public static extern bool GetTextExtentPoint32(IntPtr dc, string s, int n, out SIZE z);
+  [DllImport("user32.dll")] public static extern int GetSystemMetrics(int i);
+  [DllImport("user32.dll")] public static extern int MapWindowPoints(IntPtr from, IntPtr to, ref RECT r, int n);
+  [DllImport("gdi32.dll")] public static extern bool DeleteObject(IntPtr o);
+  [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)] public struct LOGFONT { public int lfHeight, lfWidth, lfEscapement, lfOrientation, lfWeight; public byte lfItalic, lfUnderline, lfStrikeOut, lfCharSet, lfOutPrecision, lfClipPrecision, lfQuality, lfPitchAndFamily; [MarshalAs(UnmanagedType.ByValTStr, SizeConst=32)] public string lfFaceName; }
+  [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)] public struct NONCLIENTMETRICS { public uint cbSize; public int iBorderWidth, iScrollWidth, iScrollHeight, iCaptionWidth, iCaptionHeight; public LOGFONT lfCaptionFont; public int iSmCaptionWidth, iSmCaptionHeight; public LOGFONT lfSmCaptionFont; public int iMenuWidth, iMenuHeight; public LOGFONT lfMenuFont, lfStatusFont, lfMessageFont; public int iPaddedBorderWidth; }
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern bool SystemParametersInfoForDpi(uint a, uint b, ref NONCLIENTMETRICS m, uint f, uint dpi);
+  [DllImport("gdi32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr CreateFontIndirect(ref LOGFONT lf);
+  // the font of the settings window, made again HERE (a font handle of the program means nothing in
+  // this process, avis Fable): the message font for `dpi`, as settings_ui.rs make_fonts does
+  public static IntPtr SettingsFont(uint dpi) {
+    var m = new NONCLIENTMETRICS(); m.cbSize = (uint)Marshal.SizeOf(typeof(NONCLIENTMETRICS));
+    if (!SystemParametersInfoForDpi(0x0029, m.cbSize, ref m, 0, dpi)) return IntPtr.Zero;
+    return CreateFontIndirect(ref m.lfMessageFont);
+  }
+  public static string Cut(IntPtr w, uint dpi) {
+    var bad = new StringBuilder();
+    IntPtr font = SettingsFont(dpi);
+    if (font == IntPtr.Zero) return "police des reglages non recreee; ";
+    // the client area in screen coordinates; a mirrored (Hebrew) window gives its corners swapped
+    RECT pc; GetClientRect(w, out pc); MapWindowPoints(w, IntPtr.Zero, ref pc, 2);
+    int cl = Math.Min(pc.L, pc.R), cr2 = Math.Max(pc.L, pc.R), ct = Math.Min(pc.T, pc.B), cb = Math.Max(pc.T, pc.B);
+    EnumChildWindows(w, (h, l) => {
+      if (!IsWindowVisible(h)) return true;
+      var cn = new StringBuilder(64); GetClassName(h, cn, 64); string cls = cn.ToString();
+      var tb = new StringBuilder(512); GetWindowText(h, tb, 512); string txt = tb.ToString().Replace("&", "");
+      RECT r; GetWindowRect(h, out r);
+      if (r.R - r.L > 0 && (r.L < cl - 1 || r.T < ct - 1 || r.R > cr2 + 1 || r.B > cb + 1))
+        bad.AppendFormat("{0} '{1}' hors de la fenetre ({2},{3},{4},{5}); ", cls, txt, r.L - cl, r.T - ct, r.R - cl, r.B - ct);
+      if (txt.Length == 0) return true;
+      int st = GetWindowLong(h, -16), extra = -1;
+      if (cls == "Static" && (st & 0x4000) != 0) extra = 0;                       // SS_ENDELLIPSIS: cut silently
+      else if (cls == "Button" && (st & 0x2000) == 0) {                            // not BS_MULTILINE
+        int t = st & 0xF;
+        if (t == 2 || t == 3 || t == 4 || t == 5 || t == 6 || t == 9) extra = GetSystemMetrics(71) + 4;   // box + gap
+        else if (t == 0 || t == 1) extra = 6;
+      }
+      if (extra < 0) return true;
+      IntPtr dc = GetDC(h); IntPtr old = SelectObject(dc, font); SIZE z; GetTextExtentPoint32(dc, txt, txt.Length, out z); SelectObject(dc, old); ReleaseDC(h, dc);
+      RECT cr; GetClientRect(h, out cr);
+      if (z.cx + extra > cr.R + 2) bad.AppendFormat("{0} '{1}' coupe ({2}+{3} px pour {4}); ", cls, txt, z.cx, extra, cr.R);
+      return true;
+    }, IntPtr.Zero);
+    DeleteObject(font);
+    return bad.ToString();
+  }
   [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int w, int ht, uint f);
   [DllImport("user32.dll")] public static extern IntPtr GetDC(IntPtr h);
   [DllImport("user32.dll")] public static extern int ReleaseDC(IntPtr h, IntPtr dc);
@@ -80,6 +138,27 @@ $env:KLF_TEST_CAPTURE = '1'   # the bubbles are normally excluded from screensho
 $exe = Join-Path $env:LOCALAPPDATA 'Programs\KeyboardLayoutFixer\KeyboardLayoutFixer.exe'
 $manques = New-Object System.Collections.ArrayList
 function Manque($m) { Write-Host "MANQUE : $m"; [void]$manques.Add($m) }
+$defauts = New-Object System.Collections.ArrayList
+function Defaut($m) { Write-Host "DEFAUT : $m"; [void]$defauts.Add($m) }
+Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+# 1.9.9: every control reachable from the keyboard has a name for a screen reader
+function Noms($w, $quoi) {
+  try {
+    $el = [Windows.Automation.AutomationElement]::FromHandle($w)
+    $tous = $el.FindAll([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.Condition]::TrueCondition)
+    $types = @('ControlType.Edit', 'ControlType.ComboBox', 'ControlType.CheckBox', 'ControlType.Button', 'ControlType.RadioButton', 'ControlType.TabItem', 'ControlType.Spinner', 'ControlType.Slider', 'ControlType.Hyperlink')
+    $vus = 0; $d0 = $defauts.Count
+    foreach ($e in $tous) {
+      $c = $e.Current
+      if ($c.IsOffscreen -or -not $c.IsKeyboardFocusable) { continue }
+      if ($types -notcontains $c.ControlType.ProgrammaticName) { continue }
+      $vus++
+      if ([string]::IsNullOrWhiteSpace($c.Name)) { Defaut "$quoi : controle sans nom pour un lecteur d'ecran ($($c.ControlType.ProgrammaticName), classe $($c.ClassName), id $($c.AutomationId))" }
+    }
+    if ($defauts.Count -eq $d0 -and $vus -gt 0) { Write-Host "OK    $quoi : $vus controles nommes verifies" }
+    if ($vus -eq 0) { Defaut "$quoi : aucun controle vu par UI Automation" }
+  } catch { Manque "noms UI Automation ($quoi) : $($_.Exception.Message)" }
+}
 function Photo($hw, $nom) {
   try {
     $r = New-Object A+RECT; [void][A]::GetWindowRect($hw, [ref]$r)
@@ -117,7 +196,7 @@ function Demarrer($json, $dpi) {
   Start-Sleep 1
   return $p
 }
-function Reglages($lg, $suffixe, $pages) {
+function Reglages($lg, $suffixe, $pages, [switch]$noms, $dpi = 96) {
   Start-Process -FilePath $exe -ArgumentList '--settings' | Out-Null
   $w = Attendre { [A]::FindWindow('KBLayoutFixerSettings', [NullString]::Value) } 10000
   if ($w -eq [IntPtr]::Zero) { Manque "réglages ($lg $suffixe)"; return [IntPtr]::Zero }
@@ -128,6 +207,9 @@ function Reglages($lg, $suffixe, $pages) {
     [A]::Ask($tc, 0x1330, [IntPtr]($tab - 1), [IntPtr]::Zero)   # TCM_SETCURFOCUS (3 s at most)
     Start-Sleep -Milliseconds 600
     Photo $w "reglages-$lg-$suffixe-onglet$tab.png"
+    $c = [A]::Cut($w, [uint32]$dpi)
+    if ($c) { Defaut "reglages $lg $suffixe onglet $tab : $c" } else { Write-Host "OK    reglages $lg $suffixe onglet $tab : aucun texte coupe" }
+    if ($noms) { Noms $w "reglages $lg onglet $tab" }
   }
   return $w
 }
@@ -160,16 +242,25 @@ foreach ($lg in 'he', 'fr', 'en') {
     $p = Demarrer ('{ "WelcomeDone": true, "ShowBubble": true, "ShowPreview": true, "BubblePosition": ' + $pos[0] + ', "UiLanguage": "' + $lg + '" }') $null
     $n = Bloc-notes 'akuo'
     if (-not $n) { Manque "Bloc-notes ($lg)"; continue }
+    $avantF10 = [A]::GetForegroundWindow()   # (Notepad of Windows 11: its MainWindowHandle may be stale, avis Fable)
     [A]::Key(0x79)   # F10
     $b = Attendre { [A]::Visible('KBLayoutFixerBubble', 0) } 4000
-    if ($b -ne [IntPtr]::Zero) { Start-Sleep -Milliseconds 250; Photo $b "bulle-f10-$($pos[1])-$lg.png" } else { Manque "bulle F10 $($pos[1]) ($lg)" }
+    if ($b -ne [IntPtr]::Zero) {
+      Start-Sleep -Milliseconds 250; Photo $b "bulle-f10-$($pos[1])-$lg.png"
+      # 1.9.9: the bubble never takes the foreground nor the focus (the user keeps typing)
+      $fg = [A]::GetForegroundWindow(); $ex = [A]::GetWindowLong($b, -20)
+      if ($fg -ne $avantF10) { Defaut "bulle F10 $($pos[1]) ($lg) : Bloc-notes n'est plus au premier plan" }
+      if (($ex -band 0x08000000) -eq 0) { Defaut "bulle F10 $($pos[1]) ($lg) : style sans WS_EX_NOACTIVATE" }
+      if (($ex -band 0x20) -eq 0) { Defaut "bulle F10 $($pos[1]) ($lg) : style sans WS_EX_TRANSPARENT (les clics ne la traversent pas)" }
+      if ($fg -eq $avantF10 -and ($ex -band 0x08000020) -eq 0x08000020) { Write-Host "OK    bulle F10 $($pos[1]) ($lg) : ne prend ni le premier plan ni les clics" }
+    } else { Manque "bulle F10 $($pos[1]) ($lg)" }
     Stop-Process -Id $n.Id -Force -ErrorAction SilentlyContinue
     Start-Sleep 1
   }
 
   # --- bouton « Rechercher une mise à jour » (page Diagnostic) : bulle de réponse
   $p = Demarrer ('{ "WelcomeDone": true, "ShowBubble": true, "UiLanguage": "' + $lg + '" }') $null
-  $w = Reglages $lg 'normal' @(3)
+  $w = Reglages $lg 'normal' @(1, 2, 3) -noms
   if ($w -ne [IntPtr]::Zero) {
     [void][A]::PostMessage($w, 0x0111, [IntPtr]264, [A]::GetDlgItem($w, 264))   # WM_COMMAND, bouton 264
     $b = Attendre { [A]::Visible('KBLayoutFixerBubble', 0) } 15000
@@ -180,7 +271,7 @@ foreach ($lg in 'he', 'fr', 'en') {
   # --- réglages à 150 % et 200 % (tous les onglets)
   foreach ($dpi in 144, 192) {
     $p = Demarrer ('{ "WelcomeDone": true, "ShowBubble": false, "UiLanguage": "' + $lg + '" }') $dpi
-    $w = Reglages $lg "$([int]($dpi * 100 / 96))pc" @(1, 2, 3)
+    $w = Reglages $lg "$([int]($dpi * 100 / 96))pc" @(1, 2, 3) -dpi $dpi
     if ($w -ne [IntPtr]::Zero) { [void][A]::PostMessage($w, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) }
   }
   Remove-Item Env:\KLF_TEST_DPI -ErrorAction SilentlyContinue
@@ -224,4 +315,7 @@ if ($un) {
 
 "Captures de l'audit : $((Get-ChildItem $out -Filter *.png).Count) ; manques : $($manques.Count)"
 $manques | ForEach-Object { "  - $_"; Write-Host "::warning::audit visuel : $_" }
+"Defauts verifies : $($defauts.Count)"
+$defauts | ForEach-Object { "  - $_"; Write-Host "::error::audit visuel : $_" }
+if ($defauts.Count -gt 0) { Write-Host "ECHEC : $($defauts.Count) defaut(s) dans l'audit visuel"; exit 1 }
 exit 0

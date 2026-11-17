@@ -55,8 +55,9 @@ digits, space and signs: the key codes, never written anywhere), so that F10 kno
 - **Memory only**: locked in memory (never in the page file) and left out of crash dumps; never in
   `debug.log` (the journal only says how many characters were replaced, or why nothing was done).
 - **Forgotten** at once on Enter, Tab, Esc, arrows, any other special key, Ctrl/Alt/Win (except the modifier of your F10 shortcut), a mouse
-  click, another window or a locked session, and within 20 seconds when you stop typing. The text
-  read on the screen and the converted text are overwritten in memory right after use.
+  click, another window or a locked session, and within 15 seconds when you stop typing. The text
+  read on the screen and the converted text are overwritten in memory right after use (a copy of
+  the converted text is kept for a second F10, wiped on the same events, but not locked in memory).
 - The program follows only the Windows Terminal window in front; if another window comes in front,
   the keys are not followed and what was kept is forgotten.
 - **Passwords**: before changing anything, F10 checks on the screen (Windows accessibility) that

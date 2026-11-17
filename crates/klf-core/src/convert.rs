@@ -83,7 +83,10 @@ pub fn convert_with(map: &KeyMap, text: &str, mode: MixedTextMode, replace_caps:
         false
     };
 
-    text.chars()
+    // 1.9.9 (audit 17/11): the room for the result is taken once (4 bytes per character at most),
+    // so that no smaller copy of a typed text is left behind by a reallocation
+    let mut out = String::with_capacity(text.len() * 4);
+    out.extend(text.chars()
         .map(|c| {
             if !replace_caps && c.is_uppercase() && !is_hebrew_block(c) {
                 return c;
@@ -104,8 +107,8 @@ pub fn convert_with(map: &KeyMap, text: &str, mode: MixedTextMode, replace_caps:
                 MixedTextMode::EnglishToHebrewOnly => map.latin_to_he(c).unwrap_or(c),
                 MixedTextMode::HebrewToEnglishOnly => map.he_to_latin(c).unwrap_or(c),
             }
-        })
-        .collect()
+        }));
+    out
 }
 
 /// Text typed with Caps Lock on: every Latin letter changes case ("hELLO wORLD" -> "Hello
@@ -113,7 +116,10 @@ pub fn convert_with(map: &KeyMap, text: &str, mode: MixedTextMode, replace_caps:
 /// comes back exactly: ß, İ, ı, ſ... stay as they are. Hebrew, digits and signs have
 /// no case and are kept, so mixed text is safe.
 pub fn swap_case(text: &str) -> String {
-    text.chars().map(swap_char).collect()
+    // (room taken once, see convert_with)
+    let mut out = String::with_capacity(text.len() * 4);
+    out.extend(text.chars().map(swap_char));
+    out
 }
 
 /// Latin letters handled by F9 (ASCII, Latin-1, Latin Extended-A/B).
@@ -242,5 +248,22 @@ mod tests {
         // digits and accented letters without a Hebrew key stay
         assert_eq!(t("qkuo 2026 é"), "שלום 2026 é");
         assert_eq!(t(&t("qkuo")), "qkuo");
+    }
+}
+
+#[cfg(test)]
+mod room_tests {
+    use super::*;
+
+    /// 1.9.9: the result never grows past the room taken at first (no reallocation = no copy left).
+    #[test]
+    fn the_result_never_reallocates() {
+        for t in ["akuo", "שלום", "aָׁkuֹo ₪€ 😀 ß", "", "q/.,'"] {
+            for m in [MixedTextMode::ToggleAll, MixedTextMode::EnglishToHebrewOnly, MixedTextMode::HebrewToEnglishOnly] {
+                let r = convert_with(&us_map(), t, m, true);
+                assert_eq!(r.capacity(), t.len() * 4, "{t:?}");
+            }
+            assert_eq!(swap_case(t).capacity(), t.len() * 4);
+        }
     }
 }

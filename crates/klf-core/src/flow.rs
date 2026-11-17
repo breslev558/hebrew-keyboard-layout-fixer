@@ -1222,6 +1222,8 @@ fn conhost_inner(host: &mut dyn Host, s: &AppSettings, map: &KeyMap, target: usi
     };
     let out = transform(&*host, s, map, typed);
     if out == typed {
+        // 1.9.9 (audit 17/11): wiped on this exit too, like on every other one
+        crate::terminal::wipe_string(out);
         return Outcome::say(Msg::NothingToConvert, "Console: text unchanged");
     }
     if let Err(r) = crate::terminal::check_text(&out) {

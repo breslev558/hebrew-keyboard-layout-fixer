@@ -609,8 +609,9 @@ fn page_layout(page: usize, k: i32, notes: bool) -> (Vec<Place>, i32) {
             v.push((ID_DIAG_LAST, x0, y, full, 32));
             y += 34;
             // 1.9.9: the keyboards line on two lines (three keyboards did not fit on one, Windows test)
-            v.push((ID_LAYOUTS, x0, y, full, 32));
-            y += 34;
+            // 2.0.0: 34 units (two lines measured 50 px for 48 at 150 %, Windows test 200)
+            v.push((ID_LAYOUTS, x0, y, full, 34));
+            y += 36;
             v.push((ID_DIAG_COPY, x0, y, 228, 26));
             v.push((ID_SHOW_REPORT, x0 + 234, y, full - 234, 26));
             y += 28;
